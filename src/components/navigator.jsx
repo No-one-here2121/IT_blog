@@ -45,6 +45,24 @@ export default function Navbar({ onNavigate, currentPage = "home" }) {
               </li>
               <li>
                 <button
+                  onClick={() => onNavigate && onNavigate("courses")}
+                  className={`flex items-center gap-2 py-2 font-semibold ${currentPage === "courses" ? "active text-white bg-primary font-bold" : ""}`}
+                >
+                  <span>📚</span>
+                  <span>Khóa học</span>
+                </button>
+              </li>
+              <li>
+                <button
+                  onClick={() => onNavigate && onNavigate("jobs")}
+                  className={`flex items-center gap-2 py-2 font-semibold ${currentPage === "jobs" ? "active text-white bg-primary font-bold" : ""}`}
+                >
+                  <span>💼</span>
+                  <span>Việc làm</span>
+                </button>
+              </li>
+              <li>
+                <button
                   onClick={() => onNavigate && onNavigate("moderation")}
                   className={`flex items-center justify-between py-2 font-semibold ${currentPage === "moderation" ? "active text-white bg-primary font-bold" : ""}`}
                 >
@@ -89,6 +107,26 @@ export default function Navbar({ onNavigate, currentPage = "home" }) {
               }`}
             >
               Trang chủ
+            </button>
+            <button
+              onClick={() => onNavigate && onNavigate("courses")}
+              className={`btn btn-sm text-xs font-semibold rounded-lg transition-all ${
+                currentPage === "courses"
+                  ? "bg-primary/10 text-primary font-bold shadow-2xs"
+                  : "btn-ghost text-base-content/80 hover:text-base-content"
+              }`}
+            >
+              Khóa học
+            </button>
+            <button
+              onClick={() => onNavigate && onNavigate("jobs")}
+              className={`btn btn-sm text-xs font-semibold rounded-lg transition-all ${
+                currentPage === "jobs"
+                  ? "bg-primary/10 text-primary font-bold shadow-2xs"
+                  : "btn-ghost text-base-content/80 hover:text-base-content"
+              }`}
+            >
+              Việc làm
             </button>
             <button
               onClick={() => onNavigate && onNavigate("moderation")}

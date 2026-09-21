@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useBlog } from "../context/BlogContext";
 import { CATEGORIES } from "../data/seedData";
-import MarkdownRenderer from "../components/MarkdownRenderer";
+import MarkdownRenderer, { MarkdownImage } from "../components/MarkdownRenderer";
+import TableOfContents from "../components/TableOfContents";
+import RichEditorToolbar from "../components/RichEditorToolbar";
 
 export default function CreatePostPage({ editPostData, onNavigate, onPostCreated }) {
   const { currentUser } = useAuth();
@@ -17,6 +19,8 @@ export default function CreatePostPage({ editPostData, onNavigate, onPostCreated
   const [coverImage, setCoverImage] = useState(editPostData?.coverImage || "");
   const [excerpt, setExcerpt] = useState(editPostData?.excerpt || "");
   const [content, setContent] = useState(editPostData?.content || "");
+  const contentRef = useRef(null);
+  const [showGuide, setShowGuide] = useState(false);
 
   if (!currentUser) {
     return (
@@ -85,6 +89,14 @@ export default function CreatePostPage({ editPostData, onNavigate, onPostCreated
   const parsedTags = tagsString
     .split(",")
     .map((t) => t.trim())
+    .filter(Boolean);
+
+  // Danh sach anh dang co trong noi dung (de hien thumbnail xem truoc nhanh)
+  const bodyImages = (content.match(/!\[([^\]]*)\]\(([^)]+)\)/g) || [])
+    .map((raw) => {
+      const m = raw.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+      return m ? { alt: m[1], src: m[2] } : null;
+    })
     .filter(Boolean);
 
   return (
@@ -218,16 +230,57 @@ export default function CreatePostPage({ editPostData, onNavigate, onPostCreated
                 <label className="label font-bold text-xs text-base-content/80 p-0">
                   Nội dung bài viết <span className="text-error">*</span>
                 </label>
-                <span className="text-[11px] text-base-content/50">Hỗ trợ Markdown cơ bản</span>
+                <button
+                  type="button"
+                  onClick={() => setShowGuide((v) => !v)}
+                  className="text-[11px] font-bold text-primary hover:underline"
+                >
+                  {showGuide ? "Ẩn hướng dẫn chèn ảnh / video" : "Hướng dẫn chèn ảnh / video / bước HD"}
+                </button>
               </div>
+              {showGuide && (
+                <div className="mb-2 rounded-xl border border-primary/30 bg-primary/5 p-3 text-[11px] sm:text-xs text-base-content/80 space-y-1.5 leading-relaxed">
+                  <p><b>1. Boi den de dinh dang:</b> boi den chu roi bam <b>B / I</b>; boi den ca dong roi bam <b>H1 / H2 / H3</b>.</p>
+                  <p><b>2. Muc luc tu dong:</b> moi heading H1-H3 deu len muc luc o tab Xem truoc va trang doc bai.</p>
+                  <p><b>2. Chèn ảnh:</b> bấm nút <b>Ảnh</b> rồi dán URL, hoặc bấm <b>Tải ảnh</b> để lấy ảnh từ máy (tự chèn vào bài).</p>
+                  <p><b>3. Chèn video:</b> bấm nút <b>Video</b> rồi dán link YouTube hoặc MP4. Ví dụ lưu trong bài:</p>
+                  <code className="block font-mono bg-base-100 border border-base-300 rounded-lg px-2 py-1.5">:::video https://www.youtube.com/watch?v=abc123</code>
+                  <p><b>4. Bài hướng dẫn từng bước:</b> bấm nút <b>Bước HD</b> để chèn mẫu “tiêu đề bước + mô tả + ảnh + mẹo”, rồi sửa lại nội dung.</p>
+                </div>
+              )}
+              <RichEditorToolbar textareaRef={contentRef} value={content} onChange={setContent} />
               <textarea
+                ref={contentRef}
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
-                placeholder="Soạn thảo nội dung bài viết... Bạn có thể dùng Markdown, tiêu đề ###, danh sách gạch đầu dòng, code block..."
+                placeholder="Soạn thảo nội dung bài viết... Dùng thanh công cụ phía trên để chèn ảnh, video, code, bước hướng dẫn..."
                 rows={12}
-                className="textarea textarea-bordered w-full text-sm font-mono focus:textarea-primary leading-relaxed"
+                className="textarea textarea-bordered w-full !rounded-t-none text-sm font-mono focus:textarea-primary leading-relaxed"
                 required
               />
+
+              {/* Xem truoc nhanh anh da chen trong bai (anh upload hien thumbnail) */}
+              {bodyImages.length > 0 && (
+                <div className="mt-2 rounded-xl border border-base-300 bg-base-200/40 p-3">
+                  <p className="text-[11px] font-bold text-base-content/60 mb-2">
+                    Anh trong bai ({bodyImages.length})
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {bodyImages.map((im, idx) => (
+                      <div key={idx} className="w-24">
+                        <MarkdownImage
+                          src={im.src}
+                          alt={im.alt}
+                          className="w-24 h-20 rounded-lg border border-base-300 object-cover bg-base-100"
+                        />
+                        <p className="text-[10px] text-base-content/50 truncate mt-1" title={im.alt}>
+                          {im.alt || "anh"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Hàng nút hành động: Hủy, Xem trước, Gửi duyệt, Xuất bản ngay */}
@@ -318,13 +371,15 @@ export default function CreatePostPage({ editPostData, onNavigate, onPostCreated
 
           <div className="py-2">
             {content ? (
-              <MarkdownRenderer content={content} />
+              <MarkdownRenderer content={content} headingIdPrefix="preview-" />
             ) : (
               <p className="text-sm italic text-base-content/50">
                 Nội dung bài viết sẽ hiển thị tại đây khi bạn soạn thảo...
               </p>
             )}
           </div>
+
+          <TableOfContents content={content} headingIdPrefix="preview-" />
 
           <div className="pt-6 border-t border-base-200 flex justify-end gap-3">
             <button

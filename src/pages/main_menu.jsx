@@ -156,7 +156,7 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
 
               {/* Sắp xếp */}
               <div className="flex items-center gap-1.5">
-                <span className="text-xs font-semibold text-base-content/70">Sắp xếp:</span>
+                <span className="text-xs font-semibold text-base-content/70 whitespace-nowrap">Sắp xếp:</span>
                 <select
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value)}

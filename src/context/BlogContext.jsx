@@ -5,22 +5,50 @@ import { SEED_POSTS } from "../data/seedData";
 import { generateId } from "../utils/id";
 import { useAuth } from "./AuthContext";
 import { useToast } from "./ToastContext";
+import { dbApi, fromApiPost, toApiPost, cachePosts, apiEnabled } from "../utils/dbApi";
 
 const BlogContext = createContext();
+
+// Khoa sessionStorage: bai da xem trong phien hien tai (tranh dem trung luot xem)
+const VIEWED_KEY = "it_blog_viewed_posts";
 
 export function BlogProvider({ children }) {
   const { currentUser, users } = useAuth();
   const { addToast } = useToast();
 
-  // Khởi tạo danh sách bài viết từ storage hoặc seed data
-  const [posts, setPosts] = useState(() => {
-    const saved = storage.get(STORAGE_KEYS.POSTS, null);
-    if (!saved || !saved.some((p) => p.status === "pending")) {
-      storage.set(STORAGE_KEYS.POSTS, SEED_POSTS);
-      return SEED_POSTS;
-    }
-    return saved;
-  });
+  // Bai viet: uu tien doc tu database that (API), fallback localStorage khi API tat
+  const [posts, setPosts] = useState(() => storage.get(STORAGE_KEYS.POSTS, SEED_POSTS));
+  const [useDb, setUseDb] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    if (!apiEnabled()) return;
+    dbApi
+      .listPosts()
+      .then((rows) => {
+        if (!alive || !rows) return;
+        const local = storage.get(STORAGE_KEYS.POSTS, []);
+        // Lay so lieu tu DB, nhung khong de mat luot xem vua tang o local
+        // (tranh truong hop GET ve truoc khi POST /view kip ghi).
+        const mapped = rows.map((r) => {
+          const remote = fromApiPost(r);
+          const l = Array.isArray(local) ? local.find((x) => x.id === remote.id) : null;
+          const lv = l?.views || 0;
+          return lv > (remote.views || 0) ? { ...remote, views: lv } : remote;
+        });
+        const finalPosts = mapped.length ? mapped : storage.get(STORAGE_KEYS.POSTS, SEED_POSTS);
+        setPosts(finalPosts);
+        cachePosts(finalPosts);
+        setUseDb(true);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setUseDb(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // State bộ lọc và tìm kiếm
   const [searchQuery, setSearchQuery] = useState("");
@@ -177,7 +205,27 @@ export function BlogProvider({ children }) {
       createdAt: new Date().toISOString()
     };
 
-    setPosts((prev) => [newPost, ...prev]);
+    // Cap nhat UI ngay + luu local, dong thoi day len database that qua API
+    setPosts((prev) => {
+      const next = [newPost, ...prev];
+      cachePosts(next);
+      return next;
+    });
+    if (apiEnabled()) {
+      dbApi
+        .createPost(toApiPost(newPost))
+        .then((saved) => {
+          if (!saved) return;
+          const mapped = fromApiPost(saved);
+          setPosts((prev) => {
+            const next = prev.map((p) => (p.id === newPost.id ? mapped : p));
+            cachePosts(next);
+            return next;
+          });
+          setUseDb(true);
+        })
+        .catch(() => setUseDb(false));
+    }
     if (isPending) {
       addToast("Bài viết đã được gửi vào danh sách chờ duyệt! ⏳", "info");
     } else {
@@ -190,9 +238,14 @@ export function BlogProvider({ children }) {
    * Duyệt và xuất bản bài viết
    */
   const approvePost = (postId) => {
-    setPosts((prev) =>
-      prev.map((p) => (p.id === postId ? { ...p, status: "approved" } : p))
-    );
+    setPosts((prev) => {
+      const next = prev.map((p) => (p.id === postId ? { ...p, status: "approved" } : p));
+      cachePosts(next);
+      return next;
+    });
+    if (apiEnabled()) {
+      dbApi.updatePost(postId, { status: "approved" }).catch(() => {});
+    }
     addToast("Đã phê duyệt và xuất bản bài viết thành công! ✓", "success");
   };
 
@@ -200,9 +253,14 @@ export function BlogProvider({ children }) {
    * Từ chối bài viết
    */
   const rejectPost = (postId) => {
-    setPosts((prev) =>
-      prev.map((p) => (p.id === postId ? { ...p, status: "rejected" } : p))
-    );
+    setPosts((prev) => {
+      const next = prev.map((p) => (p.id === postId ? { ...p, status: "rejected" } : p));
+      cachePosts(next);
+      return next;
+    });
+    if (apiEnabled()) {
+      dbApi.updatePost(postId, { status: "rejected" }).catch(() => {});
+    }
     addToast("Đã từ chối bài viết.", "info");
   };
 
@@ -212,8 +270,8 @@ export function BlogProvider({ children }) {
   const updatePost = (postId, updatedData) => {
     if (!currentUser) return false;
 
-    setPosts((prevPosts) =>
-      prevPosts.map((post) => {
+    setPosts((prevPosts) => {
+      const next = prevPosts.map((post) => {
         if (post.id !== postId) return post;
         // Kiểm tra quyền: chỉ tác giả
         if (post.authorId !== currentUser.id) {
@@ -225,8 +283,34 @@ export function BlogProvider({ children }) {
           ...updatedData,
           updatedAt: new Date().toISOString()
         };
-      })
-    );
+      });
+      cachePosts(next);
+      return next;
+    });
+    if (apiEnabled()) {
+      const cur = posts.find((p) => p.id === postId);
+      const merged = { ...(cur || {}), ...updatedData };
+      dbApi
+        .updatePost(postId, {
+          title: merged.title,
+          excerpt: merged.excerpt,
+          content: merged.content,
+          cover_image: merged.coverImage,
+          category: merged.category,
+          tags: merged.tags,
+          status: merged.status
+        })
+        .then((saved) => {
+          if (!saved) return;
+          const mapped = fromApiPost(saved);
+          setPosts((prev) => {
+            const next = prev.map((p) => (p.id === postId ? { ...p, ...mapped } : p));
+            cachePosts(next);
+            return next;
+          });
+        })
+        .catch(() => {});
+    }
 
     addToast("Cập nhật bài viết thành công!", "success");
     return true;
@@ -240,23 +324,67 @@ export function BlogProvider({ children }) {
     const target = posts.find((p) => p.id === postId);
     if (!target) return false;
 
-    if (target.authorId !== currentUser.id) {
+    const isManager = ["admin", "manager"].includes(currentUser.role);
+    if (!isManager && target.authorId !== currentUser.id) {
       addToast("Bạn không có quyền xóa bài viết này!", "error");
       return false;
     }
 
-    setPosts((prev) => prev.filter((p) => p.id !== postId));
+    setPosts((prev) => {
+      const next = prev.filter((p) => p.id !== postId);
+      cachePosts(next);
+      return next;
+    });
+    if (apiEnabled()) {
+      dbApi.deletePost(postId).catch(() => {});
+    }
     addToast("Đã xóa bài viết thành công.", "info");
     return true;
   };
 
   /**
-   * Tăng lượt xem cho bài viết
+   * Tăng lượt xem cho bài viết: chỉ đếm 1 lần cho mỗi bài trong 1 phiên
+   * (tránh nhảy số do React StrictMode / F5), và lưu thẳng vào database that.
    */
   const incrementViews = useCallback((postId) => {
-    setPosts((prev) =>
-      prev.map((p) => (p.id === postId ? { ...p, views: (p.views || 0) + 1 } : p))
-    );
+    if (!postId) return;
+    let seen;
+    try {
+      seen = JSON.parse(sessionStorage.getItem(VIEWED_KEY) || "[]");
+      if (!Array.isArray(seen)) seen = [];
+    } catch {
+      seen = [];
+    }
+    if (seen.includes(postId)) return;
+
+    seen.push(postId);
+    try {
+      sessionStorage.setItem(VIEWED_KEY, JSON.stringify(seen));
+    } catch {
+      // bo qua neu trinh duyet chan sessionStorage
+    }
+
+    setPosts((prev) => {
+      const next = prev.map((p) => (p.id === postId ? { ...p, views: (p.views || 0) + 1 } : p));
+      cachePosts(next);
+      return next;
+    });
+
+    if (apiEnabled()) {
+      dbApi
+        .incrementView(postId)
+        .then((views) => {
+          if (typeof views !== "number") return;
+          setPosts((prev) => {
+            const next = prev.map((p) =>
+              p.id === postId ? { ...p, views: Math.max(views, p.views || 0) } : p
+            );
+            cachePosts(next);
+            return next;
+          });
+        })
+        .catch(() => {});
+    }
   }, []);
 
   // Danh sách phân loại theo trạng thái duyệt
@@ -340,6 +468,7 @@ export function BlogProvider({ children }) {
         setSortBy,
         resetFilters,
         getAuthor,
+        useDb,
         toggleLike,
         toggleBookmark,
         addComment,

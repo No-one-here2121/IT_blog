@@ -1,6 +1,6 @@
 /**
  * Dữ liệu mẫu ban đầu (Seed Data) cho hệ thống IT Blog
- * (Tất cả người dùng đều là thành viên bình đẳng, chưa phân quyền tác nhân)
+ * (demo_user la tai khoan quan tri; cac tai khoan con lai la thanh vien)
  */
 
 export const SEED_USERS = [
@@ -8,6 +8,7 @@ export const SEED_USERS = [
     id: "demo_user",
     name: "Người dùng Demo",
     email: "demo@itblog.local",
+    role: "admin",
     avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=demouser",
     bio: "Tài khoản dùng thử để trải nghiệm tính năng trên IT Blog",
     following: ["user_hoang", "user_linh"],
@@ -17,6 +18,7 @@ export const SEED_USERS = [
     id: "user_hoang",
     name: "Hoàng Minh",
     email: "hoang@itblog.local",
+    role: "user",
     avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=hoang",
     bio: "Lập trình viên Web | Đam mê React 19, Go & System Design",
     following: ["user_linh"],
@@ -26,6 +28,7 @@ export const SEED_USERS = [
     id: "user_linh",
     name: "Linh Nguyễn",
     email: "linh@itblog.local",
+    role: "user",
     avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=linh",
     bio: "Kỹ sư Trí tuệ nhân tạo | Nghiên cứu LLMs và RAG",
     following: ["user_hoang"],
@@ -35,6 +38,7 @@ export const SEED_USERS = [
     id: "user_nam",
     name: "Nam Trần",
     email: "nam@itblog.local",
+    role: "user",
     avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=nam",
     bio: "Kỹ sư DevOps & Cloud | Docker, CI/CD Pipelines",
     following: ["user_hoang"],

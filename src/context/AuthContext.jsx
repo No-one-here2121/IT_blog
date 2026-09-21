@@ -9,6 +9,8 @@ const AuthContext = createContext();
 
 export function AuthProvider({ children }) {
   const { addToast } = useToast();
+  const seedRoles = Object.fromEntries(SEED_USERS.map((user) => [user.id, user.role || "user"]));
+  const withRole = (user) => user && ({ ...user, role: user.role || seedRoles[user.id] || "user" });
 
   // Khởi tạo danh sách người dùng từ storage hoặc seed data (tự động cập nhật nếu là dữ liệu cũ)
   const [users, setUsers] = useState(() => {
@@ -17,7 +19,7 @@ export function AuthProvider({ children }) {
       storage.set(STORAGE_KEYS.USERS, SEED_USERS);
       return SEED_USERS;
     }
-    return saved;
+    return saved.map(withRole);
   });
 
   // Người dùng hiện tại (null nếu là khách - Guest, tự dọn dẹp tài khoản demo cũ)
@@ -37,7 +39,7 @@ export function AuthProvider({ children }) {
       storage.remove(STORAGE_KEYS.USER);
       return null;
     }
-    return saved;
+    return withRole(saved);
   });
 
   // State điều khiển AuthModal và Pending Action

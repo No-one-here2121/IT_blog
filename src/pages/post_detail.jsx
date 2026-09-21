@@ -3,6 +3,7 @@ import { useAuth } from "../context/AuthContext";
 import { useBlog } from "../context/BlogContext";
 import { useToast } from "../context/ToastContext";
 import MarkdownRenderer from "../components/MarkdownRenderer";
+import TableOfContents from "../components/TableOfContents";
 
 export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
   const { currentUser, requireAuth, toggleFollow } = useAuth();
@@ -108,7 +109,7 @@ export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
   });
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
       {/* Nút quay lại & Hành động tác giả */}
       <div className="flex items-center justify-between gap-4 mb-6">
         <button
@@ -148,8 +149,12 @@ export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
         )}
       </div>
 
-      {/* Bài viết chính */}
-      <article className="bg-base-100 rounded-2xl border border-base-300 p-6 sm:p-10 shadow-sm">
+      {/* Bo cuc chuan: noi dung bai viet o cot trai, MUC LUC nam ngoai the bai viet */}
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-start">
+        {/* Cot trai: the bai viet + bai lien quan + binh luan */}
+        <div className="min-w-0 order-2 lg:order-1">
+          {/* Bài viết chính */}
+          <article className="bg-base-100 rounded-2xl border border-base-300 p-6 sm:p-10 shadow-sm">
         {/* Category & Tags */}
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <span className="badge badge-primary font-bold text-xs">{post.category}</span>
@@ -266,9 +271,9 @@ export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
           </div>
         </div>
 
-        {/* Nội dung bài viết */}
+        {/* Noi dung bai viet (muc luc da tach ra ngoai the, xem cot phai) */}
         <div className="py-4">
-          <MarkdownRenderer content={post.content} />
+          <MarkdownRenderer content={post.content} headingIdPrefix={"post-" + post.id + "-"} />
         </div>
 
         {/* Khung thông tin tác giả ở cuối bài */}
@@ -456,6 +461,32 @@ export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
           )}
         </div>
       </section>
+
+        </div>
+
+        {/* Cot phai: MUC LUC nam NGOAI the bai viet, dinh vi sticky theo trang */}
+        <aside className="order-1 lg:order-2 lg:sticky lg:top-20 space-y-4">
+          <TableOfContents content={post.content} headingIdPrefix={"post-" + post.id + "-"} />
+
+          {post.tags?.length > 0 && (
+            <div className="rounded-2xl border border-base-300 bg-base-100 p-4 shadow-sm">
+              <p className="text-xs font-black uppercase tracking-wider text-base-content/60 mb-2">
+                The tags
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {post.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="badge badge-sm border border-base-300 bg-base-200/60 text-xs"
+                  >
+                    #{tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </aside>
+      </div>
     </div>
   );
 }

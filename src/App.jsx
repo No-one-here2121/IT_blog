@@ -11,6 +11,9 @@ import ProfilePage from "./pages/profile";
 import ModerationPage from "./pages/moderation";
 import Login_page from "./pages/login";
 import Logup_page from "./pages/logup";
+import JobsPage from "./pages/jobs";
+import CoursesPage from "./pages/courses";
+import QuizPage from "./pages/quiz";
 
 import AuthModal from "./components/AuthModal";
 import Navbar from "./components/navigator";
@@ -42,6 +45,8 @@ function AppContent() {
   });
 
   const [editPostData, setEditPostData] = useState(null);
+  const [openCourseId, setOpenCourseId] = useState("");
+  const [quizParams, setQuizParams] = useState({ postId: selectedPostId });
 
   // Xử lý các query param đặc biệt như demoLogin hoặc modal
   useEffect(() => {
@@ -134,6 +139,26 @@ function AppContent() {
 
         {currentPage === "logup" && (
           <Logup_page onNavigate={navigateTo} />
+        )}
+
+        {currentPage === "jobs" && (
+          <JobsPage onNavigate={navigateTo} />
+        )}
+
+        {currentPage === "courses" && (
+          <CoursesPage
+            onNavigate={navigateTo}
+            openCourseId={openCourseId}
+            onOpenCourse={setOpenCourseId}
+            onOpenQuiz={(p) => {
+              setQuizParams(p);
+              navigateTo("quiz");
+            }}
+          />
+        )}
+
+        {currentPage === "quiz" && (
+          <QuizPage onNavigate={navigateTo} params={quizParams} />
         )}
       </div>
 

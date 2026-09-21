@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Database credentials (may local, khong commit pass that)
+database/.env
+.env
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
