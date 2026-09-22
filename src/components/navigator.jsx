@@ -363,7 +363,7 @@ ${rows}
             </div>
             <ul
               tabIndex={0}
-              className="dropdown-content menu menu-sm bg-base-100 rounded-2xl z-50 w-64 p-2.5 shadow-2xl border border-base-300 mt-2 space-y-1"
+              className="dropdown-content menu menu-sm bg-base-100 rounded-2xl z-50 w-64 p-2.5 shadow-2xl border border-base-300 mt-2 space-y-1 max-h-[calc(100vh-5rem)] overflow-y-auto"
             >
               <li className="pb-1">
                 <div className="relative p-0 hover:bg-transparent">
@@ -472,7 +472,32 @@ ${rows}
                   <span>Viết bài mới</span>
                 </button>
               </li>
-              {!currentUser && (
+              {currentUser ? (
+                <>
+                  <div className="divider my-1"></div>
+                  <li>
+                    <button
+                      onClick={() => handleNavAndCloseMobile("profile")}
+                      className={`flex items-center gap-2 py-2 font-semibold ${currentPage === "profile" ? "active text-white bg-primary font-bold" : "text-base-content/80"}`}
+                    >
+                      <span>👤</span>
+                      <span className="truncate">Trang cá nhân ({currentUser.name || currentUser.username})</span>
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      onClick={() => {
+                        handleNavAndCloseMobile();
+                        logout();
+                      }}
+                      className="flex items-center gap-2 py-2 font-semibold text-error hover:bg-error/10"
+                    >
+                      <span>🚪</span>
+                      <span>Đăng xuất</span>
+                    </button>
+                  </li>
+                </>
+              ) : (
                 <>
                   <div className="divider my-1"></div>
                   <li>
@@ -1103,13 +1128,13 @@ ${rows}
           <div className="relative w-full max-w-lg max-h-[90vh] flex flex-col bg-base-100 rounded-3xl shadow-2xl border border-base-300 overflow-hidden">
             {/* Header */}
             <div className="p-5 border-b border-base-200 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-2">
-                <span className="text-xl">⌨️</span>
-                <div>
-                  <h3 className="text-base font-bold text-base-content !my-0">
+              <div className="flex items-center gap-2 min-w-0 pr-2">
+                <span className="text-xl shrink-0">⌨️</span>
+                <div className="min-w-0">
+                  <h3 className="text-base font-bold text-base-content !my-0 break-words">
                     Phím Tắt Bàn Phím Toàn Hệ Thống
                   </h3>
-                  <p className="text-xs text-base-content/60 mt-0.5">
+                  <p className="text-xs text-base-content/60 mt-0.5 break-words">
                     Thao tác nhanh trên IT Blog bằng các tổ hợp phím tắt chuẩn Developer.
                   </p>
                 </div>
@@ -1117,7 +1142,7 @@ ${rows}
               <button
                 type="button"
                 onClick={() => setShortcutsModalOpen(false)}
-                className="btn btn-sm btn-circle btn-ghost"
+                className="btn btn-sm btn-circle btn-ghost shrink-0"
               >
                 ✕
               </button>

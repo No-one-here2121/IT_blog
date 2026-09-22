@@ -435,8 +435,8 @@ ${rows}
 
       {/* Search & Filter Bar */}
       <div className="bg-base-100 border border-base-300 rounded-2xl p-4 mb-8 shadow-xs space-y-3">
-        <div className="flex flex-col sm:flex-row gap-3 items-center">
-          <div className="relative flex-1 w-full">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3 items-center">
+          <div className="relative flex-1 min-w-[240px] w-full">
             <input
               type="text"
               placeholder="Tìm theo kỹ năng, vị trí (FastAPI, React, DevOps, FPT...)..."
@@ -791,12 +791,12 @@ ${rows}
                     "🏢"
                   )}
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-2xl font-black text-base-content">{selectedCompany.name}</h3>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-2xl font-black text-base-content break-words">{selectedCompany.name}</h3>
                     <span className="badge badge-success badge-xs font-bold text-white">Đối tác IT</span>
                   </div>
-                  <p className="text-xs text-base-content/60 mt-0.5">
+                  <p className="text-xs text-base-content/60 mt-0.5 break-all">
                     📍 {selectedCompany.location || "Việt Nam"} {selectedCompany.website && `• `}
                     {selectedCompany.website && (
                       <a href={selectedCompany.website} target="_blank" rel="noreferrer" className="text-primary hover:underline">
@@ -814,7 +814,7 @@ ${rows}
             {/* Giới thiệu doanh nghiệp */}
             <div className="space-y-2">
               <h4 className="font-bold text-xs uppercase tracking-wider text-base-content/70">Giới thiệu doanh nghiệp</h4>
-              <p className="text-sm text-base-content/80 leading-relaxed bg-base-200/50 p-4 rounded-2xl border border-base-200">
+              <p className="text-sm text-base-content/80 leading-relaxed bg-base-200/50 p-4 rounded-2xl border border-base-200 break-words">
                 {selectedCompany.description || "Doanh nghiệp công nghệ hàng đầu với môi trường làm việc năng động và chế độ đãi ngộ vượt trội dành cho các kỹ sư tài năng."}
               </p>
             </div>
@@ -867,7 +867,7 @@ ${rows}
               </div>
             </div>
 
-            <div className="modal-action mt-6 flex justify-between items-center pt-4 border-t border-base-200">
+            <div className="modal-action mt-6 flex flex-wrap justify-between items-center gap-2 pt-4 border-t border-base-200">
               <button onClick={() => setSelectedCompany(null)} className="btn btn-ghost rounded-xl font-bold">
                 Đóng
               </button>
@@ -1025,7 +1025,7 @@ ${rows}
                 />
               </div>
 
-              <div className="modal-action border-t border-base-200 pt-3 flex justify-end gap-2">
+              <div className="modal-action border-t border-base-200 pt-3 flex flex-wrap justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setShowCreateJobModal(false)}
@@ -1054,12 +1054,12 @@ ${rows}
           onClick={(e) => { if (e.target === e.currentTarget) setApplyingJob(null); }}
         >
           <div className="modal-box max-w-lg rounded-3xl p-6 bg-base-100 border border-base-300 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-base-200">
-              <div>
-                <h3 className="text-base font-bold text-base-content">
+            <div className="flex items-center justify-between pb-3 border-b border-base-200 gap-2">
+              <div className="min-w-0 pr-2">
+                <h3 className="text-base font-bold text-base-content break-words">
                   Ứng Tuyển: <span className="text-primary">{applyingJob.title}</span>
                 </h3>
-                <p className="text-xs text-base-content/60">🏢 {applyingJob.company_name}</p>
+                <p className="text-xs text-base-content/60 break-words">🏢 {applyingJob.company_name}</p>
               </div>
               <button
                 type="button"
@@ -1137,7 +1137,7 @@ ${rows}
                 />
               </div>
 
-              <div className="modal-action border-t border-base-200 pt-3 flex justify-end gap-2">
+              <div className="modal-action border-t border-base-200 pt-3 flex flex-wrap justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setApplyingJob(null)}

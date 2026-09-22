@@ -1,3 +1,4 @@
+import re
 from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -51,7 +52,14 @@ def register(user_in: UserRegister, db: Session = Depends(get_db)):
             detail="Tên người dùng (username) phải có ít nhất 3 ký tự."
         )
 
-    if len(user_in.password) < 6:
+    if not re.match(r"^[a-zA-Z0-9_.-]+$", clean_username):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tên người dùng chỉ được chứa chữ cái, số, dấu gạch dưới, gạch ngang và dấu chấm."
+        )
+
+    clean_password = user_in.password.strip() if user_in.password else ""
+    if len(clean_password) < 6:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Mật khẩu phải có ít nhất 6 ký tự."
@@ -77,7 +85,7 @@ def register(user_in: UserRegister, db: Session = Depends(get_db)):
         email=user_in.email.lower().strip(),
         username=clean_username,
         name=clean_name,
-        hashed_password=get_password_hash(user_in.password),
+        hashed_password=get_password_hash(clean_password),
         avatar=f"https://api.dicebear.com/7.x/bottts/svg?seed={user_in.username}"
     )
 
@@ -218,13 +226,13 @@ def change_password(
             detail="Mật khẩu mới phải có ít nhất 6 ký tự."
         )
 
-    if data.old_password == data.new_password:
+    if data.old_password == clean_new_pass:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Mật khẩu mới không được trùng với mật khẩu hiện tại."
         )
 
-    current_user.hashed_password = get_password_hash(data.new_password)
+    current_user.hashed_password = get_password_hash(clean_new_pass)
     db.commit()
     return MessageResponse(message="Đổi mật khẩu thành công.")
 
@@ -289,7 +297,7 @@ def reset_password(
             detail="Mật khẩu mới phải có ít nhất 6 ký tự."
         )
 
-    user.hashed_password = get_password_hash(data.new_password)
+    user.hashed_password = get_password_hash(clean_new_pass)
     db.commit()
     return MessageResponse(message="Đặt lại mật khẩu thành công. Bạn có thể đăng nhập bằng mật khẩu mới.")
 

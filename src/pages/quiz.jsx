@@ -544,12 +544,12 @@ export default function QuizPage({ params = {}, onNavigate }) {
                   : "border-error/60 bg-error/5"
                 : "border-base-300 bg-base-100"
             }`}>
-              <p className="font-bold text-sm sm:text-base mb-3">
+              <p className="font-bold text-sm sm:text-base mb-3 break-words">
                 <span className="text-primary mr-1.5">Câu {qi + 1}.</span>
                 {q.question}
-                <span className="badge badge-xs badge-ghost ml-2 align-middle">{q.difficulty}</span>
+                <span className="badge badge-xs badge-ghost ml-2 align-middle shrink-0">{q.difficulty}</span>
                 {q.language && (
-                  <span className="badge badge-xs badge-outline text-primary ml-1.5 align-middle">
+                  <span className="badge badge-xs badge-outline text-primary ml-1.5 align-middle shrink-0">
                     {q.language}
                   </span>
                 )}
@@ -575,15 +575,15 @@ export default function QuizPage({ params = {}, onNavigate }) {
                       <span className="w-6 h-6 rounded-full bg-base-200 font-black text-xs flex items-center justify-center shrink-0">
                         {String.fromCharCode(65 + oi)}
                       </span>
-                      <span>{opt}</span>
-                      {submitted && answerThis && <span className="ml-auto text-success font-bold text-xs">✓ Đáp án đúng</span>}
-                      {submitted && chosenThis && !answerThis && <span className="ml-auto text-error font-bold text-xs">✗ Bạn chọn</span>}
+                      <span className="break-words flex-1 min-w-0">{opt}</span>
+                      {submitted && answerThis && <span className="ml-auto text-success font-bold text-xs shrink-0">✓ Đáp án đúng</span>}
+                      {submitted && chosenThis && !answerThis && <span className="ml-auto text-error font-bold text-xs shrink-0">✗ Bạn chọn</span>}
                     </button>
                   );
                 })}
               </div>
               {submitted && q.explanation && (
-                <p className="text-xs text-base-content/70 mt-3 border-l-4 border-primary/40 pl-3 italic">
+                <p className="text-xs text-base-content/70 mt-3 border-l-4 border-primary/40 pl-3 italic break-words">
                   💡 {q.explanation}
                 </p>
               )}
@@ -739,7 +739,7 @@ export default function QuizPage({ params = {}, onNavigate }) {
               </div>
 
               {/* Submit / Cancel Buttons */}
-              <div className="pt-2 flex items-center justify-end gap-2">
+              <div className="pt-2 flex flex-wrap items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setShowAiModal(false)}

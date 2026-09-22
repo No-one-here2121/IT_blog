@@ -345,7 +345,7 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
               />
               <div className="space-y-1.5">
                 <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
-                  <h1 className="text-2xl font-black text-base-content !my-0">
+                  <h1 className="text-2xl font-black text-base-content !my-0 break-words">
                     {targetUser.name}
                   </h1>
                   {targetUser.role === "admin" && (
@@ -361,7 +361,7 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
                 <p className="text-xs text-base-content/60 font-mono">
                   @{targetUser.username || `user_${targetUser.id}`}
                 </p>
-                <p className="text-sm text-base-content/80 max-w-lg mt-1 leading-relaxed">
+                <p className="text-sm text-base-content/80 max-w-lg mt-1 leading-relaxed break-words">
                   {targetUser.bio || "Tác giả chia sẻ bài viết kỹ thuật trên nền tảng IT Blog."}
                 </p>
                 <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 pt-2 text-xs font-semibold text-base-content/70">
@@ -386,7 +386,7 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
                 onClick={handleFollowPublicAuthor}
                 className={`btn btn-sm rounded-full px-5 font-bold transition-all ${
                   isFollowing
-                    ? "btn-soft border border-base-300"
+                    ? "btn-outline border-base-300 text-base-content/80 hover:bg-base-200"
                     : "btn-primary text-white shadow-md hover:shadow-lg"
                 }`}
               >
@@ -1011,7 +1011,7 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
                               : day.level === 2
                               ? "bg-emerald-400 dark:bg-emerald-700"
                               : day.level === 1
-                              ? "bg-emerald-200 dark:bg-emerald-950"
+                              ? "bg-emerald-200 dark:bg-emerald-800/80 dark:border dark:border-emerald-700/50"
                               : "bg-base-200 dark:bg-base-300/60"
                           }`}
                         />
@@ -1053,7 +1053,7 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
           <div className="flex items-center gap-1.5 text-[11px] text-base-content/50 self-end sm:self-center">
             <span>Ít</span>
             <div className="w-3 h-3 rounded-[3px] bg-base-200 dark:bg-base-300/60" title="0 đóng góp"></div>
-            <div className="w-3 h-3 rounded-[3px] bg-emerald-200 dark:bg-emerald-950" title="1-2 đóng góp"></div>
+            <div className="w-3 h-3 rounded-[3px] bg-emerald-200 dark:bg-emerald-800/80 dark:border dark:border-emerald-700/50" title="1-2 đóng góp"></div>
             <div className="w-3 h-3 rounded-[3px] bg-emerald-400 dark:bg-emerald-700" title="2-3 đóng góp"></div>
             <div className="w-3 h-3 rounded-[3px] bg-emerald-500 dark:bg-emerald-500" title="3-4 đóng góp"></div>
             <div className="w-3 h-3 rounded-[3px] bg-emerald-600 dark:bg-emerald-400" title="5+ đóng góp"></div>
@@ -1812,7 +1812,7 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
                   </p>
                 </div>
 
-                <div className="modal-action pt-2 flex items-center justify-end gap-2">
+                <div className="modal-action pt-2 flex flex-wrap items-center justify-end gap-2">
                   <button
                     onClick={() => setSelectedPostForAnalytics(null)}
                     className="btn btn-sm btn-ghost rounded-xl font-bold px-5"

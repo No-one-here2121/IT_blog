@@ -90,11 +90,11 @@ export default function DeveloperAdCard({ category }) {
           </div>
         )}
 
-        <h4 className="font-bold text-xs sm:text-sm text-base-content group-hover:text-primary transition-colors line-clamp-2 leading-snug">
+        <h4 className="font-bold text-xs sm:text-sm text-base-content group-hover:text-primary transition-colors line-clamp-2 leading-snug break-words">
           {currentAd.title}
         </h4>
 
-        <p className="text-xs text-base-content/65 mt-1 line-clamp-2 leading-relaxed">
+        <p className="text-xs text-base-content/65 mt-1 line-clamp-2 leading-relaxed break-words">
           {currentAd.description}
         </p>
 

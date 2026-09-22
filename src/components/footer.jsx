@@ -179,7 +179,7 @@ export default function Foot({ onNavigate }) {
                   Bản quyền & Giấy phép mã nguồn
                 </button>
               </li>
-              <li className="pt-2 border-t border-base-300 flex items-center gap-3">
+              <li className="pt-2 border-t border-base-300 flex flex-wrap items-center gap-3">
                 <a
                   href={api.seo.getRssUrl()}
                   target="_blank"
@@ -208,11 +208,11 @@ export default function Foot({ onNavigate }) {
       {/* Dải bản quyền & Mạng xã hội phía dưới */}
       <div className="border-t border-base-300 bg-base-300/40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-base-content/60">
-          <p>
+          <p className="text-center sm:text-left break-words">
             © {new Date().getFullYear()} IT Blog. Bài tập nhóm Chuyên đề Công nghệ Phần mềm. All rights reserved.
           </p>
 
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center justify-center gap-4">
             <a
               href="https://github.com"
               target="_blank"

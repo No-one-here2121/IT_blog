@@ -290,13 +290,17 @@ def create_post(
     db.add(new_post)
 
 
-    # Process and link tags
+    # Process and link tags (deduplicated by slug)
     if post_in.tags:
+        seen_tag_slugs = set()
         for tag_name in post_in.tags:
             clean_name = tag_name.strip().lstrip("#")
             if not clean_name:
                 continue
             tag_slug = slugify(clean_name)
+            if not tag_slug or tag_slug in seen_tag_slugs:
+                continue
+            seen_tag_slugs.add(tag_slug)
             tag_obj = db.query(Tag).filter(
                 or_(Tag.slug == tag_slug, Tag.name.ilike(clean_name))
             ).first()
@@ -304,7 +308,8 @@ def create_post(
                 tag_obj = Tag(name=clean_name, slug=tag_slug)
                 db.add(tag_obj)
                 db.flush()
-            new_post.tags.append(tag_obj)
+            if tag_obj not in new_post.tags:
+                new_post.tags.append(tag_obj)
 
     db.commit()
     db.refresh(new_post)
@@ -428,11 +433,15 @@ def update_post(
 
     if post_in.tags is not None:
         post.tags.clear()
+        seen_tag_slugs = set()
         for tag_name in post_in.tags:
             clean_name = tag_name.strip().lstrip("#")
             if not clean_name:
                 continue
             tag_slug = slugify(clean_name)
+            if not tag_slug or tag_slug in seen_tag_slugs:
+                continue
+            seen_tag_slugs.add(tag_slug)
             tag_obj = db.query(Tag).filter(
                 or_(Tag.slug == tag_slug, Tag.name.ilike(clean_name))
             ).first()
@@ -440,7 +449,8 @@ def update_post(
                 tag_obj = Tag(name=clean_name, slug=tag_slug)
                 db.add(tag_obj)
                 db.flush()
-            post.tags.append(tag_obj)
+            if tag_obj not in post.tags:
+                post.tags.append(tag_obj)
 
     db.add(post)
     db.commit()

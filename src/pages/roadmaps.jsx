@@ -421,7 +421,7 @@ export default function RoadmapsPage({ onNavigate }) {
             <button
               key={tab.id}
               onClick={() => setLevelFilter(tab.id)}
-              className={`btn btn-sm rounded-xl font-semibold transition-all ${
+              className={`btn btn-sm rounded-xl font-semibold whitespace-nowrap shrink-0 transition-all ${
                 levelFilter === tab.id
                   ? "btn-primary text-white shadow-sm"
                   : "btn-ghost text-base-content/70 hover:text-base-content"
@@ -562,16 +562,16 @@ export default function RoadmapsPage({ onNavigate }) {
         >
           <div className="modal-box max-w-3xl rounded-2xl p-6 bg-base-100 border border-base-300 max-h-[90vh] overflow-y-auto">
             <div className="flex items-start justify-between gap-4 mb-4">
-              <div>
+              <div className="min-w-0 flex-1">
                 <span className="badge badge-primary text-white text-xs font-bold uppercase mb-2">
                   {selectedRoadmap.level}
                 </span>
-                <h3 className="text-2xl font-black text-base-content">{selectedRoadmap.title}</h3>
-                <p className="text-sm text-base-content/70 mt-1">{selectedRoadmap.description}</p>
+                <h3 className="text-2xl font-black text-base-content break-words">{selectedRoadmap.title}</h3>
+                <p className="text-sm text-base-content/70 mt-1 break-words">{selectedRoadmap.description}</p>
               </div>
               <button
                 onClick={() => setSelectedRoadmap(null)}
-                className="btn btn-sm btn-circle btn-ghost"
+                className="btn btn-sm btn-circle btn-ghost shrink-0"
               >
                 ✕
               </button>
@@ -699,7 +699,7 @@ export default function RoadmapsPage({ onNavigate }) {
             })()}
 
             <div className="modal-action mt-6 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {selectedRoadmap.progress_percentage > 0 && (
                   <button
                     type="button"
@@ -866,7 +866,7 @@ export default function RoadmapsPage({ onNavigate }) {
               </div>
 
               {/* Submit Buttons */}
-              <div className="pt-3 flex items-center justify-end gap-2 border-t border-base-200">
+              <div className="pt-3 flex flex-wrap items-center justify-end gap-2 border-t border-base-200">
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(false)}

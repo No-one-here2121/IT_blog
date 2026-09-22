@@ -269,14 +269,14 @@ def get_user_followers(user_id: int, db: Session = Depends(get_db)):
     Get list of users following this user.
     """
     target_user = db.query(User).filter(User.id == user_id).first()
-    if not target_user:
+    if not target_user or not target_user.is_active:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Không tìm thấy người dùng này."
         )
 
     follows = db.query(Follow).filter(Follow.following_id == user_id).all()
-    followers = [AuthorSummary.model_validate(f.follower) for f in follows if f.follower is not None]
+    followers = [AuthorSummary.model_validate(f.follower) for f in follows if f.follower is not None and f.follower.is_active]
     return FollowerListResponse(items=followers, total=len(followers))
 
 
@@ -287,12 +287,12 @@ def get_user_following(user_id: int, db: Session = Depends(get_db)):
     Get list of authors this user is following.
     """
     target_user = db.query(User).filter(User.id == user_id).first()
-    if not target_user:
+    if not target_user or not target_user.is_active:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Không tìm thấy người dùng này."
         )
 
     follows = db.query(Follow).filter(Follow.follower_id == user_id).all()
-    following = [AuthorSummary.model_validate(f.following) for f in follows if f.following is not None]
+    following = [AuthorSummary.model_validate(f.following) for f in follows if f.following is not None and f.following.is_active]
     return FollowerListResponse(items=following, total=len(following))

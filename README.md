@@ -161,7 +161,7 @@ Sau khi chạy lệnh nạp dữ liệu `seed`:
 
 ## 🧪 Chạy Kiểm Thử Tự Động (Automated Tests)
 
-Backend đã tích hợp đầy đủ bộ test tự động với **152 bài test**:
+Backend đã tích hợp đầy đủ bộ test tự động với **160 bài test (100% Passed)**:
 ```bash
 cd backend
 .venv\Scripts\activate  # hoặc source .venv/bin/activate

@@ -375,7 +375,7 @@ export default function CoursesPage({ onNavigate }) {
                 key={lvl.id}
                 type="button"
                 onClick={() => setLevelFilter(lvl.id)}
-                className={`tab tab-xs font-semibold ${levelFilter === lvl.id ? "tab-active bg-primary text-white font-bold" : ""}`}
+                className={`tab tab-xs font-semibold whitespace-nowrap shrink-0 ${levelFilter === lvl.id ? "tab-active bg-primary text-white font-bold" : ""}`}
               >
                 {lvl.label}
               </button>
@@ -546,22 +546,22 @@ export default function CoursesPage({ onNavigate }) {
         >
           <div className="modal-box max-w-3xl rounded-2xl p-6 bg-base-100 border border-base-300 max-h-[90vh] overflow-y-auto">
             <div className="flex items-start justify-between gap-4 mb-4">
-              <div>
+              <div className="min-w-0 flex-1">
                 <span className="badge badge-primary text-white text-xs font-bold uppercase mb-2">
                   {selectedCourse.level}
                 </span>
-                <h3 className="text-2xl font-black text-base-content">{selectedCourse.title}</h3>
-                <p className="text-sm text-base-content/70 mt-1">{selectedCourse.description}</p>
-                <div className="text-xs text-base-content/60 mt-2">
+                <h3 className="text-2xl font-black text-base-content break-words">{selectedCourse.title}</h3>
+                <p className="text-sm text-base-content/70 mt-1 break-words">{selectedCourse.description}</p>
+                <div className="text-xs text-base-content/60 mt-2 break-words">
                   Giảng viên: <span className="font-semibold text-base-content">{selectedCourse.instructor_name}</span>
                 </div>
               </div>
-              <button onClick={() => setSelectedCourse(null)} className="btn btn-sm btn-circle btn-ghost">
+              <button onClick={() => setSelectedCourse(null)} className="btn btn-sm btn-circle btn-ghost shrink-0">
                 ✕
               </button>
             </div>
 
-            <div className="my-4 p-4 rounded-xl bg-base-200/60 border border-base-300/60 flex items-center justify-between">
+            <div className="my-4 p-4 rounded-xl bg-base-200/60 border border-base-300/60 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <span className="text-xs font-semibold text-base-content/60 uppercase">Giáo trình bài học</span>
                 <p className="text-lg font-bold text-primary">
@@ -820,7 +820,7 @@ export default function CoursesPage({ onNavigate }) {
                 </div>
               </div>
 
-              <div className="modal-action pt-2 flex items-center justify-end gap-3">
+              <div className="modal-action pt-2 flex flex-wrap items-center justify-end gap-3">
                 <button
                   type="button"
                   onClick={() => setShowCreateCourseModal(false)}
@@ -891,7 +891,7 @@ export default function CoursesPage({ onNavigate }) {
                 Đã hoàn thành xuất sắc 100% chương trình đào tạo chuyên sâu và các bài thực hành thực chiến của khóa học:
               </p>
 
-              <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800 text-base font-black text-amber-900 dark:text-amber-200">
+              <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800 text-base font-black text-amber-900 dark:text-amber-200 break-words">
                 {certificateCourse.title}
               </div>
 
@@ -907,7 +907,7 @@ export default function CoursesPage({ onNavigate }) {
                 </div>
                 <div>
                   <span className="text-[10px] text-base-content/50 uppercase font-bold block">Mã xác thực chứng chỉ</span>
-                  <span className="font-mono font-bold text-primary text-[11px]">
+                  <span className="font-mono font-bold text-primary text-[11px] break-all">
                     ITB-CERT-{certificateCourse.id}-{Math.abs(certificateCourse.title.length * 37 + 1048)}
                   </span>
                 </div>
@@ -919,7 +919,7 @@ export default function CoursesPage({ onNavigate }) {
               <span className="text-[11px] text-base-content/50 text-left">
                 📅 Ngày cấp: <strong>{new Date().toLocaleDateString("vi-VN")}</strong> • Xác thực điện tử toàn cầu
               </span>
-              <div className="flex items-center gap-2 self-end sm:self-center">
+              <div className="flex flex-wrap items-center gap-2 self-end sm:self-center">
                 <button
                   type="button"
                   onClick={() => window.print()}

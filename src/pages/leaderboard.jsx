@@ -330,14 +330,14 @@ export default function LeaderboardPage({ onNavigate }) {
                   <div className="text-2xl p-2 rounded-xl bg-base-100 border border-base-300 shadow-2xs">
                     {badge.icon || "🎖️"}
                   </div>
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between">
-                      <p className="font-bold text-sm text-base-content">{badge.name}</p>
-                      <span className="badge badge-xs badge-ghost text-xs font-semibold">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-bold text-sm text-base-content break-words">{badge.name}</p>
+                      <span className="badge badge-xs badge-ghost text-xs font-semibold shrink-0">
                         {badge.points_required} pts
                       </span>
                     </div>
-                    <p className="text-xs text-base-content/60 mt-1 leading-relaxed">
+                    <p className="text-xs text-base-content/60 mt-1 leading-relaxed break-words">
                       {badge.description}
                     </p>
                   </div>
@@ -374,12 +374,12 @@ export default function LeaderboardPage({ onNavigate }) {
             <span className="badge badge-primary badge-sm text-white font-bold uppercase mb-2">
               Huy hiệu thành tựu
             </span>
-            <h3 className="text-xl font-black text-base-content">{selectedBadge.name}</h3>
+            <h3 className="text-xl font-black text-base-content break-words">{selectedBadge.name}</h3>
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-black my-3">
               <span>⚡ Yêu cầu:</span>
               <span>{selectedBadge.points_required} Điểm Uy Tín</span>
             </div>
-            <p className="text-sm text-base-content/80 leading-relaxed px-2 mb-5">
+            <p className="text-sm text-base-content/80 leading-relaxed px-2 mb-5 break-words">
               {selectedBadge.description}
             </p>
 

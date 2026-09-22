@@ -393,7 +393,7 @@ ${rows}
                 setTypeFilter(tab.id);
                 if (tab.id === "my_tickets") loadMyTickets();
               }}
-              className={`btn btn-sm rounded-xl font-semibold transition-all ${
+              className={`btn btn-sm rounded-xl font-semibold whitespace-nowrap shrink-0 transition-all ${
                 typeFilter === tab.id
                   ? "btn-primary text-white shadow-xs"
                   : "btn-ghost text-base-content/70 hover:text-base-content"
@@ -811,7 +811,7 @@ ${rows}
                 />
               </div>
 
-              <div className="modal-action border-t border-base-200 pt-3 flex justify-end gap-2">
+              <div className="modal-action border-t border-base-200 pt-3 flex flex-wrap justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setShowCreateEventModal(false)}
@@ -867,7 +867,7 @@ ${rows}
                 <span className="badge badge-primary badge-sm text-white font-bold uppercase mb-2">
                   Sự kiện IT Blog
                 </span>
-                <h2 className="text-xl font-black text-base-content leading-snug">
+                <h2 className="text-xl font-black text-base-content leading-snug break-words">
                   {selectedTicketForModal.event_title || "Sự kiện Công nghệ"}
                 </h2>
                 <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs bg-base-200/50 p-3.5 rounded-2xl">
@@ -885,7 +885,7 @@ ${rows}
                   </div>
                   <div>
                     <span className="text-base-content/60 font-semibold block">📍 Địa điểm / Hình thức</span>
-                    <strong className="text-base-content text-sm">
+                    <strong className="text-base-content text-sm break-words">
                       {selectedTicketForModal.location || "Online qua Zoom / Livestream"}
                     </strong>
                   </div>
@@ -896,10 +896,10 @@ ${rows}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                 <div className="space-y-1">
                   <span className="text-base-content/60 font-semibold">👤 Đại biểu / Người tham dự:</span>
-                  <p className="font-bold text-sm text-base-content">
+                  <p className="font-bold text-sm text-base-content break-words">
                     {selectedTicketForModal.full_name || currentUser?.full_name || "Lập trình viên"}
                   </p>
-                  <p className="text-base-content/70">
+                  <p className="text-base-content/70 break-all">
                     📧 {selectedTicketForModal.email || currentUser?.email || "dev@itblog.vn"}
                   </p>
                 </div>
@@ -912,7 +912,7 @@ ${rows}
                     <span className="badge badge-ghost text-xs">Vé VIP Miễn phí</span>
                   </div>
                   {selectedTicketForModal.notes && (
-                    <p className="text-primary italic mt-1 font-medium">
+                    <p className="text-primary italic mt-1 font-medium break-words">
                       "{selectedTicketForModal.notes}"
                     </p>
                   )}
@@ -932,7 +932,7 @@ ${rows}
                   ))}
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs font-black tracking-widest text-base-content/80">
+                  <span className="font-mono text-xs font-black tracking-widest text-base-content/80 break-all">
                     IT-PASS-{(selectedTicketForModal.id || selectedTicketForModal.event_id || 1) * 892}
                   </span>
                   <button
@@ -952,7 +952,7 @@ ${rows}
             </div>
 
             {/* Modal Actions */}
-            <div className="bg-base-200/50 p-4 border-t border-base-200 flex items-center justify-between gap-3">
+            <div className="bg-base-200/50 p-4 border-t border-base-200 flex flex-wrap items-center justify-between gap-3">
               <button
                 type="button"
                 onClick={() => window.print()}

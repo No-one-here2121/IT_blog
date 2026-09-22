@@ -336,6 +336,33 @@ def toggle_like_comment(
             detail="Không tìm thấy bình luận."
         )
 
+    post = db.query(Post).filter(Post.id == comment.post_id).first()
+    if not post:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy bình luận."
+        )
+
+    now = datetime.now(timezone.utc)
+    is_author_or_admin = (
+        current_user.id == post.author_id or
+        current_user.is_superuser or
+        any(r.name in ["admin", "moderator"] for r in current_user.roles)
+    )
+    sched = post.scheduled_at
+    if sched and sched.tzinfo is None:
+        sched = sched.replace(tzinfo=timezone.utc)
+
+    is_published = (
+        post.status == PostStatus.APPROVED.value and
+        (sched is None or sched <= now)
+    )
+    if not is_published and not is_author_or_admin:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy bình luận."
+        )
+
     existing_like = db.query(CommentLike).filter(
         CommentLike.user_id == current_user.id,
         CommentLike.comment_id == comment_id
@@ -416,15 +443,14 @@ def toggle_pin_comment(
 
 
 @router.post("/comments/{comment_id}/accept")
-def toggle_accept_answer(
+def toggle_accepted_answer(
     comment_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Technical Discussion: Mark a solution as 'Accepted Answer'.
-    Only the post author can mark/unmark an accepted answer.
-    Awards +20 reputation points to the comment author when marked!
+    Section 43: Question author can mark one comment/reply as the 'Accepted Answer'.
+    Awards reputation points to the answerer.
     """
     comment = db.query(Comment).filter(Comment.id == comment_id).first()
     if not comment:
@@ -442,12 +468,23 @@ def toggle_accept_answer(
 
     new_state = not comment.is_accepted_answer
 
-    # If setting to True, reset other comments on this post to False
+    # If setting to True, reset other comments on this post to False and revoke their reputation
     if new_state:
-        db.query(Comment).filter(
+        prev_accepted = db.query(Comment).filter(
             Comment.post_id == post.id,
-            Comment.id != comment_id
-        ).update({"is_accepted_answer": False}, synchronize_session=False)
+            Comment.id != comment_id,
+            Comment.is_accepted_answer == True
+        ).all()
+        for prev in prev_accepted:
+            prev.is_accepted_answer = False
+            if prev.author_id != current_user.id:
+                prev_reps = db.query(ReputationLog).filter(
+                    ReputationLog.user_id == prev.author_id,
+                    ReputationLog.action == "accepted_answer",
+                    ReputationLog.reference_id == prev.id
+                ).all()
+                for pr in prev_reps:
+                    db.delete(pr)
 
         # Award reputation to comment author if not already awarded
         if comment.author_id != current_user.id:
@@ -467,11 +504,13 @@ def toggle_accept_answer(
     else:
         # Revoke reputation if unmarked
         if comment.author_id != current_user.id:
-            db.query(ReputationLog).filter(
+            awarded = db.query(ReputationLog).filter(
                 ReputationLog.user_id == comment.author_id,
                 ReputationLog.action == "accepted_answer",
                 ReputationLog.reference_id == comment.id
-            ).delete(synchronize_session=False)
+            ).all()
+            for r in awarded:
+                db.delete(r)
 
     comment.is_accepted_answer = new_state
     db.add(comment)
@@ -479,4 +518,3 @@ def toggle_accept_answer(
     db.refresh(comment)
 
     return {"comment_id": comment.id, "is_accepted_answer": comment.is_accepted_answer}
-

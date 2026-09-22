@@ -91,11 +91,11 @@ export default function Banner_full({ onNavigate }) {
                   {slide.tag}
                 </span>
 
-                <h2 className="text-base sm:text-2xl md:text-3xl lg:text-4xl font-black leading-tight drop-shadow-md text-white">
+                <h2 className="text-base sm:text-2xl md:text-3xl lg:text-4xl font-black leading-tight drop-shadow-md text-white break-words">
                   {slide.title}
                 </h2>
 
-                <p className="text-xs sm:text-sm text-gray-200 line-clamp-2 sm:line-clamp-3 leading-relaxed drop-shadow-sm">
+                <p className="text-xs sm:text-sm text-gray-200 line-clamp-2 sm:line-clamp-3 leading-relaxed drop-shadow-sm break-words">
                   {slide.description}
                 </p>
 
