@@ -25,9 +25,12 @@ export default function AuthModal() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in"
+      onClick={(e) => { if (e.target === e.currentTarget) closeAuthModal(); }}
+    >
       {/* Modal Dialog Box */}
-      <div className="relative w-full max-w-md bg-base-100 rounded-2xl shadow-2xl border border-base-300 p-6 overflow-hidden">
+      <div className="relative w-full max-w-md bg-base-100 rounded-2xl shadow-2xl border border-base-300 p-6 max-h-[90vh] overflow-y-auto">
         {/* Nút đóng Modal */}
         <button
           onClick={closeAuthModal}
@@ -101,7 +104,7 @@ export default function AuthModal() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Họ và tên của bạn"
-                  className="input border-none rounded-none w-full text-xs h-9 focus:outline-none focus:ring-0 px-3 bg-transparent"
+                  className="w-full text-xs h-9 focus:outline-none px-3 bg-transparent text-base-content placeholder:text-base-content/40"
                   required
                 />
               </div>
@@ -121,7 +124,7 @@ export default function AuthModal() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="Email của bạn"
-                className="input border-none rounded-none w-full text-xs h-9 focus:outline-none focus:ring-0 px-3 bg-transparent"
+                className="w-full text-xs h-9 focus:outline-none px-3 bg-transparent text-base-content placeholder:text-base-content/40"
                 required
               />
             </div>
@@ -139,7 +142,7 @@ export default function AuthModal() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Mật khẩu"
-                className="input border-none rounded-none w-full text-xs h-9 focus:outline-none focus:ring-0 px-3 pr-8 bg-transparent"
+                className="w-full text-xs h-9 focus:outline-none px-3 pr-8 bg-transparent text-base-content placeholder:text-base-content/40"
               />
               <button
                 type="button"

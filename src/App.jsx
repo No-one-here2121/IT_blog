@@ -11,6 +11,12 @@ import ProfilePage from "./pages/profile";
 import ModerationPage from "./pages/moderation";
 import Login_page from "./pages/login";
 import Logup_page from "./pages/logup";
+import RoadmapsPage from "./pages/roadmaps";
+import CoursesPage from "./pages/courses";
+import JobsPage from "./pages/jobs";
+import EventsPage from "./pages/events";
+import LeaderboardPage from "./pages/leaderboard";
+import QuizPage from "./pages/quiz";
 
 import AuthModal from "./components/AuthModal";
 import Navbar from "./components/navigator";
@@ -42,6 +48,9 @@ function AppContent() {
   });
 
   const [editPostData, setEditPostData] = useState(null);
+  const [quizParams, setQuizParams] = useState({});
+  const [selectedAuthorId, setSelectedAuthorId] = useState(null);
+  const [profileTab, setProfileTab] = useState("my_posts");
 
   // Xử lý các query param đặc biệt như demoLogin hoặc modal
   useEffect(() => {
@@ -69,6 +78,14 @@ function AppContent() {
   const navigateTo = (page, params = null) => {
     if (params?.postId) setSelectedPostId(params.postId);
     if (params?.postData) setEditPostData(params.postData);
+    if (params?.quizParams) setQuizParams(params.quizParams);
+    if (params?.tab) setProfileTab(params.tab);
+    else if (page === "profile" && !params?.tab) setProfileTab("my_posts");
+    if (params?.authorId !== undefined) {
+      setSelectedAuthorId(params.authorId);
+    } else if (page === "profile" && !params?.authorId) {
+      setSelectedAuthorId(null);
+    }
     setCurrentPage(page);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -115,6 +132,8 @@ function AppContent() {
 
         {currentPage === "profile" && (
           <ProfilePage
+            authorId={selectedAuthorId}
+            initialTab={profileTab}
             onNavigate={navigateTo}
             onSelectPost={(id) => setSelectedPostId(id)}
             onEditPost={(post) => setEditPostData(post)}
@@ -128,6 +147,30 @@ function AppContent() {
           />
         )}
 
+        {currentPage === "roadmaps" && (
+          <RoadmapsPage onNavigate={navigateTo} />
+        )}
+
+        {currentPage === "courses" && (
+          <CoursesPage onNavigate={navigateTo} />
+        )}
+
+        {currentPage === "jobs" && (
+          <JobsPage onNavigate={navigateTo} />
+        )}
+
+        {currentPage === "events" && (
+          <EventsPage onNavigate={navigateTo} />
+        )}
+
+        {currentPage === "leaderboard" && (
+          <LeaderboardPage onNavigate={navigateTo} />
+        )}
+
+        {currentPage === "quiz" && (
+          <QuizPage onNavigate={navigateTo} params={quizParams} />
+        )}
+
         {currentPage === "login" && (
           <Login_page onNavigate={navigateTo} />
         )}
@@ -137,7 +180,7 @@ function AppContent() {
         )}
       </div>
 
-      {!isAuthPage && <Foot />}
+      {!isAuthPage && <Foot onNavigate={navigateTo} />}
     </div>
   );
 }

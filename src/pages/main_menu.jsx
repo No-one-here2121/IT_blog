@@ -1,10 +1,35 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Banner_full from "../components/banner_main";
 import PostCard from "../components/PostCard";
 import PostCardSkeleton from "../components/PostCardSkeleton";
+import DeveloperAdCard from "../components/DeveloperAdCard";
 import { useBlog } from "../context/BlogContext";
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 import { CATEGORIES, POPULAR_TAGS } from "../data/seedData";
+import { api } from "../services/api";
+
+const formatFeedPost = (p) => ({
+  id: p.id,
+  title: p.title,
+  slug: p.slug,
+  content: p.content || p.excerpt || "",
+  excerpt: p.excerpt || "",
+  coverImage: p.cover_image || p.coverImage || "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=800&q=80",
+  views: p.views || 0,
+  likes: p.likes_count !== undefined ? Array(p.likes_count).fill(1) : (Array.isArray(p.likes) ? p.likes : []),
+  bookmarks: Array.isArray(p.bookmarks) ? p.bookmarks : [],
+  comments: p.comments_count !== undefined ? Array(p.comments_count).fill(1) : (Array.isArray(p.comments) ? p.comments : []),
+  category: p.category?.name || p.category_name || p.category || "Công nghệ",
+  tags: p.tags?.map((t) => (typeof t === "string" ? t : t.name)) || [],
+  authorId: p.author?.id || p.author_id || 1,
+  authorName: p.author?.name || p.author_name || "Tác giả IT",
+  authorAvatar: p.author?.avatar || p.author_avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix",
+  readTime: p.read_time || "5 phút đọc",
+  createdAt: p.created_at || p.createdAt || new Date().toISOString(),
+  date: (p.created_at && !isNaN(new Date(p.created_at).getTime())) ? new Date(p.created_at).toLocaleDateString("vi-VN") : "Hôm nay",
+  status: p.status || "approved",
+});
 
 export default function Menu_main({ onNavigate, onSelectPost }) {
   const {
@@ -17,11 +42,24 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
     setSelectedTag,
     sortBy,
     setSortBy,
+    timeRange,
+    setTimeRange,
+    readDuration,
+    setReadDuration,
     resetFilters
   } = useBlog();
 
   const { users, currentUser, requireAuth, toggleFollow } = useAuth();
+  const { addToast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
+  const [categoriesList, setCategoriesList] = useState(CATEGORIES);
+  const [popularTagsList, setPopularTagsList] = useState(POPULAR_TAGS);
+
+  // Smart Discovery Feed Mode
+  const [feedMode, setFeedMode] = useState("all"); // 'all' | 'for_you' | 'following' | 'trending'
+  const [feedPosts, setFeedPosts] = useState([]);
+  const [isFeedLoading, setIsFeedLoading] = useState(false);
+
   const [layoutMode, setLayoutMode] = useState(() => {
     try {
       const params = new URLSearchParams(window.location.search);
@@ -37,7 +75,7 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
     .sort((a, b) => (b.views || 0) - (a.views || 0))
     .slice(0, 3);
 
-  // Tắt trạng thái loading ban đầu sau khi component mount & hỗ trợ cuộn trang qua URL
+  // Tắt trạng thái loading ban đầu sau khi component mount & nạp categories/tags
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsLoading(false);
@@ -51,20 +89,174 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
         console.error(e);
       }
     }, 350);
+
+    // Dynamic categories & tags from backend
+    api.categories.list()
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setCategoriesList(["Tất cả", ...data.map((c) => c.name)]);
+        }
+      })
+      .catch(() => {});
+
+    api.tags.list()
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setPopularTagsList(data.map((t) => t.name));
+        }
+      })
+      .catch(() => {});
+
     return () => clearTimeout(timer);
   }, []);
+
+  // Fetch or filter posts based on feedMode
+  useEffect(() => {
+    if (feedMode === "all") return;
+
+    let isMounted = true;
+
+    if (feedMode === "for_you") {
+      api.feeds.forYou()
+        .then((res) => {
+          const items = res?.items || (Array.isArray(res) ? res : []);
+          if (isMounted) {
+            if (items.length > 0) setFeedPosts(items.map(formatFeedPost));
+            else setFeedPosts(posts.slice(0, 6));
+          }
+        })
+        .catch(() => {
+          if (isMounted) setFeedPosts(posts.slice(0, 6));
+        })
+        .finally(() => {
+          if (isMounted) setIsFeedLoading(false);
+        });
+    } else if (feedMode === "following") {
+      api.feeds.following()
+        .then((res) => {
+          const items = res?.items || (Array.isArray(res) ? res : []);
+          if (isMounted) {
+            if (items.length > 0) setFeedPosts(items.map(formatFeedPost));
+            else {
+              const followingIds = Array.isArray(currentUser?.following) ? currentUser.following : [];
+              const followed = posts.filter((p) => followingIds.includes(p.authorId));
+              setFeedPosts(followed.length > 0 ? followed : posts.slice(0, 3));
+            }
+          }
+        })
+        .catch(() => {
+          if (isMounted) {
+            const followingIds = Array.isArray(currentUser?.following) ? currentUser.following : [];
+            const followed = posts.filter((p) => followingIds.includes(p.authorId));
+            setFeedPosts(followed.length > 0 ? followed : posts.slice(0, 3));
+          }
+        })
+        .finally(() => {
+          if (isMounted) setIsFeedLoading(false);
+        });
+    } else if (feedMode === "trending") {
+      api.feeds.trending()
+        .then((data) => {
+          if (isMounted) {
+            if (Array.isArray(data) && data.length > 0) setFeedPosts(data.map(formatFeedPost));
+            else {
+              const sorted = [...posts].sort((a, b) => (b.views || 0) - (a.views || 0));
+              setFeedPosts(sorted.slice(0, 6));
+            }
+          }
+        })
+        .catch(() => {
+          if (isMounted) {
+            const sorted = [...posts].sort((a, b) => (b.views || 0) - (a.views || 0));
+            setFeedPosts(sorted.slice(0, 6));
+          }
+        })
+        .finally(() => {
+          if (isMounted) setIsFeedLoading(false);
+        });
+    }
+  }, [feedMode, currentUser?.id, currentUser?.following, posts]);
+
+  const displayedPosts = useMemo(() => {
+    const list = feedMode === "all" ? filteredPosts : feedPosts;
+    if (feedMode !== "all") {
+      const sorted = [...list];
+      if (sortBy === "likes") {
+        sorted.sort((a, b) => (Array.isArray(b.likes) ? b.likes.length : (b.likes || 0)) - (Array.isArray(a.likes) ? a.likes.length : (a.likes || 0)));
+      } else if (sortBy === "comments") {
+        sorted.sort((a, b) => (Array.isArray(b.comments) ? b.comments.length : (b.comments || 0)) - (Array.isArray(a.comments) ? a.comments.length : (a.comments || 0)));
+      } else if (sortBy === "views") {
+        sorted.sort((a, b) => (b.views || 0) - (a.views || 0));
+      } else {
+        sorted.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+      }
+      return sorted;
+    }
+    return list;
+  }, [feedMode, filteredPosts, feedPosts, sortBy]);
+  const isPostListLoading = isLoading || (feedMode !== "all" && isFeedLoading);
 
   const isFiltering =
     searchQuery.trim() !== "" ||
     selectedCategory !== "Tất cả" ||
     selectedTag !== "" ||
-    sortBy !== "newest";
+    sortBy !== "newest" ||
+    timeRange !== "all" ||
+    readDuration !== "all";
 
   const handleFollowAuthor = (authorId, authorName) => {
     requireAuth(
       () => toggleFollow(authorId),
       `Vui lòng đăng nhập để theo dõi tác giả ${authorName}!`
     );
+  };
+
+  const handleExportFeedMd = () => {
+    if (displayedPosts.length === 0) {
+      addToast("Không có bài viết nào trong danh sách để xuất! ℹ️", "info");
+      return;
+    }
+    const filterInfo = [
+      selectedCategory !== "Tất cả" ? `Chuyên mục: ${selectedCategory}` : null,
+      selectedTag ? `Thẻ tag: #${selectedTag}` : null,
+      searchQuery ? `Từ khóa: "${searchQuery}"` : null,
+      feedMode !== "all" ? `Bảng tin: ${feedMode}` : null
+    ].filter(Boolean).join(" | ") || "Toàn bộ bài viết";
+
+    const rows = displayedPosts.map((p, idx) => {
+      const title = (p.title || "Bài viết").replace(/\|/g, "\\|");
+      const author = p.authorName || "Tác giả IT";
+      const cat = p.category || "Công nghệ";
+      const readTime = p.readTime || "5 phút đọc";
+      const date = p.date || "N/A";
+      const views = p.views || 0;
+      const likes = Array.isArray(p.likes) ? p.likes.length : (p.likes || 0);
+      return `| ${idx + 1} | ${title} | ${cat} | ${author} | ${readTime} | ${views} | ${likes} | ${date} |`;
+    }).join("\n");
+
+    const mdContent = `# DANH SÁCH BÀI VIẾT KỸ THUẬT - IT BLOG
+*Thời gian xuất:* ${new Date().toLocaleString("vi-VN")}
+*Bộ lọc:* ${filterInfo}
+*Tổng số bài viết:* ${displayedPosts.length}
+
+| STT | Tiêu đề | Chuyên mục | Tác giả | Thời lượng | Lượt xem | Lượt thích | Ngày đăng |
+|---|---|---|---|---|---|---|---|
+${rows}
+
+---
+*Tài liệu được xuất từ Nền tảng Tri thức & Mạng xã hội Kỹ sư IT Blog.*
+`;
+
+    const blob = new Blob([mdContent], { type: "text/markdown;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `it_blog_reading_list_${new Date().toISOString().slice(0, 10)}.md`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    addToast("Đã tải xuống danh sách bài viết định dạng Markdown (.md)! 📥", "success");
   };
 
   return (
@@ -77,28 +269,101 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
         id="posts-container"
         className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full scroll-mt-20"
         >
-          {/* Thanh phân loại Danh mục (Category Tabs) */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-3 mb-6 scrollbar-none border-b border-base-200">
-            {CATEGORIES.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setSelectedCategory(cat)}
-                className={`btn btn-sm rounded-full whitespace-nowrap transition-all font-semibold ${
-                  selectedCategory === cat
-                    ? "btn-primary text-white shadow-sm"
-                    : "btn-ghost text-base-content hover:bg-base-200"
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
+          {/* Thanh chuyển đổi Discovery Feed Mode */}
+          <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1 scrollbar-none">
+            <button
+              type="button"
+              onClick={() => setFeedMode("all")}
+              className={`btn btn-sm rounded-xl font-bold transition-all gap-1.5 shrink-0 whitespace-nowrap ${
+                feedMode === "all"
+                  ? "btn-primary text-white shadow-sm"
+                  : "btn-ghost text-base-content/70 hover:text-base-content hover:bg-base-200"
+              }`}
+            >
+              <span>📚</span>
+              <span>Khám phá chung</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                requireAuth(
+                  () => {
+                    setIsFeedLoading(true);
+                    setFeedMode("for_you");
+                  },
+                  "Vui lòng đăng nhập để xem nội dung gợi ý cá nhân hóa!"
+                );
+              }}
+              className={`btn btn-sm rounded-xl font-bold transition-all gap-1.5 shrink-0 whitespace-nowrap ${
+                feedMode === "for_you"
+                  ? "btn-primary text-white shadow-sm"
+                  : "btn-ghost text-base-content/70 hover:text-base-content hover:bg-base-200"
+              }`}
+            >
+              <span>🎯</span>
+              <span>Dành cho bạn (AI Feed)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                requireAuth(
+                  () => {
+                    setIsFeedLoading(true);
+                    setFeedMode("following");
+                  },
+                  "Vui lòng đăng nhập để xem bài viết từ tác giả đang theo dõi!"
+                );
+              }}
+              className={`btn btn-sm rounded-xl font-bold transition-all gap-1.5 shrink-0 whitespace-nowrap ${
+                feedMode === "following"
+                  ? "btn-primary text-white shadow-sm"
+                  : "btn-ghost text-base-content/70 hover:text-base-content hover:bg-base-200"
+              }`}
+            >
+              <span>👥</span>
+              <span>Đang theo dõi</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsFeedLoading(true);
+                setFeedMode("trending");
+              }}
+              className={`btn btn-sm rounded-xl font-bold transition-all gap-1.5 shrink-0 whitespace-nowrap ${
+                feedMode === "trending"
+                  ? "btn-primary text-white shadow-sm"
+                  : "btn-ghost text-base-content/70 hover:text-base-content hover:bg-base-200"
+              }`}
+            >
+              <span>🔥</span>
+              <span>Xu hướng hot</span>
+            </button>
           </div>
+
+          {/* Thanh phân loại Danh mục (Category Tabs) - chỉ áp dụng khi xem Khám phá chung */}
+          {feedMode === "all" && (
+            <div className="flex items-center gap-2 overflow-x-auto pb-3 mb-6 scrollbar-none border-b border-base-200">
+              {categoriesList.map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`btn btn-sm rounded-full whitespace-nowrap shrink-0 transition-all font-semibold ${
+                    selectedCategory === cat
+                      ? "btn-primary text-white shadow-sm"
+                      : "btn-ghost text-base-content hover:bg-base-200"
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Thanh công cụ lọc & sắp xếp */}
           <div className="flex flex-wrap items-center justify-between gap-4 mb-6 bg-base-200/50 p-3.5 rounded-xl border border-base-300">
-            <div className="flex items-center gap-2 text-xs text-base-content/70">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-base-content/70">
               <span>
-                Tìm thấy <strong className="text-primary font-bold">{filteredPosts.length}</strong> bài viết
+                Tìm thấy <strong className="text-primary font-bold">{displayedPosts.length}</strong> bài viết
               </span>
               {selectedTag && (
                 <span className="badge badge-sm badge-secondary text-white gap-1 font-semibold">
@@ -116,10 +381,51 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
                   Đặt lại bộ lọc
                 </button>
               )}
+              {displayedPosts.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleExportFeedMd}
+                  className="btn btn-ghost btn-xs text-primary font-bold hover:underline ml-1 flex items-center gap-1"
+                  title="Xuất danh sách bài viết đang lọc ra tệp Markdown (.md)"
+                >
+                  <span>📥</span>
+                  <span>Xuất .md</span>
+                </button>
+              )}
             </div>
 
             {/* Sắp xếp & Chuyển đổi giao diện hiển thị */}
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Lọc theo Thời gian xuất bản */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold text-base-content/70">Thời gian:</span>
+                <select
+                  value={timeRange}
+                  onChange={(e) => setTimeRange(e.target.value)}
+                  className="select select-xs select-bordered bg-base-100 focus:select-primary font-semibold text-xs"
+                >
+                  <option value="all">Tất cả thời gian</option>
+                  <option value="today">Hôm nay (24h)</option>
+                  <option value="week">7 ngày qua</option>
+                  <option value="month">30 ngày qua</option>
+                </select>
+              </div>
+
+              {/* Lọc theo Thời lượng đọc */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold text-base-content/70">Độ dài:</span>
+                <select
+                  value={readDuration}
+                  onChange={(e) => setReadDuration(e.target.value)}
+                  className="select select-xs select-bordered bg-base-100 focus:select-primary font-semibold text-xs"
+                >
+                  <option value="all">Tất cả độ dài</option>
+                  <option value="quick">⚡ Đọc nhanh (&lt; 3p)</option>
+                  <option value="medium">📖 Vừa phải (3-7p)</option>
+                  <option value="deep">🧠 Chuyên sâu (&gt; 7p)</option>
+                </select>
+              </div>
+
               {/* Toggle Chế độ xem: 2 Cột + Sidebar vs Lưới 3 Cột rộng */}
               <div className="hidden sm:flex items-center bg-base-200/80 p-0.5 rounded-lg border border-base-300">
                 <button
@@ -162,10 +468,10 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
                   onChange={(e) => setSortBy(e.target.value)}
                   className="select select-xs select-bordered bg-base-100 focus:select-primary font-semibold"
                 >
-                  <option value="newest">Mới nhất</option>
-                  <option value="likes">Nhiều lượt thích nhất</option>
-                  <option value="comments">Nhiều bình luận nhất</option>
-                  <option value="views">Lượt xem nhiều nhất</option>
+                  <option value="newest">⚡ Mới nhất</option>
+                  <option value="likes">❤️ Nhiều lượt thích nhất</option>
+                  <option value="comments">💬 Nhiều bình luận nhất</option>
+                  <option value="views">🔥 Lượt xem nhiều nhất</option>
                 </select>
               </div>
             </div>
@@ -182,7 +488,7 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
               </div>
               <div className="flex items-center gap-3 overflow-x-auto pb-1 scrollbar-none">
                 {users.slice(0, 6).map((author) => {
-                  const isFollowing = currentUser?.following?.includes(author.id);
+                  const isFollowing = currentUser?.following && Array.isArray(currentUser.following) && currentUser.following.includes(author.id);
                   const isMe = currentUser?.id === author.id;
                   return (
                     <div
@@ -193,6 +499,9 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
                         src={author.avatar}
                         alt={author.name}
                         className="w-8 h-8 rounded-full border border-base-300 object-cover"
+                        onError={(e) => {
+                          e.currentTarget.src = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(author.name || "dev")}`;
+                        }}
                       />
                       <div className="text-left">
                         <p className="text-xs font-bold text-base-content leading-tight max-w-[120px] truncate">
@@ -211,11 +520,11 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
                           onClick={() => handleFollowAuthor(author.id, author.name)}
                           className={`btn btn-xs rounded-full font-semibold ml-1 transition-all ${
                             isFollowing
-                              ? "btn-soft text-[11px] px-2.5 text-success"
+                              ? "btn-soft text-[11px] px-2.5 text-success font-bold"
                               : "btn-primary btn-outline text-[11px] px-2.5"
                           }`}
                         >
-                          {isFollowing ? "✓ Đã theo dõi" : "+ Theo dõi"}
+                          {isFollowing ? "✓ Đang theo dõi" : "+ Theo dõi"}
                         </button>
                       )}
                     </div>
@@ -229,15 +538,15 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
           {layoutMode === "grid" ? (
             /* Chế độ 1: Lưới 3 Cột Rộng Toàn Màn Hình */
             <div>
-              {isLoading ? (
+              {isPostListLoading ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {[...Array(6)].map((_, i) => (
                     <PostCardSkeleton key={i} />
                   ))}
                 </div>
-              ) : filteredPosts.length > 0 ? (
+              ) : displayedPosts.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in">
-                  {filteredPosts.map((post) => (
+                  {displayedPosts.map((post) => (
                     <PostCard
                       key={post.id}
                       post={post}
@@ -265,7 +574,7 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
                   <p className="text-sm text-base-content/60 max-w-sm mx-auto mb-6">
                     Không tìm thấy bài viết nào khớp với tiêu chí tìm kiếm hoặc bộ lọc hiện tại của bạn.
                   </p>
-                  <div className="flex justify-center gap-3">
+                  <div className="flex flex-wrap justify-center gap-3">
                     <button
                       onClick={resetFilters}
                       className="btn btn-outline btn-sm font-semibold"
@@ -292,15 +601,15 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 items-start">
               {/* Cột chính: Danh sách bài viết (3 Cột trong hệ 4) */}
               <div className="lg:col-span-3">
-                {isLoading ? (
+                {isPostListLoading ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {[...Array(6)].map((_, i) => (
                       <PostCardSkeleton key={i} />
                     ))}
                   </div>
-                ) : filteredPosts.length > 0 ? (
+                ) : displayedPosts.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in">
-                    {filteredPosts.map((post) => (
+                    {displayedPosts.map((post) => (
                       <PostCard
                         key={post.id}
                         post={post}
@@ -327,7 +636,7 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
                     <p className="text-sm text-base-content/60 max-w-sm mx-auto mb-6">
                       Không tìm thấy bài viết nào khớp với tiêu chí tìm kiếm hoặc bộ lọc hiện tại của bạn.
                     </p>
-                    <div className="flex justify-center gap-3">
+                    <div className="flex flex-wrap justify-center gap-3">
                       <button
                         onClick={resetFilters}
                         className="btn btn-outline btn-sm font-semibold"
@@ -359,19 +668,26 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
                   </h3>
                   <div className="space-y-4">
                     {users.slice(0, 4).map((author) => {
-                      const isFollowing = currentUser?.following?.includes(author.id);
+                      const isFollowing = currentUser?.following && Array.isArray(currentUser.following) && currentUser.following.includes(author.id);
                       const isMe = currentUser?.id === author.id;
 
                       return (
                         <div key={author.id} className="flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-2.5 min-w-0">
+                          <div
+                            onClick={() => onNavigate && onNavigate("profile", { authorId: author.id })}
+                            className="flex items-center gap-2.5 min-w-0 cursor-pointer group/author"
+                            title={`Xem hồ sơ của ${author.name}`}
+                          >
                             <img
                               src={author.avatar}
                               alt={author.name}
-                              className="w-9 h-9 rounded-full border border-base-300 shrink-0 object-cover"
+                              className="w-9 h-9 rounded-full border border-base-300 shrink-0 object-cover group-hover/author:ring-2 group-hover/author:ring-primary transition-all"
+                              onError={(e) => {
+                                e.currentTarget.src = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(author.name || "dev")}`;
+                              }}
                             />
                             <div className="min-w-0">
-                              <p className="text-xs font-bold text-base-content truncate">
+                              <p className="text-xs font-bold text-base-content truncate group-hover/author:text-primary transition-colors">
                                 {author.name}
                               </p>
                               <p className="text-[11px] text-base-content/50 truncate">
@@ -389,7 +705,7 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
                               onClick={() => handleFollowAuthor(author.id, author.name)}
                               className={`btn btn-xs rounded-full shrink-0 font-medium transition-all ${
                                 isFollowing
-                                  ? "btn-soft text-[11px]"
+                                  ? "btn-soft text-[11px] font-bold text-success"
                                   : "btn-outline btn-primary text-[11px]"
                               }`}
                             >
@@ -446,7 +762,7 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
                     🏷️ Thẻ chủ đề phổ biến
                   </h3>
                   <div className="flex flex-wrap gap-1.5">
-                    {POPULAR_TAGS.map((tag) => (
+                    {popularTagsList.map((tag) => (
                       <button
                         key={tag}
                         onClick={() => setSelectedTag(selectedTag === tag ? "" : tag)}
@@ -461,6 +777,9 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
                     ))}
                   </div>
                 </div>
+
+                {/* Widget: Quảng bá & Cơ hội Developer */}
+                <DeveloperAdCard />
 
                 {/* Widget 4: Kêu gọi đóng góp bài viết */}
                 <div className="bg-gradient-to-br from-primary/10 via-base-200 to-secondary/10 rounded-2xl border border-base-300 p-5 text-center space-y-3">

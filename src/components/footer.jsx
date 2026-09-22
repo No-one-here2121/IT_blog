@@ -1,4 +1,31 @@
-export default function Foot() {
+import { api } from "../services/api";
+import { useBlog } from "../context/BlogContext";
+import { useToast } from "../context/ToastContext";
+
+export default function Foot({ onNavigate }) {
+  const { setSelectedCategory } = useBlog();
+  const { addToast } = useToast();
+
+  const handleCategoryClick = (catName) => (e) => {
+    e.preventDefault();
+    if (setSelectedCategory) setSelectedCategory(catName);
+    if (onNavigate) onNavigate("home");
+    setTimeout(() => {
+      const el = document.getElementById("posts-container");
+      if (el) el.scrollIntoView({ behavior: "smooth" });
+    }, 150);
+  };
+
+  const handleFeedbackClick = (e) => {
+    e.preventDefault();
+    addToast("Cảm ơn bạn! Vui lòng gửi phản hồi qua email support@itblog.local 📬", "info");
+  };
+
+  const handlePolicyClick = (policyName) => (e) => {
+    e.preventDefault();
+    addToast(`Quy định "${policyName}" tuân thủ chuẩn mã nguồn mở & đồ án Chuyên đề CNPM. 📜`, "info");
+  };
+
   return (
     <footer className="bg-base-200 border-t border-base-300 text-base-content mt-auto">
       {/* Khung nội dung chính của Footer */}
@@ -31,29 +58,49 @@ export default function Foot() {
             </h4>
             <ul className="space-y-2 text-xs text-base-content/70">
               <li>
-                <a href="#posts-container" className="hover:text-primary transition-colors">
+                <button
+                  type="button"
+                  onClick={handleCategoryClick("Frontend")}
+                  className="hover:text-primary transition-colors text-left cursor-pointer"
+                >
                   Frontend & UI/UX
-                </a>
+                </button>
               </li>
               <li>
-                <a href="#posts-container" className="hover:text-primary transition-colors">
+                <button
+                  type="button"
+                  onClick={handleCategoryClick("Backend")}
+                  className="hover:text-primary transition-colors text-left cursor-pointer"
+                >
                   Backend & API (Go/FastAPI)
-                </a>
+                </button>
               </li>
               <li>
-                <a href="#posts-container" className="hover:text-primary transition-colors">
+                <button
+                  type="button"
+                  onClick={handleCategoryClick("AI & Machine Learning")}
+                  className="hover:text-primary transition-colors text-left cursor-pointer"
+                >
                   Trí tuệ nhân tạo (AI & LLMs)
-                </a>
+                </button>
               </li>
               <li>
-                <a href="#posts-container" className="hover:text-primary transition-colors">
+                <button
+                  type="button"
+                  onClick={handleCategoryClick("DevOps & Cloud")}
+                  className="hover:text-primary transition-colors text-left cursor-pointer"
+                >
                   DevOps, Docker & CI/CD
-                </a>
+                </button>
               </li>
               <li>
-                <a href="#posts-container" className="hover:text-primary transition-colors">
+                <button
+                  type="button"
+                  onClick={handleCategoryClick("Cơ sở dữ liệu")}
+                  className="hover:text-primary transition-colors text-left cursor-pointer"
+                >
                   Cơ sở dữ liệu & System Design
-                </a>
+                </button>
               </li>
             </ul>
           </div>
@@ -66,7 +113,9 @@ export default function Foot() {
             <ul className="space-y-2 text-xs text-base-content/70">
               <li className="flex items-center gap-1.5">
                 <span>📧</span>
-                <span>support@itblog.local</span>
+                <a href="mailto:support@itblog.local" className="hover:text-primary transition-colors">
+                  support@itblog.local
+                </a>
               </li>
               <li className="flex items-center gap-1.5">
                 <span>📞</span>
@@ -77,9 +126,13 @@ export default function Foot() {
                 <span>T2 - T7: 8:00 - 17:30</span>
               </li>
               <li className="pt-1">
-                <a href="#posts-container" className="hover:text-primary transition-colors">
+                <button
+                  type="button"
+                  onClick={handleFeedbackClick}
+                  className="hover:text-primary transition-colors text-left cursor-pointer"
+                >
                   Gửi phản hồi / Báo lỗi
-                </a>
+                </button>
               </li>
             </ul>
           </div>
@@ -91,23 +144,60 @@ export default function Foot() {
             </h4>
             <ul className="space-y-2 text-xs text-base-content/70">
               <li>
-                <a href="#posts-container" className="hover:text-primary transition-colors">
+                <button
+                  type="button"
+                  onClick={handlePolicyClick("Điều khoản sử dụng")}
+                  className="hover:text-primary transition-colors text-left cursor-pointer"
+                >
                   Điều khoản sử dụng
-                </a>
+                </button>
               </li>
               <li>
-                <a href="#posts-container" className="hover:text-primary transition-colors">
+                <button
+                  type="button"
+                  onClick={handlePolicyClick("Chính sách bảo mật")}
+                  className="hover:text-primary transition-colors text-left cursor-pointer"
+                >
                   Chính sách bảo mật
-                </a>
+                </button>
               </li>
               <li>
-                <a href="#posts-container" className="hover:text-primary transition-colors">
+                <button
+                  type="button"
+                  onClick={handlePolicyClick("Quy chuẩn đăng bài")}
+                  className="hover:text-primary transition-colors text-left cursor-pointer"
+                >
                   Quy chuẩn đăng bài
-                </a>
+                </button>
               </li>
               <li>
-                <a href="#posts-container" className="hover:text-primary transition-colors">
+                <button
+                  type="button"
+                  onClick={handlePolicyClick("Bản quyền & Giấy phép mã nguồn")}
+                  className="hover:text-primary transition-colors text-left cursor-pointer"
+                >
                   Bản quyền & Giấy phép mã nguồn
+                </button>
+              </li>
+              <li className="pt-2 border-t border-base-300 flex items-center gap-3">
+                <a
+                  href={api.seo.getRssUrl()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-500 hover:underline"
+                  title="Nguồn cấp tin tức chuẩn XML RSS 2.0"
+                >
+                  <span>📰 RSS Feed</span>
+                </a>
+                <span className="text-base-content/30">•</span>
+                <a
+                  href={api.seo.getSitemapUrl()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] font-bold text-primary hover:underline"
+                  title="Sơ đồ định tuyến website cho công cụ tìm kiếm"
+                >
+                  <span>🗺️ Sitemap</span>
                 </a>
               </li>
             </ul>

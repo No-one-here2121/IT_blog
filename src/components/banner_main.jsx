@@ -65,7 +65,7 @@ export default function Banner_full({ onNavigate }) {
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
     >
-      <div className="relative w-full overflow-hidden rounded-2xl sm:rounded-3xl border border-base-300 shadow-md min-h-[250px] sm:min-h-[320px] sm:aspect-[21/9] max-h-[380px] bg-base-900 group">
+      <div className="relative w-full overflow-hidden rounded-2xl sm:rounded-3xl border border-base-300 shadow-md min-h-[250px] sm:min-h-[320px] sm:aspect-[21/9] max-h-[380px] bg-neutral-900 group">
         {/* Slides list */}
         {slides.map((slide, index) => (
           <div
@@ -79,6 +79,9 @@ export default function Banner_full({ onNavigate }) {
               src={slide.image}
               alt={slide.title}
               className="w-full h-full object-cover object-center"
+              onError={(e) => {
+                e.currentTarget.src = bannerPic;
+              }}
             />
 
             {/* Gradient Overlay để chữ luôn đọc rõ ràng */}
@@ -107,7 +110,7 @@ export default function Banner_full({ onNavigate }) {
                         onNavigate("home");
                       }
                     }}
-                    className="btn btn-primary btn-xs sm:btn-md text-white font-bold rounded-lg shadow-lg hover:scale-105 transition-transform"
+                    className="btn btn-primary btn-sm sm:btn-md text-white font-bold rounded-lg shadow-lg hover:scale-105 transition-transform"
                   >
                     {slide.buttonText} &rarr;
                   </button>

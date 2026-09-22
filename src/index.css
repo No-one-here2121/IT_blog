@@ -6,13 +6,13 @@
 :root,
 :root[data-theme="light"],
 [data-theme="light"] {
-  /* Tông màu Primary nhẹ nhàng, tinh tế chuẩn công nghệ (thay thế màu tím xanh đậm gắt cũ) */
-  --color-primary: #5488c7;
+  /* Tông màu Primary công nghệ sắc nét, đạt chuẩn độ tương phản WCAG (>= 4.5:1) với chữ trắng */
+  --color-primary: #2563eb;
   --color-primary-content: #ffffff;
   --color-secondary: #64748b;
   --color-secondary-content: #ffffff;
-  --color-accent: #38bdf8;
-  --color-accent-content: #0f172a;
+  --color-accent: #0284c7;
+  --color-accent-content: #ffffff;
 
   --color-base-100: #ffffff;
   --color-base-200: #f8fafc;
@@ -29,9 +29,9 @@
   --bg: #f8fafc;
   --app-border: #e2e8f0;
   --code-bg: #f1f5f9;
-  --accent: #5488c7;
-  --accent-bg: rgba(84, 136, 199, 0.1);
-  --accent-border: rgba(84, 136, 199, 0.35);
+  --accent: #2563eb;
+  --accent-bg: rgba(37, 99, 235, 0.08);
+  --accent-border: rgba(37, 99, 235, 0.3);
   --social-bg: rgba(244, 243, 236, 0.5);
   --shadow:
     rgba(0, 0, 0, 0.08) 0 10px 15px -3px, rgba(0, 0, 0, 0.04) 0 4px 6px -2px;
@@ -60,9 +60,9 @@ html[data-theme="dark"],
 [data-theme="dark"],
 :root.dark,
 .dark {
-  /* Tông màu Dark Mode dịu mắt, độ sáng vừa phải, không gây chói lóa */
-  --color-primary: #60a5fa;
-  --color-primary-content: #0f172a;
+  /* Tông màu Dark Mode công nghệ hiện đại, sắc nét, tương phản hoàn hảo với chữ trắng */
+  --color-primary: #3b82f6;
+  --color-primary-content: #ffffff;
   --color-secondary: #94a3b8;
   --color-secondary-content: #0f172a;
   --color-accent: #38bdf8;
@@ -83,9 +83,9 @@ html[data-theme="dark"],
   --bg: #111827;
   --app-border: #374151;
   --code-bg: #1f2937;
-  --accent: #60a5fa;
-  --accent-bg: rgba(96, 165, 250, 0.15);
-  --accent-border: rgba(96, 165, 250, 0.4);
+  --accent: #3b82f6;
+  --accent-bg: rgba(59, 130, 246, 0.15);
+  --accent-border: rgba(59, 130, 246, 0.4);
   --social-bg: rgba(47, 48, 58, 0.5);
   --shadow:
     rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
@@ -101,22 +101,22 @@ html[data-theme="dark"],
 }
 
 /* Tối ưu viền và trạng thái focus cho input, select, textarea */
-.input,
-.textarea,
-.select {
-  border: 1px solid var(--color-base-300) !important;
+.input:not(.border-none),
+.textarea:not(.border-none),
+.select:not(.border-none) {
+  border: 1px solid var(--color-base-300);
   background-color: var(--color-base-100);
   color: var(--color-base-content);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.input:focus,
-.input:focus-within,
+.input:not(.border-none):focus,
+.input:not(.border-none):focus-within,
 .textarea:focus,
 .textarea:focus-within,
 .select:focus {
-  border-color: var(--color-primary) !important;
-  outline: 2px solid color-mix(in oklab, var(--color-primary) 35%, transparent) !important;
+  border-color: var(--color-primary);
+  outline: 2px solid color-mix(in oklab, var(--color-primary) 35%, transparent);
   outline-offset: 1px;
 }
 

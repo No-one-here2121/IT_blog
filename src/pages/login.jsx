@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import ThemeToggle from "../components/ThemeToggle";
+import { api } from "../services/api";
 
 export default function Login_page({ onNavigate }) {
   const { login, loginDemo } = useAuth();
@@ -11,6 +12,15 @@ export default function Login_page({ onNavigate }) {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Forgot / Reset Password States
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotStep, setForgotStep] = useState(1); // 1: Email, 2: Token & New Password
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [resetToken, setResetToken] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [isProcessingReset, setIsProcessingReset] = useState(false);
 
   // Validate errors
   const [errors, setErrors] = useState({});
@@ -31,18 +41,20 @@ export default function Login_page({ onNavigate }) {
     return Object.keys(errs).length === 0;
   };
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     if (!validate()) return;
 
     setIsSubmitting(true);
-    setTimeout(() => {
-      const success = login(identifier, password);
+    try {
+      const success = await login(identifier, password);
       setIsSubmitting(false);
       if (success && onNavigate) {
         onNavigate("home");
       }
-    }, 400);
+    } catch {
+      setIsSubmitting(false);
+    }
   };
 
   const handleSocialClick = () => {
@@ -50,12 +62,64 @@ export default function Login_page({ onNavigate }) {
     if (onNavigate) onNavigate("home");
   };
 
-  const handleForgotPassword = () => {
-    addToast(
-      "Tính năng khôi phục mật khẩu sẽ gửi mã OTP đến email đã đăng ký. Bạn cũng có thể dùng nút Đăng nhập Demo bên dưới!",
-      "info",
-      5000
-    );
+  const handleOpenForgotModal = () => {
+    setForgotStep(1);
+    setForgotEmail(identifier.includes("@") ? identifier : "");
+    setResetToken("");
+    setNewPassword("");
+    setConfirmNewPassword("");
+    setShowForgotModal(true);
+  };
+
+  const handleSendResetEmail = async (e) => {
+    e.preventDefault();
+    if (!forgotEmail.trim() || !forgotEmail.includes("@")) {
+      addToast("Vui lòng nhập địa chỉ email hợp lệ!", "warning");
+      return;
+    }
+
+    setIsProcessingReset(true);
+    try {
+      const res = await api.auth.forgotPassword(forgotEmail.trim());
+      addToast(res.message || "Đã tạo mã xác nhận khôi phục mật khẩu.", "info");
+      if (res?.reset_token) {
+        setResetToken(res.reset_token);
+      }
+      setForgotStep(2);
+    } catch (err) {
+      addToast(`Lỗi: ${err.message}`, "error");
+    } finally {
+      setIsProcessingReset(false);
+    }
+  };
+
+  const handleResetPasswordSubmit = async (e) => {
+    e.preventDefault();
+    if (!resetToken.trim()) {
+      addToast("Vui lòng nhập mã Token xác nhận!", "warning");
+      return;
+    }
+    if (!newPassword || newPassword.length < 6) {
+      addToast("Mật khẩu mới phải từ 6 ký tự trở lên!", "warning");
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      addToast("Mật khẩu xác nhận không khớp!", "warning");
+      return;
+    }
+
+    setIsProcessingReset(true);
+    try {
+      await api.auth.resetPassword(resetToken.trim(), newPassword);
+      addToast("Đặt lại mật khẩu thành công! Bạn có thể đăng nhập ngay. 🎉", "success");
+      setPassword(newPassword);
+      if (forgotEmail) setIdentifier(forgotEmail);
+      setShowForgotModal(false);
+    } catch (err) {
+      addToast(`Không thể đặt lại mật khẩu: ${err.message}`, "error");
+    } finally {
+      setIsProcessingReset(false);
+    }
   };
 
   return (
@@ -118,7 +182,7 @@ export default function Login_page({ onNavigate }) {
                   if (errors.identifier) setErrors((prev) => ({ ...prev, identifier: "" }));
                 }}
                 placeholder="Tên người dùng hoặc email"
-                className="input border-none rounded-none w-full text-sm h-11 focus:outline-none focus:ring-0 px-3.5 bg-transparent"
+                className="w-full text-sm h-11 focus:outline-none px-3.5 bg-transparent text-base-content placeholder:text-base-content/40"
                 disabled={isSubmitting}
               />
             </div>
@@ -145,7 +209,7 @@ export default function Login_page({ onNavigate }) {
                   if (errors.password) setErrors((prev) => ({ ...prev, password: "" }));
                 }}
                 placeholder="Mật khẩu"
-                className="input border-none rounded-none w-full text-sm h-11 focus:outline-none focus:ring-0 px-3.5 pr-10 bg-transparent"
+                className="w-full text-sm h-11 focus:outline-none px-3.5 pr-10 bg-transparent text-base-content placeholder:text-base-content/40"
                 disabled={isSubmitting}
               />
               <button
@@ -192,7 +256,7 @@ export default function Login_page({ onNavigate }) {
         <div className="flex items-center justify-between mt-3 text-xs">
           <button
             type="button"
-            onClick={handleForgotPassword}
+            onClick={handleOpenForgotModal}
             className="text-primary hover:underline font-medium"
           >
             Quên mật khẩu?
@@ -272,6 +336,134 @@ export default function Login_page({ onNavigate }) {
           </button>
         </div>
       </div>
+
+      {/* Modal Quên mật khẩu & Đặt lại mật khẩu */}
+      {showForgotModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowForgotModal(false); }}
+        >
+          <div className="relative w-full max-w-md bg-base-100 rounded-3xl shadow-2xl border border-base-300 p-6 sm:p-8 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-2 border-b border-base-200">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🔐</span>
+                <h3 className="font-bold text-base text-base-content">
+                  {forgotStep === 1 ? "Khôi phục mật khẩu" : "Đặt lại mật khẩu mới"}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowForgotModal(false)}
+                className="btn btn-xs btn-circle btn-ghost"
+              >
+                ✕
+              </button>
+            </div>
+
+            {forgotStep === 1 ? (
+              <form onSubmit={handleSendResetEmail} className="space-y-4">
+                <p className="text-xs text-base-content/70">
+                  Nhập địa chỉ email đăng ký tài khoản của bạn. Hệ thống sẽ tạo mã xác nhận để bạn đặt lại mật khẩu mới.
+                </p>
+                <div>
+                  <label className="label font-bold text-xs text-base-content/80 pb-1">
+                    Địa chỉ email:
+                  </label>
+                  <input
+                    type="email"
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    placeholder="dev@itblog.vn"
+                    className="input input-bordered input-sm w-full text-xs focus:input-primary"
+                    required
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setForgotStep(2)}
+                    className="text-[11px] text-primary hover:underline font-semibold"
+                  >
+                    Đã có mã xác nhận? Bấm vào đây
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isProcessingReset}
+                    className="btn btn-sm btn-primary text-white font-bold text-xs rounded-xl"
+                  >
+                    {isProcessingReset ? <span className="loading loading-spinner loading-xs"></span> : "Gửi mã xác nhận"}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={handleResetPasswordSubmit} className="space-y-3">
+                <p className="text-xs text-base-content/70">
+                  Nhập mã Token xác nhận và mật khẩu mới để hoàn tất việc đổi mật khẩu.
+                </p>
+                <div>
+                  <label className="label font-bold text-xs text-base-content/80 pb-1">
+                    Mã xác nhận (Reset Token):
+                  </label>
+                  <input
+                    type="text"
+                    value={resetToken}
+                    onChange={(e) => setResetToken(e.target.value)}
+                    placeholder="Dán mã Token vào đây..."
+                    className="input input-bordered input-sm w-full font-mono text-xs focus:input-primary"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="label font-bold text-xs text-base-content/80 pb-1">
+                    Mật khẩu mới:
+                  </label>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Mật khẩu mới (tối thiểu 6 ký tự)"
+                    className="input input-bordered input-sm w-full text-xs focus:input-primary"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="label font-bold text-xs text-base-content/80 pb-1">
+                    Xác nhận mật khẩu mới:
+                  </label>
+                  <input
+                    type="password"
+                    value={confirmNewPassword}
+                    onChange={(e) => setConfirmNewPassword(e.target.value)}
+                    placeholder="Nhập lại mật khẩu mới"
+                    className="input input-bordered input-sm w-full text-xs focus:input-primary"
+                    required
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setForgotStep(1)}
+                    className="btn btn-sm btn-ghost text-xs"
+                  >
+                    ← Quay lại
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isProcessingReset}
+                    className="btn btn-sm btn-primary text-white font-bold text-xs rounded-xl"
+                  >
+                    {isProcessingReset ? <span className="loading loading-spinner loading-xs"></span> : "Đặt lại mật khẩu"}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

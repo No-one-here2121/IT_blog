@@ -143,7 +143,7 @@ export default function Logup_page({ onNavigate }) {
                   if (errors.name) setErrors((prev) => ({ ...prev, name: "" }));
                 }}
                 placeholder="Tên của bạn (Họ và tên)"
-                className="input border-none rounded-none w-full text-sm h-11 focus:outline-none focus:ring-0 px-3.5 bg-transparent"
+                className="w-full text-sm h-11 focus:outline-none px-3.5 bg-transparent text-base-content placeholder:text-base-content/40"
                 disabled={isSubmitting}
               />
             </div>
@@ -172,7 +172,7 @@ export default function Logup_page({ onNavigate }) {
                     if (errors.email) setErrors((prev) => ({ ...prev, email: "" }));
                   }}
                   placeholder="Địa chỉ email của bạn"
-                  className="input border-none rounded-none w-full text-sm h-11 focus:outline-none focus:ring-0 px-3.5 bg-transparent"
+                  className="w-full text-sm h-11 focus:outline-none px-3.5 bg-transparent text-base-content placeholder:text-base-content/40"
                   disabled={isSubmitting}
                 />
               </div>
@@ -196,7 +196,7 @@ export default function Logup_page({ onNavigate }) {
                     if (errors.username) setErrors((prev) => ({ ...prev, username: "" }));
                   }}
                   placeholder="Tên tài khoản"
-                  className="input border-none rounded-none w-full text-sm h-11 focus:outline-none focus:ring-0 px-3.5 bg-transparent"
+                  className="w-full text-sm h-11 focus:outline-none px-3.5 bg-transparent text-base-content placeholder:text-base-content/40"
                   disabled={isSubmitting}
                 />
               </div>
@@ -224,7 +224,7 @@ export default function Logup_page({ onNavigate }) {
                   if (errors.password) setErrors((prev) => ({ ...prev, password: "" }));
                 }}
                 placeholder="Mật khẩu"
-                className="input border-none rounded-none w-full text-sm h-11 focus:outline-none focus:ring-0 px-3.5 pr-10 bg-transparent"
+                className="w-full text-sm h-11 focus:outline-none px-3.5 pr-10 bg-transparent text-base-content placeholder:text-base-content/40"
                 disabled={isSubmitting}
               />
               <button
@@ -268,7 +268,7 @@ export default function Logup_page({ onNavigate }) {
                   if (errors.confirmPassword) setErrors((prev) => ({ ...prev, confirmPassword: "" }));
                 }}
                 placeholder="Xác nhận mật khẩu của bạn"
-                className="input border-none rounded-none w-full text-sm h-11 focus:outline-none focus:ring-0 px-3.5 pr-10 bg-transparent"
+                className="w-full text-sm h-11 focus:outline-none px-3.5 pr-10 bg-transparent text-base-content placeholder:text-base-content/40"
                 disabled={isSubmitting}
               />
               <button

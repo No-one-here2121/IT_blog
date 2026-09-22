@@ -5,7 +5,8 @@ export const STORAGE_KEYS = {
   USER: 'it_blog_user',
   USERS: 'it_blog_users',
   POSTS: 'it_blog_posts',
-  THEME: 'theme'
+  THEME: 'theme',
+  POST_DRAFT: 'it_blog_post_draft'
 };
 
 export const storage = {

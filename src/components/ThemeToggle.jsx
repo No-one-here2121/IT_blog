@@ -7,7 +7,7 @@ export default function ThemeToggle({ className = "" }) {
     <button
       onClick={toggleTheme}
       type="button"
-      className={`btn btn-circle btn-ghost border border-base-300 shadow-sm transition-all hover:scale-105 active:scale-95 ${className}`}
+      className={`btn btn-sm btn-circle btn-ghost border border-base-300 shadow-sm transition-all hover:scale-105 active:scale-95 ${className}`}
       title={theme === "light" ? "Chuyển sang giao diện tối" : "Chuyển sang giao diện sáng"}
       aria-label="Toggle theme"
     >

@@ -4,6 +4,7 @@ import { storage, STORAGE_KEYS } from "../utils/storage";
 import { SEED_USERS } from "../data/seedData";
 import { generateId } from "../utils/id";
 import { useToast } from "./ToastContext";
+import { api } from "../services/api";
 
 const AuthContext = createContext();
 
@@ -44,6 +45,22 @@ export function AuthProvider({ children }) {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [modalMessage, setModalMessage] = useState("");
   const [pendingAction, setPendingAction] = useState(null); // { callback, message }
+
+  // Khôi phục phiên đăng nhập từ backend qua JWT token nếu có
+  useEffect(() => {
+    const token = localStorage.getItem("it_blog_token");
+    if (token) {
+      api.auth.getMe()
+        .then((user) => {
+          if (user) {
+            setCurrentUser(user);
+          }
+        })
+        .catch(() => {
+          // Token expired or backend unreachable
+        });
+    }
+  }, []);
 
   // Lưu danh sách users vào storage mỗi khi thay đổi
   useEffect(() => {
@@ -109,17 +126,32 @@ export function AuthProvider({ children }) {
   /**
    * Đăng nhập thông thường bằng Email hoặc Username
    */
-  const login = (identifier, password) => {
-    const trimmedId = (identifier || "").trim().toLowerCase();
+  const login = async (identifier, password) => {
+    const trimmedId = (identifier || "").trim();
     if (!password) {
       addToast("Vui lòng nhập mật khẩu!", "warning");
       return false;
     }
+
+    try {
+      const data = await api.auth.login(trimmedId, password);
+      if (data?.user) {
+        setCurrentUser(data.user);
+        setAuthModalOpen(false);
+        addToast(`Chào mừng ${data.user.name} trở lại!`, "success");
+        setTimeout(() => executePendingAction(), 100);
+        return true;
+      }
+    } catch {
+      // Backend failed or network offline -> fallback to local demo user
+    }
+
+    const lowerId = trimmedId.toLowerCase();
     const user = users.find(
       (u) =>
-        u.email.toLowerCase() === trimmedId ||
-        (u.username && u.username.toLowerCase() === trimmedId) ||
-        (u.name && u.name.toLowerCase() === trimmedId)
+        u.email.toLowerCase() === lowerId ||
+        (u.username && u.username.toLowerCase() === lowerId) ||
+        (u.name && u.name.toLowerCase() === lowerId)
     );
 
     if (!user) {
@@ -166,9 +198,29 @@ export function AuthProvider({ children }) {
   /**
    * Đăng ký tài khoản mới
    */
-  const register = ({ name, email, username }) => {
+  const register = async ({ name, email, username, password }) => {
     const trimmedEmail = (email || "").trim().toLowerCase();
     const trimmedUsername = (username || "").trim().toLowerCase();
+    const trimmedName = (name || "").trim();
+
+    try {
+      const data = await api.auth.register({
+        email: trimmedEmail,
+        username: trimmedUsername || trimmedEmail.split("@")[0],
+        name: trimmedName,
+        password: password || "DemoPassword123!"
+      });
+      if (data?.user) {
+        setCurrentUser(data.user);
+        setUsers((prev) => [data.user, ...prev]);
+        setAuthModalOpen(false);
+        addToast(`Đăng ký thành công! Chào mừng ${data.user.name}.`, "success");
+        setTimeout(() => executePendingAction(), 100);
+        return true;
+      }
+    } catch {
+      // Backend failed or network offline -> fallback to local demo
+    }
 
     const existingEmail = users.find((u) => u.email.toLowerCase() === trimmedEmail);
     if (existingEmail) {
@@ -188,10 +240,10 @@ export function AuthProvider({ children }) {
 
     const newUser = {
       id: generateId("user"),
-      name: name.trim(),
+      name: trimmedName,
       username: trimmedUsername || trimmedEmail.split("@")[0],
       email: trimmedEmail,
-      avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(name)}`,
+      avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(trimmedName)}`,
       bio: "Thành viên mới của cộng đồng IT Blog",
       following: [],
       createdAt: new Date().toISOString()
@@ -213,6 +265,11 @@ export function AuthProvider({ children }) {
    * Đăng xuất
    */
   const logout = () => {
+    try {
+      api.auth.logout();
+    } catch {
+      // ignore
+    }
     setCurrentUser(null);
     setPendingAction(null);
     addToast("Bạn đã đăng xuất tài khoản.", "info");
@@ -221,7 +278,7 @@ export function AuthProvider({ children }) {
   /**
    * Cập nhật thông tin cá nhân
    */
-  const updateProfile = ({ name, bio, avatar }) => {
+  const updateProfile = async ({ name, bio, avatar }) => {
     if (!currentUser) return false;
 
     const updatedUser = {
@@ -230,6 +287,12 @@ export function AuthProvider({ children }) {
       bio: bio !== undefined ? bio : currentUser.bio,
       avatar: avatar !== undefined ? avatar : currentUser.avatar
     };
+
+    try {
+      await api.users.updateProfile({ name, bio, avatar });
+    } catch {
+      // ignore
+    }
 
     setCurrentUser(updatedUser);
     setUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
@@ -240,22 +303,29 @@ export function AuthProvider({ children }) {
   /**
    * Theo dõi / Bỏ theo dõi tác giả (Lưu trong currentUser.following)
    */
-  const toggleFollow = (authorId) => {
+  const toggleFollow = async (authorId) => {
     if (!currentUser) return false;
     if (currentUser.id === authorId) {
       addToast("Bạn không thể tự theo dõi chính mình!", "warning");
       return false;
     }
 
-    const isFollowing = currentUser.following?.includes(authorId);
+    const currentFollowing = Array.isArray(currentUser.following) ? currentUser.following : [];
+    const isFollowing = currentFollowing.includes(authorId);
     let updatedFollowing;
 
     if (isFollowing) {
-      updatedFollowing = currentUser.following.filter((id) => id !== authorId);
+      updatedFollowing = currentFollowing.filter((id) => id !== authorId);
       addToast("Đã hủy theo dõi tác giả.", "info");
     } else {
-      updatedFollowing = [...(currentUser.following || []), authorId];
+      updatedFollowing = [...currentFollowing, authorId];
       addToast("Đã theo dõi tác giả!", "success");
+    }
+
+    try {
+      await api.interactions.toggleFollowUser(authorId);
+    } catch {
+      // ignore
     }
 
     const updatedUser = {

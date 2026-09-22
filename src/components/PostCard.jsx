@@ -16,25 +16,37 @@ export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDel
   const { currentUser, requireAuth } = useAuth();
   const { getAuthor, toggleLike, toggleBookmark } = useBlog();
 
-  const author = getAuthor(post.authorId);
-  const isLiked = currentUser && post.likes?.includes(currentUser.id);
-  const isBookmarked = currentUser && post.bookmarks?.includes(currentUser.id);
+  const author = getAuthor(post.authorId || post.author_id);
+  const isLiked = Boolean(currentUser && Array.isArray(post.likes) && post.likes.includes(currentUser.id));
+  const isBookmarked = Boolean(currentUser && Array.isArray(post.bookmarks) && post.bookmarks.includes(currentUser.id));
 
   const thumbnailUrl =
     post.coverImage ||
     CATEGORY_THUMBNAILS[post.category] ||
     "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?auto=format&fit=crop&w=600&q=80";
 
-  // Định dạng ngày tháng
-  const formattedDate = new Date(post.createdAt).toLocaleDateString("vi-VN", {
-    year: "numeric",
-    month: "short",
-    day: "numeric"
-  });
+  // Định dạng ngày tháng an toàn chống Invalid Date
+  const rawDate = post.createdAt || post.created_at || post.date;
+  const parsedDate = rawDate ? new Date(rawDate) : null;
+  const formattedDate = parsedDate && !isNaN(parsedDate.getTime())
+    ? parsedDate.toLocaleDateString("vi-VN", {
+        year: "numeric",
+        month: "short",
+        day: "numeric"
+      })
+    : (typeof post.date === "string" ? post.date : "Hôm nay");
 
   const handleOpenDetail = () => {
     if (onSelectPost) onSelectPost(post.id);
-    if (onNavigate) onNavigate("post_detail");
+    if (onNavigate) onNavigate("post_detail", { postId: post.id });
+  };
+
+  const handleAuthorClick = (e) => {
+    e.stopPropagation();
+    const targetAuthorId = author?.id || post?.authorId || post?.author_id;
+    if (onNavigate && targetAuthorId) {
+      onNavigate("profile", { authorId: targetAuthorId });
+    }
   };
 
   const handleLike = (e) => {
@@ -65,6 +77,9 @@ export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDel
           alt={post.title}
           loading="lazy"
           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+          onError={(e) => {
+            e.currentTarget.src = "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?auto=format&fit=crop&w=600&q=80";
+          }}
         />
         <div className="absolute top-3 left-3">
           <span className="badge badge-primary text-white font-bold text-xs uppercase shadow-md">
@@ -101,13 +116,22 @@ export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDel
           {/* Header tác giả & Ngày đăng */}
           <div className="flex items-center gap-2.5 mb-3">
             <img
-              src={author.avatar}
-              alt={author.name}
-              className="w-8 h-8 rounded-full bg-base-200 border border-base-300 object-cover shrink-0"
+              src={author?.avatar || "https://api.dicebear.com/7.x/bottts/svg?seed=dev"}
+              alt={author?.name || "Tác giả"}
+              onClick={handleAuthorClick}
+              className="w-8 h-8 rounded-full bg-base-200 border border-base-300 object-cover shrink-0 cursor-pointer hover:ring-2 hover:ring-primary/40 transition-all"
+              title={`Xem hồ sơ của ${author?.name || "tác giả"}`}
+              onError={(e) => {
+                e.currentTarget.src = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(author?.name || "dev")}`;
+              }}
             />
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold text-base-content truncate hover:text-primary transition-colors">
-                {author.name}
+              <p
+                onClick={handleAuthorClick}
+                className="text-xs font-bold text-base-content truncate hover:text-primary cursor-pointer transition-colors"
+                title={`Xem hồ sơ của ${author?.name || "tác giả"}`}
+              >
+                {author?.name || "Tác giả IT"}
               </p>
               <div className="flex items-center gap-1.5 text-[11px] text-base-content/60">
                 <span>{formattedDate}</span>
@@ -120,7 +144,7 @@ export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDel
           {/* Tiêu đề bài viết */}
           <h2
             onClick={handleOpenDetail}
-            className="text-base sm:text-lg font-bold text-base-content hover:text-primary cursor-pointer line-clamp-2 leading-snug transition-colors mb-2"
+            className="text-base sm:text-lg font-bold text-base-content hover:text-primary cursor-pointer line-clamp-2 leading-snug transition-colors mb-2 break-words"
           >
             {post.title}
           </h2>
@@ -150,7 +174,7 @@ export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDel
       </div>
 
       {/* Footer Card: Like, Comment, Lượt xem, Đọc tiếp */}
-      <div className="border-t border-base-200 px-5 py-3 flex items-center justify-between bg-base-200/30 text-xs text-base-content/70">
+      <div className="border-t border-base-200 px-5 py-3 flex flex-wrap items-center justify-between gap-2 bg-base-200/30 text-xs text-base-content/70">
         <div className="flex items-center gap-3.5">
           {/* Nút Like */}
           <button
@@ -174,7 +198,7 @@ export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDel
                 d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
               />
             </svg>
-            <span>{post.likes?.length || 0}</span>
+            <span>{Array.isArray(post.likes) ? post.likes.length : (typeof post.likes === "number" ? post.likes : 0)}</span>
           </button>
 
           {/* Nút Bình luận */}
@@ -191,7 +215,7 @@ export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDel
                 d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
               />
             </svg>
-            <span>{post.comments?.length || 0}</span>
+            <span>{Array.isArray(post.comments) ? post.comments.length : (typeof post.comments === "number" ? post.comments : 0)}</span>
           </button>
 
           {/* Lượt xem */}

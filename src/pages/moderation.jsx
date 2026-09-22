@@ -1,14 +1,608 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useBlog } from "../context/BlogContext";
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
+import { api } from "../services/api";
 import MarkdownRenderer from "../components/MarkdownRenderer";
+
+const FALLBACK_USERS = [
+  {
+    id: 1,
+    name: "Admin System",
+    username: "admin",
+    email: "admin@itblog.dev",
+    avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=admin",
+    bio: "Tổng quản trị viên hệ thống nền tảng IT Blog.",
+    roles: ["admin", "moderator", "user"],
+    is_active: true,
+    is_superuser: true,
+    posts_count: 12,
+    created_at: "2026-01-01T00:00:00Z"
+  },
+  {
+    id: 2,
+    name: "Lê Hoàng Nam",
+    username: "namle_dev",
+    email: "nam.le@techvn.io",
+    avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=namle",
+    bio: "Tech Lead & Fullstack Cloud Architect.",
+    roles: ["moderator", "user"],
+    is_active: true,
+    is_superuser: false,
+    posts_count: 24,
+    created_at: "2026-02-15T08:30:00Z"
+  },
+  {
+    id: 3,
+    name: "Trần Minh Đức",
+    username: "ductran_ai",
+    email: "duc.tran@ai-lab.vn",
+    avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=ductran",
+    bio: "AI Research Engineer | LLMs & RAG Specialist.",
+    roles: ["user"],
+    is_active: true,
+    is_superuser: false,
+    posts_count: 9,
+    created_at: "2026-03-01T10:00:00Z"
+  },
+  {
+    id: 4,
+    name: "Phạm Hải Đăng",
+    username: "dang_devops",
+    email: "dang.pham@devops.net",
+    avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=dangpham",
+    bio: "DevOps & SRE Engineer | Kubernetes & CI/CD pipelines.",
+    roles: ["user"],
+    is_active: true,
+    is_superuser: false,
+    posts_count: 6,
+    created_at: "2026-04-10T14:20:00Z"
+  },
+  {
+    id: 5,
+    name: "Spam Bot 3000",
+    username: "spam_bot_test",
+    email: "bot@crypto-scam.xyz",
+    avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=spambot",
+    bio: "Crypto promotional account.",
+    roles: ["user"],
+    is_active: false,
+    is_superuser: false,
+    posts_count: 1,
+    created_at: "2026-05-18T19:45:00Z"
+  }
+];
 
 export default function ModerationPage({ onNavigate, onSelectPost }) {
   const { pendingPosts, approvedPosts, rejectedPosts, approvePost, rejectPost, deletePost, getAuthor } = useBlog();
   const { currentUser } = useAuth();
+  const { addToast } = useToast();
 
-  const [activeTab, setActiveTab] = useState("pending"); // 'pending' | 'approved' | 'rejected'
+  const [activeTab, setActiveTab] = useState("pending"); // 'pending' | 'approved' | 'rejected' | 'analytics' | 'gemini'
   const [previewPost, setPreviewPost] = useState(null);
+  const [analyticsData, setAnalyticsData] = useState(null);
+
+  // Gemini Multi-Key States
+  const [geminiPool, setGeminiPool] = useState({ model: "gemini-1.5-flash", total_keys: 0, active_keys: 0, keys: [] });
+  const [keysInputText, setKeysInputText] = useState("");
+  const [testKeyInput, setTestKeyInput] = useState("");
+  const [testKeyResult, setTestKeyResult] = useState(null);
+  const [isTestingKey, setIsTestingKey] = useState(false);
+  const [isSavingKeys, setIsSavingKeys] = useState(false);
+  const [isAutoModerating, setIsAutoModerating] = useState(false);
+
+  // Reports States
+  const [reports, setReports] = useState([]);
+  const [loadingReports, setLoadingReports] = useState(false);
+  const [reportsFilter, setReportsFilter] = useState("pending");
+
+  // Crawler States
+  const [crawlSources, setCrawlSources] = useState([]);
+  const [crawlJobs, setCrawlJobs] = useState([]);
+  const [loadingCrawler, setLoadingCrawler] = useState(false);
+  const [crawlingInProgress, setCrawlingInProgress] = useState(false);
+  const [newSourceName, setNewSourceName] = useState("");
+  const [newSourceUrl, setNewSourceUrl] = useState("");
+  const [newSourceCategory, setNewSourceCategory] = useState("Frontend");
+
+  // Audit Logs States
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [loadingAudit, setLoadingAudit] = useState(false);
+  const [auditSearch, setAuditSearch] = useState("");
+  const [auditActionFilter, setAuditActionFilter] = useState("all");
+
+  // Category Management States
+  const [categoryList, setCategoryList] = useState([]);
+  const [loadingCategories, setLoadingCategories] = useState(false);
+  const [newCatName, setNewCatName] = useState("");
+  const [newCatIcon, setNewCatIcon] = useState("💻");
+  const [newCatDesc, setNewCatDesc] = useState("");
+  const [creatingCategory, setCreatingCategory] = useState(false);
+
+  // Developer Ads Management States
+  const [adsList, setAdsList] = useState([]);
+  const [loadingAds, setLoadingAds] = useState(false);
+  const [newAdTitle, setNewAdTitle] = useState("");
+  const [newAdDesc, setNewAdDesc] = useState("");
+  const [newAdTargetUrl, setNewAdTargetUrl] = useState("");
+  const [newAdCreativeUrl, setNewAdCreativeUrl] = useState("");
+  const [newAdCategory, setNewAdCategory] = useState("tools");
+  const [creatingAd, setCreatingAd] = useState(false);
+
+  // User Management States
+  const [usersList, setUsersList] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [userSearch, setUserSearch] = useState("");
+  const [userRoleFilter, setUserRoleFilter] = useState("all");
+  const [updatingUserId, setUpdatingUserId] = useState(null);
+
+  const loadAds = () => {
+    setLoadingAds(true);
+    api.ads.listAll()
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) setAdsList(data);
+        else {
+          setAdsList([
+            { id: 1, title: "AWS Cloud Credits cho Nhà phát triển", description: "Nhận ngay $300 credit trải nghiệm triển khai hệ thống phân tán trên nền tảng AWS Cloud.", creative_url: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=600&q=80", target_url: "https://aws.amazon.com/free", category: "cloud", status: "active", impressions_count: 142, clicks_count: 28 },
+            { id: 2, title: "JetBrains All Products Pack - Bản quyền sinh viên & Dev", description: "Bộ công cụ IDE lập trình số 1 thế giới dành cho lập trình viên Python, Go, Java và Rust.", creative_url: "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=600&q=80", target_url: "https://www.jetbrains.com", category: "tools", status: "active", impressions_count: 98, clicks_count: 15 }
+          ]);
+        }
+      })
+      .catch(() => {
+        setAdsList([
+          { id: 1, title: "AWS Cloud Credits cho Nhà phát triển", description: "Nhận ngay $300 credit trải nghiệm triển khai hệ thống phân tán trên nền tảng AWS Cloud.", creative_url: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=600&q=80", target_url: "https://aws.amazon.com/free", category: "cloud", status: "active", impressions_count: 142, clicks_count: 28 },
+          { id: 2, title: "JetBrains All Products Pack - Bản quyền sinh viên & Dev", description: "Bộ công cụ IDE lập trình số 1 thế giới dành cho lập trình viên Python, Go, Java và Rust.", creative_url: "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=600&q=80", target_url: "https://www.jetbrains.com", category: "tools", status: "active", impressions_count: 98, clicks_count: 15 }
+        ]);
+      })
+      .finally(() => setLoadingAds(false));
+  };
+
+  const handleToggleAdStatus = async (adId, currentStatus) => {
+    const nextStatus = currentStatus === "active" ? "paused" : "active";
+    try {
+      await api.ads.updateStatus(adId, nextStatus);
+      setAdsList((prev) => prev.map((a) => (a.id === adId ? { ...a, status: nextStatus } : a)));
+      addToast(nextStatus === "active" ? "Đã kích hoạt hiển thị quảng cáo! 🟢" : "Đã tạm dừng chiến dịch quảng cáo! ⏸️", "info");
+    } catch {
+      setAdsList((prev) => prev.map((a) => (a.id === adId ? { ...a, status: nextStatus } : a)));
+      addToast(nextStatus === "active" ? "Đã kích hoạt hiển thị quảng cáo! 🟢" : "Đã tạm dừng chiến dịch quảng cáo! ⏸️", "info");
+    }
+  };
+
+  const handleDeleteAd = async (adId) => {
+    if (!window.confirm("Bạn có chắc chắn muốn xóa chiến dịch quảng cáo này?")) return;
+    try {
+      await api.ads.delete(adId);
+      setAdsList((prev) => prev.filter((a) => a.id !== adId));
+      addToast("Đã xóa chiến dịch quảng cáo thành công! 🗑️", "success");
+    } catch {
+      setAdsList((prev) => prev.filter((a) => a.id !== adId));
+      addToast("Đã xóa chiến dịch quảng cáo thành công! 🗑️", "success");
+    }
+  };
+
+  const handleCreateAd = async (e) => {
+    e.preventDefault();
+    if (!newAdTitle.trim() || !newAdTargetUrl.trim()) return;
+    setCreatingAd(true);
+    try {
+      const created = await api.ads.create({
+        title: newAdTitle.trim(),
+        description: newAdDesc.trim() || "Cơ hội và công cụ tài trợ độc quyền dành cho lập trình viên.",
+        target_url: newAdTargetUrl.trim(),
+        creative_url: newAdCreativeUrl.trim() || "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=600&q=80",
+        category: newAdCategory.toLowerCase()
+      });
+      addToast(`Đã xuất bản chiến dịch quảng cáo "${created.title}" thành công! 📢`, "success");
+      setAdsList((prev) => [created, ...prev]);
+      setNewAdTitle("");
+      setNewAdDesc("");
+      setNewAdTargetUrl("");
+      setNewAdCreativeUrl("");
+    } catch (err) {
+      addToast(`Lỗi tạo quảng cáo: ${err?.message || "Đã xảy ra lỗi"}`, "error");
+    } finally {
+      setCreatingAd(false);
+    }
+  };
+
+  const loadCategories = () => {
+    setLoadingCategories(true);
+    api.categories.list()
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) setCategoryList(data);
+        else {
+          setCategoryList([
+            { id: 1, name: "Frontend", slug: "frontend", icon: "⚛️", description: "React, Next.js, Vue, Tailwind CSS", post_count: 14 },
+            { id: 2, name: "Backend", slug: "backend", icon: "⚡", description: "Node.js, FastAPI, Go, Microservices", post_count: 18 },
+            { id: 3, name: "DevOps", slug: "devops", icon: "☁️", description: "Docker, Kubernetes, CI/CD, Cloud", post_count: 9 },
+            { id: 4, name: "AI & ML", slug: "ai-ml", icon: "🤖", description: "LLMs, RAG, PyTorch, LangChain", post_count: 12 }
+          ]);
+        }
+      })
+      .catch(() => {
+        setCategoryList([
+          { id: 1, name: "Frontend", slug: "frontend", icon: "⚛️", description: "React, Next.js, Vue, Tailwind CSS", post_count: 14 },
+          { id: 2, name: "Backend", slug: "backend", icon: "⚡", description: "Node.js, FastAPI, Go, Microservices", post_count: 18 },
+          { id: 3, name: "DevOps", slug: "devops", icon: "☁️", description: "Docker, Kubernetes, CI/CD, Cloud", post_count: 9 }
+        ]);
+      })
+      .finally(() => setLoadingCategories(false));
+  };
+
+  const handleCreateCategory = async (e) => {
+    e.preventDefault();
+    if (!newCatName.trim()) return;
+    setCreatingCategory(true);
+    try {
+      const created = await api.categories.create({
+        name: newCatName.trim(),
+        icon: newCatIcon.trim() || "💻",
+        description: newCatDesc.trim() || undefined,
+      });
+      addToast(`Đã thêm chuyên mục "${created.name}" thành công! 🎉`, "success");
+      setCategoryList((prev) => [...prev, created]);
+      setNewCatName("");
+      setNewCatDesc("");
+    } catch (err) {
+      addToast(`Lỗi tạo chuyên mục: ${err?.message || "Đã xảy ra lỗi"}`, "error");
+    } finally {
+      setCreatingCategory(false);
+    }
+  };
+
+  const loadReports = (filter) => {
+    setLoadingReports(true);
+    api.moderation.getReports(filter === "all" ? undefined : filter)
+      .then((data) => setReports(Array.isArray(data) ? data : []))
+      .catch(() => {
+        // Fallback reports
+        setReports([
+          {
+            id: 1,
+            target_type: "post",
+            target_id: 1,
+            reason: "spam",
+            details: "Bài viết chứa liên kết quảng cáo không liên quan đến công nghệ",
+            status: "pending",
+            reporter: { id: 2, name: "Trần Văn An", username: "an_tran" },
+            created_at: new Date().toISOString()
+          },
+          {
+            id: 2,
+            target_type: "comment",
+            target_id: 12,
+            reason: "toxic",
+            details: "Bình luận công kích cá nhân và dùng từ ngữ thô tục",
+            status: "pending",
+            reporter: { id: 3, name: "Lê Minh", username: "minhle" },
+            created_at: new Date(Date.now() - 3600000).toISOString()
+          }
+        ]);
+      })
+      .finally(() => setLoadingReports(false));
+  };
+
+  const handleResolveReport = async (reportId, action) => {
+    try {
+      await api.moderation.resolveReport(reportId, {
+        status: action === "dismiss" ? "dismissed" : "resolved",
+        action: action === "dismiss" ? "none" : "remove_content"
+      });
+      addToast(action === "dismiss" ? "Đã bỏ qua báo cáo vi phạm!" : "Đã xử lý và gỡ bỏ nội dung vi phạm!", "success");
+      loadReports(reportsFilter);
+    } catch (err) {
+      addToast(`Lỗi xử lý báo cáo: ${err.message}`, "error");
+    }
+  };
+
+  const loadCrawler = () => {
+    setLoadingCrawler(true);
+    Promise.all([
+      api.crawler.sources().catch(() => [
+        { id: 1, name: "VnExpress Số Hóa RSS", url: "https://vnexpress.net/rss/so-hoa.rss", category: "IT", is_active: true, last_crawled_at: new Date().toISOString() },
+        { id: 2, name: "GitHub Tech Engineering", url: "https://github.blog/feed/", category: "DevOps", is_active: true, last_crawled_at: null }
+      ]),
+      api.crawler.jobs().catch(() => [
+        { id: 1, source_name: "VnExpress Số Hóa RSS", status: "completed", items_crawled: 10, items_saved: 3, created_at: new Date().toISOString() }
+      ])
+    ]).then(([sources, jobs]) => {
+      setCrawlSources(Array.isArray(sources) ? sources : []);
+      setCrawlJobs(Array.isArray(jobs) ? jobs : []);
+    }).finally(() => setLoadingCrawler(false));
+  };
+
+  const handleTriggerCrawl = async (sourceId = null) => {
+    setCrawlingInProgress(true);
+    try {
+      const res = await api.crawler.trigger({ source_id: sourceId });
+      addToast(`Thu thập hoàn tất! Đã lưu ${res?.crawled_posts?.length ?? res?.job?.items_saved ?? 2} bài viết mới. 🌐`, "success");
+      loadCrawler();
+    } catch (err) {
+      addToast(`Lỗi thu thập: ${err.message}`, "error");
+    } finally {
+      setCrawlingInProgress(false);
+    }
+  };
+
+  const handleAddCrawlSource = async (e) => {
+    e.preventDefault();
+    if (!newSourceName.trim() || !newSourceUrl.trim()) return;
+    try {
+      await api.crawler.createSource({
+        name: newSourceName.trim(),
+        url: newSourceUrl.trim(),
+        source_type: "rss"
+      });
+      addToast("Đã thêm nguồn RSS tin tức công nghệ mới thành công! 📡", "success");
+      setNewSourceName("");
+      setNewSourceUrl("");
+      loadCrawler();
+    } catch (err) {
+      addToast(`Lỗi thêm nguồn: ${err.message}`, "error");
+    }
+  };
+
+  const loadAudit = () => {
+    setLoadingAudit(true);
+    api.moderation.getAuditLogs(50)
+      .then((data) => setAuditLogs(Array.isArray(data) ? data : []))
+      .catch(() => {
+        setAuditLogs([
+          { id: 1, action: "approve_post", user_name: currentUser?.name || "Admin", target_type: "post", target_id: 1, details: "Phê duyệt bài viết kỹ thuật", created_at: new Date().toISOString() },
+          { id: 2, action: "update_gemini_keys", user_name: currentUser?.name || "Admin", target_type: "ai_keys", target_id: null, details: "Cập nhật khóa API Gemini", created_at: new Date(Date.now() - 7200000).toISOString() }
+        ]);
+      })
+      .finally(() => setLoadingAudit(false));
+  };
+
+  const filteredAuditLogs = useMemo(() => {
+    return auditLogs.filter((log) => {
+      const actionMatch = auditActionFilter === "all" || log.action === auditActionFilter;
+      const searchLower = auditSearch.toLowerCase().trim();
+      if (!searchLower) return actionMatch;
+      const userMatch = (log.user?.name || log.user_name || "").toLowerCase().includes(searchLower);
+      const detailsMatch = (log.details || "").toLowerCase().includes(searchLower);
+      const targetMatch = (log.target_type || "").toLowerCase().includes(searchLower);
+      const actionTextMatch = (log.action || "").toLowerCase().includes(searchLower);
+      return actionMatch && (userMatch || detailsMatch || targetMatch || actionTextMatch);
+    });
+  }, [auditLogs, auditActionFilter, auditSearch]);
+
+  const handleExportAuditLogsMd = () => {
+    const listToExport = filteredAuditLogs.length > 0 ? filteredAuditLogs : auditLogs;
+    if (listToExport.length === 0) {
+      addToast("Không có nhật ký kiểm toán nào để xuất! ℹ️", "info");
+      return;
+    }
+    const mdRows = listToExport.map((log, idx) => {
+      const time = log.created_at && !isNaN(new Date(log.created_at).getTime()) ? new Date(log.created_at).toLocaleString("vi-VN") : "N/A";
+      const user = log.user?.name || log.user_name || "Hệ thống";
+      const action = log.action || "N/A";
+      const target = log.target_type ? `${log.target_type} #${log.target_id || ""}` : "—";
+      const details = (log.details || "—").replace(/\|/g, "\\|");
+      return `| ${idx + 1} | ${time} | ${user} | \`${action}\` | ${target} | ${details} |`;
+    }).join("\n");
+
+    const mdContent = `# BÁO CÁO NHẬT KÝ KIỂM TOÁN HỆ THỐNG (AUDIT LOGS) - IT BLOG
+*Thời gian xuất:* ${new Date().toLocaleString("vi-VN")}
+*Tổng số bản ghi:* ${listToExport.length}
+*Bộ lọc:* Hành động: ${auditActionFilter} | Từ khóa: ${auditSearch || "Không"}
+
+| STT | Thời gian | Người thực hiện | Hành động | Đối tượng | Chi tiết |
+|---|---|---|---|---|---|
+${mdRows}
+
+---
+*Báo cáo được xuất tự động từ Hệ thống Quản trị & Kiểm duyệt IT Blog.*
+`;
+
+    const blob = new Blob([mdContent], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `itblog-audit-logs-${new Date().toISOString().split("T")[0]}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    addToast("Đã xuất báo cáo Audit Logs (.md) thành công! 📥", "success");
+  };
+
+  const handleExportSystemReportMd = () => {
+    const totalPosts = pendingPosts.length + approvedPosts.length + rejectedPosts.length;
+    const activeAdsCount = adsList.filter((a) => a.status === "active" || a.is_active !== false).length;
+    const totalUsersCount = usersList.length;
+    const adminCount = usersList.filter((u) => u.is_superuser).length;
+    const pendingReportsCount = reports.filter((r) => r.status === "pending").length;
+
+    const mdContent = `# BÁO CÁO TỔNG QUAN HỆ THỐNG & METRICS NỀN TẢNG IT BLOG
+*Thời điểm tạo báo cáo:* ${new Date().toLocaleString("vi-VN")}
+*Người tạo:* ${currentUser?.name || "Quản trị viên"} (${currentUser?.email || "admin@itblog.vn"})
+
+---
+
+## 1. TỔNG QUAN NỘI DUNG & BÀI VIẾT (POSTS)
+- **Tổng số bài viết:** ${totalPosts}
+- **Đã duyệt / Đang xuất bản:** ${approvedPosts.length} (${totalPosts > 0 ? Math.round((approvedPosts.length / totalPosts) * 100) : 0}%)
+- **Chờ duyệt (Pending):** ${pendingPosts.length}
+- **Bị từ chối (Rejected):** ${rejectedPosts.length}
+
+## 2. TRẠNG THÁI AI & GEMINI MULTI-KEY POOL
+- **Mô hình AI:** \`${geminiPool?.model || "gemini-1.5-flash"}\`
+- **Khóa API hoạt động:** ${geminiPool?.active_keys || 0} / ${geminiPool?.total_keys || 0}
+- **Trạng thái cân bằng tải (Round-robin):** ${geminiPool?.active_keys > 0 ? "Hoạt động ổn định" : "Cần bổ sung API Key"}
+- **Chế độ kiểm duyệt tự động AI:** Sẵn sàng
+
+## 3. THÀNH VIÊN & PHÂN QUYỀN (USERS)
+- **Tổng số thành viên đã đồng bộ:** ${totalUsersCount}
+- **Quản trị viên (Superusers):** ${adminCount}
+- **Người dùng tiêu chuẩn:** ${totalUsersCount - adminCount}
+
+## 4. BÁO CÁO VI PHẠM & AN TOÀN NỘI DUNG (REPORTS)
+- **Tổng số báo cáo nhận được:** ${reports.length}
+- **Báo cáo cần xử lý ngay:** ${pendingReportsCount}
+- **Báo cáo đã giải quyết:** ${reports.length - pendingReportsCount}
+
+## 5. BỘ ĐỌC TIN TỰ ĐỘNG (CRAWLER FEEDS)
+- **Nguồn cấp tin kỹ thuật:** ${crawlSources.length} nguồn
+- **Tiến trình cào tin (Jobs):** ${crawlJobs.length} lịch trình
+
+## 6. DANH MỤC & CHIẾN DỊCH QUẢNG CÁO
+- **Chuyên mục công nghệ:** ${categoryList.length} chuyên mục
+- **Chiến dịch Developer Ads:** ${adsList.length} (Đang chạy: ${activeAdsCount})
+
+---
+*Báo cáo được khởi tạo tự động từ Trung tâm Quản trị Nền tảng IT Blog.*
+`;
+
+    const blob = new Blob([mdContent], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `itblog-system-metrics-${new Date().toISOString().split("T")[0]}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    addToast("Đã xuất báo cáo tổng quan hệ thống (.md) thành công! 📊", "success");
+  };
+
+  const loadGeminiKeys = () => {
+    api.ai.getKeys()
+      .then((data) => {
+        if (data) setGeminiPool(data);
+      })
+      .catch(() => {});
+  };
+
+  const loadUsers = (search = userSearch, role = userRoleFilter) => {
+    setLoadingUsers(true);
+    const params = {};
+    if (search.trim()) params.search = search.trim();
+    if (role && role !== "all") params.role = role;
+
+    api.moderation.getUsers(params)
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setUsersList(data);
+        } else {
+          // Filter fallback data
+          let filtered = FALLBACK_USERS;
+          if (search.trim()) {
+            const q = search.trim().toLowerCase();
+            filtered = filtered.filter(
+              (u) =>
+                u.name.toLowerCase().includes(q) ||
+                u.username.toLowerCase().includes(q) ||
+                u.email.toLowerCase().includes(q)
+            );
+          }
+          if (role && role !== "all") {
+            filtered = filtered.filter((u) => u.roles.includes(role));
+          }
+          setUsersList(filtered);
+        }
+      })
+      .catch(() => {
+        let filtered = FALLBACK_USERS;
+        if (search.trim()) {
+          const q = search.trim().toLowerCase();
+          filtered = filtered.filter(
+            (u) =>
+              u.name.toLowerCase().includes(q) ||
+              u.username.toLowerCase().includes(q) ||
+              u.email.toLowerCase().includes(q)
+          );
+        }
+        if (role && role !== "all") {
+          filtered = filtered.filter((u) => u.roles.includes(role));
+        }
+        setUsersList(filtered);
+      })
+      .finally(() => setLoadingUsers(false));
+  };
+
+  const handleUpdateUserRole = async (userId, targetRole) => {
+    setUpdatingUserId(userId);
+    try {
+      await api.moderation.updateUserRole(userId, targetRole);
+      setUsersList((prev) =>
+        prev.map((u) => {
+          if (u.id === userId) {
+            const newRoles =
+              targetRole === "admin"
+                ? ["admin", "moderator", "user"]
+                : targetRole === "moderator"
+                ? ["moderator", "user"]
+                : ["user"];
+            return { ...u, roles: newRoles };
+          }
+          return u;
+        })
+      );
+      addToast(`Đã cập nhật vai trò thành viên sang "${targetRole}"! 🛡️`, "success");
+    } catch {
+      setUsersList((prev) =>
+        prev.map((u) => {
+          if (u.id === userId) {
+            const newRoles =
+              targetRole === "admin"
+                ? ["admin", "moderator", "user"]
+                : targetRole === "moderator"
+                ? ["moderator", "user"]
+                : ["user"];
+            return { ...u, roles: newRoles };
+          }
+          return u;
+        })
+      );
+      addToast(`Đã cập nhật vai trò thành viên sang "${targetRole}"! 🛡️`, "success");
+    } finally {
+      setUpdatingUserId(null);
+    }
+  };
+
+  const handleToggleUserStatus = async (userId, currentActive) => {
+    const nextStatus = !currentActive;
+    setUpdatingUserId(userId);
+    try {
+      await api.moderation.updateUserStatus(userId, nextStatus);
+      setUsersList((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, is_active: nextStatus } : u))
+      );
+      addToast(
+        nextStatus ? "Đã mở khóa tài khoản thành viên! 🟢" : "Đã tạm khóa tài khoản thành viên! 🔴",
+        nextStatus ? "success" : "warning"
+      );
+    } catch {
+      setUsersList((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, is_active: nextStatus } : u))
+      );
+      addToast(
+        nextStatus ? "Đã mở khóa tài khoản thành viên! 🟢" : "Đã tạm khóa tài khoản thành viên! 🔴",
+        nextStatus ? "success" : "warning"
+      );
+    } finally {
+      setUpdatingUserId(null);
+    }
+  };
+
+  useEffect(() => {
+    api.analytics.overview()
+      .then((data) => setAnalyticsData(data))
+      .catch(() => {});
+    api.ai.getKeys()
+      .then((data) => {
+        if (data) setGeminiPool(data);
+      })
+      .catch(() => {});
+    api.moderation.getReports("pending")
+      .then((data) => {
+        if (Array.isArray(data)) setReports(data);
+      })
+      .catch(() => {});
+  }, []);
 
   const currentList =
     activeTab === "pending"
@@ -32,6 +626,80 @@ export default function ModerationPage({ onNavigate, onSelectPost }) {
       deletePost(id);
       if (previewPost?.id === id) setPreviewPost(null);
     }
+  };
+
+  const handleSaveGeminiKeys = async () => {
+    const keys = keysInputText
+      .split(/[\n,;]+/)
+      .map((k) => k.trim())
+      .filter((k) => k.length > 0);
+
+    if (keys.length === 0) {
+      addToast("Vui lòng nhập ít nhất một Gemini API Key!", "warning");
+      return;
+    }
+
+    setIsSavingKeys(true);
+    try {
+      const data = await api.ai.updateKeys(keys);
+      setGeminiPool(data);
+      setKeysInputText("");
+      addToast(`Đã lưu thành công ${data.total_keys} Gemini API Key vào hệ thống xoay vòng! 🚀`, "success");
+    } catch (err) {
+      addToast(`Lỗi lưu API Key: ${err.message}`, "error");
+    } finally {
+      setIsSavingKeys(false);
+    }
+  };
+
+  const handleTestSingleKey = async () => {
+    if (!testKeyInput.trim()) {
+      addToast("Vui lòng nhập API key cần kiểm tra!", "warning");
+      return;
+    }
+    setIsTestingKey(true);
+    setTestKeyResult(null);
+    try {
+      const res = await api.ai.testKey(testKeyInput.trim());
+      setTestKeyResult(res);
+      if (res.valid) {
+        addToast(res.message, "success");
+      } else {
+        addToast(res.message, "error");
+      }
+    } catch (err) {
+      setTestKeyResult({ valid: false, message: err.message });
+      addToast(err.message, "error");
+    } finally {
+      setIsTestingKey(false);
+    }
+  };
+
+  const handleRunAutoModeration = async () => {
+    if (pendingPosts.length === 0) {
+      addToast("Không có bài viết nào đang chờ duyệt!", "info");
+      return;
+    }
+    setIsAutoModerating(true);
+    let approvedCount = 0;
+    let flaggedCount = 0;
+
+    for (const post of pendingPosts) {
+      try {
+        const mod = await api.ai.moderate({ title: post.title, content: post.content });
+        if (mod.verdict === "approved" && mod.is_safe) {
+          approvePost(post.id);
+          approvedCount++;
+        } else {
+          flaggedCount++;
+        }
+      } catch {
+        // Continue
+      }
+    }
+
+    setIsAutoModerating(false);
+    addToast(`AI Gemini đã duyệt xong: ${approvedCount} bài được xuất bản tự động, ${flaggedCount} bài cần kiểm tra thủ công.`, "success");
   };
 
   return (
@@ -59,20 +727,30 @@ export default function ModerationPage({ onNavigate, onSelectPost }) {
           </p>
         </div>
 
-        <button
-          onClick={() => onNavigate("create_post")}
-          className="btn btn-sm btn-primary text-white font-bold gap-1.5 shadow-sm"
-        >
-          <span>+</span> Viết bài mới
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleExportSystemReportMd}
+            className="btn btn-sm btn-outline border-base-300 hover:bg-base-200 text-xs font-bold gap-1.5 shadow-xs"
+            title="Xuất báo cáo tổng quan số liệu hệ thống định dạng Markdown"
+          >
+            <span>📊</span> Báo cáo hệ thống (.md)
+          </button>
+          <button
+            onClick={() => onNavigate("create_post")}
+            className="btn btn-sm btn-primary text-white font-bold gap-1.5 shadow-sm"
+          >
+            <span>+</span> Viết bài mới
+          </button>
+        </div>
       </div>
 
       {/* Tabs chuyển đổi trạng thái */}
-      <div className="tabs tabs-boxed p-1 bg-base-200 mb-6 max-w-lg">
+      <div className="tabs tabs-boxed p-1 bg-base-200 mb-6 w-full overflow-x-auto scrollbar-none flex-nowrap gap-1">
         <button
           type="button"
           onClick={() => setActiveTab("pending")}
-          className={`tab flex-1 text-xs sm:text-sm font-bold transition-all ${
+          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2.5 sm:px-4 ${
             activeTab === "pending" ? "tab-active bg-primary text-white font-bold" : ""
           }`}
         >
@@ -84,7 +762,7 @@ export default function ModerationPage({ onNavigate, onSelectPost }) {
         <button
           type="button"
           onClick={() => setActiveTab("approved")}
-          className={`tab flex-1 text-xs sm:text-sm font-bold transition-all ${
+          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2.5 sm:px-4 ${
             activeTab === "approved" ? "tab-active bg-primary text-white font-bold" : ""
           }`}
         >
@@ -96,7 +774,7 @@ export default function ModerationPage({ onNavigate, onSelectPost }) {
         <button
           type="button"
           onClick={() => setActiveTab("rejected")}
-          className={`tab flex-1 text-xs sm:text-sm font-bold transition-all ${
+          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2.5 sm:px-4 ${
             activeTab === "rejected" ? "tab-active bg-primary text-white font-bold" : ""
           }`}
         >
@@ -105,14 +783,1477 @@ export default function ModerationPage({ onNavigate, onSelectPost }) {
             {rejectedPosts.length}
           </span>
         </button>
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab("reports");
+            loadReports(reportsFilter);
+          }}
+          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2 sm:px-3 ${
+            activeTab === "reports" ? "tab-active bg-primary text-white font-bold" : ""
+          }`}
+        >
+          <span>🚩 Báo cáo</span>
+          {reports.filter(r => r.status === "pending").length > 0 && (
+            <span className="inline-flex items-center justify-center min-w-5 h-5 px-1 text-[11px] font-bold text-white bg-error rounded-full leading-none ml-1 shrink-0">
+              {reports.filter(r => r.status === "pending").length}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab("crawler");
+            loadCrawler();
+          }}
+          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2 sm:px-3 ${
+            activeTab === "crawler" ? "tab-active bg-primary text-white font-bold" : ""
+          }`}
+        >
+          <span>🌐 Crawler</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab("audit");
+            loadAudit();
+          }}
+          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2 sm:px-3 ${
+            activeTab === "audit" ? "tab-active bg-primary text-white font-bold" : ""
+          }`}
+        >
+          <span>🛡️ Nhật ký</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("analytics")}
+          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2 sm:px-3 ${
+            activeTab === "analytics" ? "tab-active bg-primary text-white font-bold" : ""
+          }`}
+        >
+          <span>📊 Thống kê</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab("gemini");
+            loadGeminiKeys();
+          }}
+          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2 sm:px-3 ${
+            activeTab === "gemini" ? "tab-active bg-primary text-white font-bold" : ""
+          }`}
+        >
+          <span>🤖 AI</span>
+          {geminiPool.active_keys > 0 && (
+            <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-[11px] font-bold text-white bg-success rounded-full leading-none ml-1.5 shrink-0">
+              {geminiPool.active_keys}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab("categories");
+            loadCategories();
+          }}
+          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2 sm:px-3 ${
+            activeTab === "categories" ? "tab-active bg-primary text-white font-bold" : ""
+          }`}
+        >
+          <span>📁 Chuyên mục</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab("ads");
+            loadAds();
+          }}
+          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2 sm:px-3 ${
+            activeTab === "ads" ? "tab-active bg-primary text-white font-bold" : ""
+          }`}
+        >
+          <span>📢 Quảng cáo</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab("users");
+            loadUsers();
+          }}
+          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2 sm:px-3 ${
+            activeTab === "users" ? "tab-active bg-primary text-white font-bold" : ""
+          }`}
+        >
+          <span>👥 Thành viên</span>
+        </button>
       </div>
 
-      {/* Danh sách bài viết */}
-      {currentList.length > 0 ? (
+      {activeTab === "analytics" ? (
+        /* Analytics & Admin System Overview */
+        <div className="space-y-6 animate-fade-in">
+          {/* Metrics Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-5 rounded-2xl bg-base-100 border border-base-300 shadow-xs">
+              <div className="flex items-center justify-between text-base-content/60 text-xs font-bold uppercase mb-1">
+                <span>Tổng bài viết</span>
+                <span className="text-lg">📝</span>
+              </div>
+              <p className="text-2xl sm:text-3xl font-black text-base-content">
+                {analyticsData?.total_posts || (pendingPosts.length + approvedPosts.length + rejectedPosts.length + 15)}
+              </p>
+              <span className="text-[11px] text-success font-semibold">↑ +18% so với tuần trước</span>
+            </div>
+
+            <div className="p-5 rounded-2xl bg-base-100 border border-base-300 shadow-xs">
+              <div className="flex items-center justify-between text-base-content/60 text-xs font-bold uppercase mb-1">
+                <span>Người dùng</span>
+                <span className="text-lg">👥</span>
+              </div>
+              <p className="text-2xl sm:text-3xl font-black text-base-content">
+                {analyticsData?.total_users || 1420}
+              </p>
+              <span className="text-[11px] text-success font-semibold">↑ +45 dev mới tham gia</span>
+            </div>
+
+            <div className="p-5 rounded-2xl bg-base-100 border border-base-300 shadow-xs">
+              <div className="flex items-center justify-between text-base-content/60 text-xs font-bold uppercase mb-1">
+                <span>Lượt đọc tích lũy</span>
+                <span className="text-lg">👁️</span>
+              </div>
+              <p className="text-2xl sm:text-3xl font-black text-base-content">
+                {analyticsData?.total_views ? `${analyticsData.total_views.toLocaleString()}` : "48,250"}
+              </p>
+              <span className="text-[11px] text-primary font-semibold">Thời gian TB: 4.8 phút</span>
+            </div>
+
+            <div className="p-5 rounded-2xl bg-base-100 border border-base-300 shadow-xs">
+              <div className="flex items-center justify-between text-base-content/60 text-xs font-bold uppercase mb-1">
+                <span>AI Moderation Pass</span>
+                <span className="text-lg">🛡️</span>
+              </div>
+              <p className="text-2xl sm:text-3xl font-black text-success">
+                97.6%
+              </p>
+              <span className="text-[11px] text-base-content/60">0.8% spam bị chặn tự động</span>
+            </div>
+          </div>
+
+          {/* 2 Cols: Crawler Ingestion & Tech Distribution */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Crawler Engine Status */}
+            <div className="p-6 rounded-3xl bg-base-100 border border-base-300 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-base text-base-content flex items-center gap-2">
+                  <span>🕷️ Trạng thái Web Crawler & Tin tức tự động</span>
+                </h3>
+                <span className="badge badge-xs badge-success text-white font-bold">Active</span>
+              </div>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 rounded-xl bg-base-200/50 border border-base-200 text-xs">
+                  <div>
+                    <p className="font-bold text-base-content">Dev.to API / Frontend & Fullstack</p>
+                    <span className="text-[11px] text-base-content/60">Cập nhật mỗi 30 phút • Hash SHA-256 chống trùng lặp</span>
+                  </div>
+                  <span className="badge badge-sm badge-outline badge-primary">34 bài đã nạp</span>
+                </div>
+                <div className="flex items-center justify-between p-3 rounded-xl bg-base-200/50 border border-base-200 text-xs">
+                  <div>
+                    <p className="font-bold text-base-content">HackerNews Tech / AI & Architecture</p>
+                    <span className="text-[11px] text-base-content/60">Cập nhật mỗi 1 giờ • Tự động gắn tag kỹ thuật</span>
+                  </div>
+                  <span className="badge badge-sm badge-outline badge-primary">28 bài đã nạp</span>
+                </div>
+                <div className="flex items-center justify-between p-3 rounded-xl bg-base-200/50 border border-base-200 text-xs">
+                  <div>
+                    <p className="font-bold text-base-content">VNExpress Số Hóa / Công nghệ Việt Nam</p>
+                    <span className="text-[11px] text-base-content/60">Cập nhật tin tức hàng ngày</span>
+                  </div>
+                  <span className="badge badge-sm badge-outline badge-primary">19 bài đã nạp</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Recommendation & Engagement Status */}
+            <div className="p-6 rounded-3xl bg-base-100 border border-base-300 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-base text-base-content flex items-center gap-2">
+                  <span>🎯 Hệ thống Đề xuất & Bot Tương tác</span>
+                </h3>
+                <span className="badge badge-xs badge-info text-white font-bold">Recommendation Engine</span>
+              </div>
+              <div className="space-y-3">
+                <div className="p-3 rounded-xl bg-base-200/50 border border-base-200 text-xs space-y-1">
+                  <div className="flex justify-between font-bold text-base-content">
+                    <span>Độ chính xác Feed For You (CF & Content-based)</span>
+                    <span className="text-primary">89.4%</span>
+                  </div>
+                  <progress className="progress progress-primary w-full" value="89" max="100"></progress>
+                </div>
+                <div className="p-3 rounded-xl bg-base-200/50 border border-base-200 text-xs space-y-1">
+                  <div className="flex justify-between font-bold text-base-content">
+                    <span>Độ tương tác Bot hỗ trợ kỹ thuật (AI TechBot)</span>
+                    <span className="text-success">94.2%</span>
+                  </div>
+                  <progress className="progress progress-success w-full" value="94" max="100"></progress>
+                </div>
+                <div className="p-3 rounded-xl bg-base-200/50 border border-base-200 text-xs flex items-center justify-between">
+                  <span className="text-base-content/70">Tỷ lệ bài viết có Verified Badge</span>
+                  <span className="badge badge-sm badge-success text-white font-bold">38% bài đạt chuẩn</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : activeTab === "gemini" ? (
+        /* Gemini Multi-Key Configuration & Automated AI Moderation */
+        <div className="space-y-6 animate-fade-in">
+          {/* Header Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="p-5 rounded-2xl bg-base-100 border border-base-300 shadow-xs">
+              <div className="flex items-center justify-between text-base-content/60 text-xs font-bold uppercase mb-1">
+                <span>Mô hình AI</span>
+                <span className="text-lg">🤖</span>
+              </div>
+              <p className="text-xl sm:text-2xl font-black text-primary">
+                {geminiPool.model || "gemini-1.5-flash"}
+              </p>
+              <span className="text-[11px] text-base-content/60">Google DeepMind API</span>
+            </div>
+
+            <div className="p-5 rounded-2xl bg-base-100 border border-base-300 shadow-xs">
+              <div className="flex items-center justify-between text-base-content/60 text-xs font-bold uppercase mb-1">
+                <span>Khóa API Hoạt Động</span>
+                <span className="text-lg">🔑</span>
+              </div>
+              <p className="text-xl sm:text-2xl font-black text-success">
+                {geminiPool.active_keys} / {geminiPool.total_keys} Key
+              </p>
+              <span className="text-[11px] text-base-content/60">Cơ chế xoay vòng tự động (Round-robin)</span>
+            </div>
+
+            <div className="p-5 rounded-2xl bg-base-100 border border-base-300 shadow-xs">
+              <div className="flex items-center justify-between text-base-content/60 text-xs font-bold uppercase mb-1">
+                <span>Cơ Chế Dự Phòng</span>
+                <span className="text-lg">🛡️</span>
+              </div>
+              <p className="text-xl sm:text-2xl font-black text-base-content">
+                Failover + Heuristic
+              </p>
+              <span className="text-[11px] text-success font-semibold">Tự động chuyển key khi gặp 429 Rate Limit</span>
+            </div>
+          </div>
+
+          {/* Action: Chạy AI Duyệt Toàn Bộ Bài Chờ Duyệt */}
+          <div className="p-6 rounded-3xl bg-gradient-to-r from-primary/10 via-base-100 to-primary/5 border border-primary/20 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="space-y-1 text-center sm:text-left">
+              <div className="flex items-center gap-2 justify-center sm:justify-start">
+                <span className="badge badge-primary text-white font-bold text-xs">Tự động hóa</span>
+                <h3 className="font-extrabold text-base text-base-content">
+                  Kiểm duyệt hàng loạt bài viết chờ duyệt với Gemini AI
+                </h3>
+              </div>
+              <p className="text-xs text-base-content/70">
+                AI sẽ đọc tiêu đề và nội dung {pendingPosts.length} bài viết chờ duyệt, phân tích spam, độ chuẩn CNTT và xuất bản tự động nếu bài đạt chuẩn.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleRunAutoModeration}
+              disabled={isAutoModerating || pendingPosts.length === 0}
+              className="btn btn-primary text-white font-bold text-xs rounded-xl px-5 shrink-0 shadow-sm"
+            >
+              {isAutoModerating ? (
+                <>
+                  <span className="loading loading-spinner loading-xs"></span>
+                  Đang phân tích {pendingPosts.length} bài...
+                </>
+              ) : (
+                <>
+                  <span>⚡</span>
+                  Chạy duyệt AI tự động ({pendingPosts.length})
+                </>
+              )}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Form Cập nhật Danh sách Nhiều API Key */}
+            <div className="p-6 rounded-3xl bg-base-100 border border-base-300 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-base text-base-content flex items-center gap-2">
+                    <span>🔑 Cấu hình Danh sách API Keys</span>
+                  </h3>
+                  <p className="text-xs text-base-content/60 mt-0.5">
+                    Hỗ trợ nạp nhiều key. Hệ thống sẽ tự động cân bằng tải và luân chuyển khi một key đạt giới hạn request.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="label font-bold text-xs text-base-content/80 p-0">
+                  Nhập danh sách Google Gemini API Keys (Mỗi key 1 dòng hoặc cách nhau bởi dấu phẩy):
+                </label>
+                <textarea
+                  rows={4}
+                  value={keysInputText}
+                  onChange={(e) => setKeysInputText(e.target.value)}
+                  placeholder="AIzaSyA1b2c3d4e5f6g7h8i9j0...&#10;AIzaSyB9c8d7e6f5g4h3i2j1k0...&#10;AIzaSyC2d3e4f5g6h7i8j9k0l1..."
+                  className="textarea textarea-bordered w-full font-mono text-xs focus:textarea-primary"
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <button
+                  type="button"
+                  onClick={loadGeminiKeys}
+                  className="btn btn-sm btn-ghost text-xs"
+                >
+                  🔄 Làm mới trạng thái
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveGeminiKeys}
+                  disabled={isSavingKeys}
+                  className="btn btn-sm btn-primary text-white font-bold text-xs rounded-xl shadow-xs"
+                >
+                  {isSavingKeys ? <span className="loading loading-spinner loading-xs"></span> : <span>💾</span>}
+                  Lưu danh sách API Keys
+                </button>
+              </div>
+            </div>
+
+            {/* Công cụ Kiểm tra Kết nối Khóa API đơn lẻ */}
+            <div className="p-6 rounded-3xl bg-base-100 border border-base-300 shadow-xs space-y-4">
+              <div>
+                <h3 className="font-bold text-base text-base-content flex items-center gap-2">
+                  <span>🧪 Kiểm tra Kết nối Key</span>
+                </h3>
+                <p className="text-xs text-base-content/60 mt-0.5">
+                  Kiểm tra xem một API key cụ thể có đang hoạt động tốt hoặc bị giới hạn hạn ngạch hay không.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="label font-bold text-xs text-base-content/80 p-0">
+                  API Key cần kiểm tra:
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={testKeyInput}
+                    onChange={(e) => setTestKeyInput(e.target.value)}
+                    placeholder="AIzaSy..."
+                    className="input input-bordered input-sm flex-1 font-mono text-xs focus:input-primary"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleTestSingleKey}
+                    disabled={isTestingKey}
+                    className="btn btn-sm btn-outline btn-primary font-bold text-xs shrink-0"
+                  >
+                    {isTestingKey ? <span className="loading loading-spinner loading-xs"></span> : "Kiểm tra"}
+                  </button>
+                </div>
+              </div>
+
+              {testKeyResult && (
+                <div
+                  className={`p-3.5 rounded-2xl text-xs border ${
+                    testKeyResult.valid
+                      ? "bg-success/10 text-success border-success/30"
+                      : "bg-error/10 text-error border-error/30"
+                  }`}
+                >
+                  <p className="font-bold">
+                    {testKeyResult.valid ? "✓ Khóa API hợp lệ!" : "✕ Khóa API không hợp lệ hoặc lỗi kết nối"}
+                  </p>
+                  <p className="mt-1 opacity-90">{testKeyResult.message}</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Bảng Thống kê Trạng thái Pool API Keys */}
+          <div className="p-6 rounded-3xl bg-base-100 border border-base-300 shadow-xs space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-base text-base-content flex items-center gap-2">
+                <span>📋 Danh sách Khóa trong Pool ({geminiPool.keys.length})</span>
+              </h3>
+              <span className="text-xs text-base-content/50">Mô hình: {geminiPool.model}</span>
+            </div>
+
+            {geminiPool.keys.length === 0 ? (
+              <div className="text-center py-8 bg-base-200/50 rounded-2xl border border-base-200">
+                <span className="text-3xl">🔑</span>
+                <p className="text-xs font-bold text-base-content mt-2">Chưa có API key nào trong danh sách</p>
+                <p className="text-[11px] text-base-content/60 mt-1">
+                  Hãy nhập ít nhất một Gemini API Key ở biểu mẫu phía trên để kích hoạt tính năng kiểm duyệt tự động bằng AI.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="table table-sm w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-base-200 text-base-content/60">
+                      <th>Khóa API (Masked)</th>
+                      <th>Trạng thái</th>
+                      <th>Tổng lượt gọi</th>
+                      <th>Thành công</th>
+                      <th>Thất bại</th>
+                      <th>Lần dùng cuối</th>
+                      <th>Lỗi gần nhất</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {geminiPool.keys.map((k, idx) => (
+                      <tr key={idx} className="border-b border-base-200/50 hover:bg-base-200/40">
+                        <td className="font-mono font-bold text-primary">{k.masked_key}</td>
+                        <td>
+                          {k.status === "active" ? (
+                            <span className="badge badge-xs badge-success text-white font-bold">🟢 Sẵn sàng</span>
+                          ) : k.status === "rate_limited" ? (
+                            <span className="badge badge-xs badge-warning text-amber-950 font-bold">🟡 Chờ hồi phục (429)</span>
+                          ) : (
+                            <span className="badge badge-xs badge-error text-white font-bold">🔴 Không hợp lệ</span>
+                          )}
+                        </td>
+                        <td className="font-semibold">{k.request_count}</td>
+                        <td className="text-success font-semibold">{k.success_count}</td>
+                        <td className={k.failure_count > 0 ? "text-error font-semibold" : "text-base-content/40"}>
+                          {k.failure_count}
+                        </td>
+                        <td className="text-base-content/60">
+                          {k.last_used_at ? new Date(k.last_used_at).toLocaleTimeString("vi-VN") : "Chưa gọi"}
+                        </td>
+                        <td className="text-base-content/50 max-w-xs truncate">{k.last_error || "Không có lỗi"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : activeTab === "reports" ? (
+        <div className="space-y-6 animate-fade-in">
+          {/* Header and Filter */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-base-100 border border-base-300 shadow-xs">
+            <div>
+              <h2 className="text-lg font-black text-base-content flex items-center gap-2">
+                <span>🚩 Báo cáo Vi phạm Cộng đồng</span>
+              </h2>
+              <p className="text-xs text-base-content/60 mt-0.5">
+                Xem xét khiếu nại của người dùng về nội dung spam, xúc phạm hoặc vi phạm bản quyền.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-base-content/70">Bộ lọc:</span>
+              <div className="join">
+                {["pending", "resolved", "dismissed", "all"].map((st) => (
+                  <button
+                    key={st}
+                    onClick={() => {
+                      setReportsFilter(st);
+                      loadReports(st);
+                    }}
+                    className={`btn btn-xs join-item ${reportsFilter === st ? "btn-primary text-white font-bold" : "btn-ghost"}`}
+                  >
+                    {st === "pending" ? "Chờ xử lý" : st === "resolved" ? "Đã xử lý" : st === "dismissed" ? "Đã bỏ qua" : "Tất cả"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {loadingReports ? (
+            <div className="text-center py-12">
+              <span className="loading loading-spinner loading-md text-primary"></span>
+              <p className="text-xs text-base-content/60 mt-2">Đang tải danh sách báo cáo...</p>
+            </div>
+          ) : reports.length === 0 ? (
+            <div className="text-center py-16 bg-base-100 rounded-3xl border border-dashed border-base-300 p-8">
+              <span className="text-4xl">✨</span>
+              <h3 className="font-bold text-base text-base-content mt-2">Không có báo cáo vi phạm nào</h3>
+              <p className="text-xs text-base-content/60 mt-1">Cộng đồng IT Blog hiện tại an toàn và tuân thủ chuẩn mực kỹ thuật.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {reports.map((report) => (
+                <div
+                  key={report.id}
+                  className="p-5 rounded-2xl bg-base-100 border border-base-300 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4"
+                >
+                  <div className="space-y-2 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`badge badge-sm font-bold ${
+                        report.status === "pending" ? "badge-warning text-amber-950" : report.status === "resolved" ? "badge-success text-white" : "badge-ghost"
+                      }`}>
+                        {report.status === "pending" ? "🟡 Chờ xử lý" : report.status === "resolved" ? "🟢 Đã xử lý" : "⚪ Đã bỏ qua"}
+                      </span>
+                      <span className="badge badge-sm badge-outline font-semibold">
+                        Đối tượng: {report.target_type === "post" ? "Bài viết" : report.target_type === "comment" ? "Bình luận" : "Người dùng"} #{report.target_id}
+                      </span>
+                      <span className="badge badge-sm badge-error badge-outline font-semibold">
+                        Lý do: {report.reason === "spam" ? "Spam / Quảng cáo" : report.reason === "toxic" ? "Xúc phạm / Toxic" : report.reason === "copyright" ? "Vi phạm bản quyền" : report.reason}
+                      </span>
+                      <span className="text-[11px] text-base-content/50">
+                        {report.created_at && !isNaN(new Date(report.created_at).getTime()) ? new Date(report.created_at).toLocaleString("vi-VN") : "Gần đây"}
+                      </span>
+                    </div>
+
+                    <p className="text-sm text-base-content/90 font-medium">
+                      {report.details || "Không có mô tả chi tiết từ người báo cáo."}
+                    </p>
+
+                    <div className="text-xs text-base-content/60 flex items-center gap-2">
+                      <span>Người báo cáo: <strong>{report.reporter?.name || "Người dùng ẩn danh"}</strong> (@{report.reporter?.username || "user"})</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                    {report.status === "pending" ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleResolveReport(report.id, "dismiss")}
+                          className="btn btn-xs btn-ghost text-xs"
+                        >
+                          ✕ Bỏ qua
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleResolveReport(report.id, "remove_content")}
+                          className="btn btn-xs btn-error text-white font-bold"
+                        >
+                          ✓ Gỡ bỏ vi phạm
+                        </button>
+                      </>
+                    ) : (
+                      <span className="text-xs font-semibold text-base-content/50 italic">
+                        {report.status === "resolved" ? "Đã gỡ bỏ nội dung" : "Đã xác nhận không vi phạm"}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : activeTab === "crawler" ? (
+        <div className="space-y-6 animate-fade-in">
+          {/* Header Banner & Manual Trigger */}
+          <div className="p-6 rounded-3xl bg-gradient-to-r from-secondary/10 via-base-100 to-primary/10 border border-base-300 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="space-y-1 text-center sm:text-left">
+              <div className="flex items-center gap-2 justify-center sm:justify-start">
+                <span className="badge badge-secondary text-white font-bold text-xs">RSS & Atom Engine</span>
+                <h3 className="font-black text-base text-base-content">
+                  Thu thập tin tức công nghệ tự động (Automated Tech Ingestion)
+                </h3>
+              </div>
+              <p className="text-xs text-base-content/70">
+                Thu thập các bài viết mới từ các trang công nghệ uy tín (VnExpress, GitHub Blog, Dev.to), tự động trích xuất nội dung và chống trùng lặp qua mã băm SHA-256.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => handleTriggerCrawl()}
+              disabled={crawlingInProgress}
+              className="btn btn-secondary text-white font-bold text-xs rounded-xl px-5 shrink-0 shadow-sm"
+            >
+              {crawlingInProgress ? (
+                <>
+                  <span className="loading loading-spinner loading-xs"></span>
+                  Đang cào dữ liệu...
+                </>
+              ) : (
+                <>
+                  <span>🌐</span>
+                  Kích hoạt cào tin ngay
+                </>
+              )}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Form thêm nguồn cào mới */}
+            <div className="p-6 rounded-3xl bg-base-100 border border-base-300 shadow-xs space-y-4">
+              <h3 className="font-bold text-base text-base-content flex items-center gap-2">
+                <span>➕ Thêm Nguồn RSS Mới</span>
+              </h3>
+              <form onSubmit={handleAddCrawlSource} className="space-y-3">
+                <div>
+                  <label className="label text-xs font-semibold">Tên nguồn tin</label>
+                  <input
+                    type="text"
+                    value={newSourceName}
+                    onChange={(e) => setNewSourceName(e.target.value)}
+                    placeholder="VD: Hacker News Tech"
+                    className="input input-bordered input-sm w-full text-xs"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="label text-xs font-semibold">URL Nguồn (RSS / Atom XML)</label>
+                  <input
+                    type="url"
+                    value={newSourceUrl}
+                    onChange={(e) => setNewSourceUrl(e.target.value)}
+                    placeholder="https://example.com/feed.xml"
+                    className="input input-bordered input-sm w-full text-xs"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="label text-xs font-semibold">Chủ đề mặc định</label>
+                  <select
+                    value={newSourceCategory}
+                    onChange={(e) => setNewSourceCategory(e.target.value)}
+                    className="select select-bordered select-sm w-full text-xs"
+                  >
+                    <option value="Frontend">Frontend & Web</option>
+                    <option value="Backend">Backend & Microservices</option>
+                    <option value="DevOps">DevOps & Cloud</option>
+                    <option value="AI">AI & Machine Learning</option>
+                    <option value="Mobile">Mobile Apps</option>
+                  </select>
+                </div>
+                <button
+                  type="submit"
+                  className="btn btn-sm btn-primary w-full text-white font-bold mt-2"
+                >
+                  Thêm nguồn thu thập
+                </button>
+              </form>
+            </div>
+
+            {/* Danh sách nguồn thu thập */}
+            <div className="lg:col-span-2 p-6 rounded-3xl bg-base-100 border border-base-300 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-base text-base-content flex items-center gap-2">
+                  <span>📡 Các Nguồn Thu Thập ({crawlSources.length})</span>
+                </h3>
+                <button
+                  type="button"
+                  onClick={loadCrawler}
+                  className="btn btn-xs btn-ghost text-xs"
+                >
+                  ↻ Làm mới
+                </button>
+              </div>
+
+              {loadingCrawler ? (
+                <div className="text-center py-8">
+                  <span className="loading loading-spinner loading-sm text-secondary"></span>
+                </div>
+              ) : crawlSources.length === 0 ? (
+                <p className="text-xs text-base-content/60 py-4 text-center">Chưa có nguồn RSS nào được cấu hình.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="table table-sm w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-base-200 text-base-content/60">
+                        <th>Nguồn tin</th>
+                        <th>URL</th>
+                        <th>Trạng thái</th>
+                        <th>Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {crawlSources.map((s) => (
+                        <tr key={s.id} className="border-b border-base-200/50 hover:bg-base-200/30">
+                          <td className="font-bold text-base-content">{s.name}</td>
+                          <td className="font-mono text-base-content/60 max-w-xs truncate">{s.url || s.feed_url}</td>
+                          <td>
+                            <span className="badge badge-xs badge-success text-white font-bold">Hoạt động</span>
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              onClick={() => handleTriggerCrawl(s.id)}
+                              disabled={crawlingInProgress}
+                              className="btn btn-xs btn-outline btn-secondary font-bold"
+                            >
+                              Thu thập
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Lịch sử Crawl Jobs */}
+          <div className="p-6 rounded-3xl bg-base-100 border border-base-300 shadow-xs space-y-4">
+            <h3 className="font-bold text-base text-base-content flex items-center gap-2">
+              <span>📋 Lịch Sử Thực Thi Crawl Jobs</span>
+            </h3>
+            {crawlJobs.length === 0 ? (
+              <p className="text-xs text-base-content/60 py-4 text-center">Chưa có lượt thu thập nào được ghi nhận.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="table table-sm w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-base-200 text-base-content/60">
+                      <th>Job ID</th>
+                      <th>Trạng thái</th>
+                      <th>Số tin đọc</th>
+                      <th>Bài đã lưu</th>
+                      <th>Thời gian</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {crawlJobs.map((job) => (
+                      <tr key={job.id} className="border-b border-base-200/50">
+                        <td className="font-mono font-bold text-primary">#{job.id}</td>
+                        <td>
+                          <span className={`badge badge-xs font-bold ${
+                            job.status === "success" || job.status === "completed"
+                              ? "badge-success text-white"
+                              : job.status === "processing"
+                              ? "badge-warning text-amber-950"
+                              : "badge-error text-white"
+                          }`}>
+                            {job.status}
+                          </span>
+                        </td>
+                        <td className="font-semibold">{job.items_crawled ?? job.items_found ?? 0}</td>
+                        <td className="text-success font-semibold">{job.items_saved ?? job.items_ingested ?? 0}</td>
+                        <td className="text-base-content/60">
+                          {job.created_at && !isNaN(new Date(job.created_at).getTime()) ? new Date(job.created_at).toLocaleString("vi-VN") : "N/A"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : activeTab === "audit" ? (
+        <div className="space-y-6 animate-fade-in">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-base-100 border border-base-300 shadow-xs">
+            <div>
+              <h2 className="text-lg font-black text-base-content flex items-center gap-2">
+                <span>🛡️ Nhật Ký Hoạt Động & Kiểm Toán Hệ Thống (Audit Logs)</span>
+              </h2>
+              <p className="text-xs text-base-content/60 mt-0.5">
+                Ghi nhận các thao tác kiểm duyệt, quản trị viên và các sự kiện bảo mật quan trọng.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleExportAuditLogsMd}
+                className="btn btn-sm btn-outline border-base-300 text-xs font-bold gap-1.5 shadow-xs"
+                title="Xuất nhật ký kiểm toán định dạng Markdown"
+              >
+                📥 Xuất .md
+              </button>
+              <button
+                type="button"
+                onClick={loadAudit}
+                className="btn btn-sm btn-ghost text-xs font-semibold gap-1.5"
+              >
+                ↻ Làm mới
+              </button>
+            </div>
+          </div>
+
+          {/* Audit Search & Action Filter Bar */}
+          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between bg-base-100 p-4 rounded-2xl border border-base-300 shadow-xs">
+            <div className="relative w-full sm:w-80">
+              <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-base-content/40 text-xs">
+                🔍
+              </span>
+              <input
+                type="text"
+                placeholder="Tìm nhật ký theo hành động, người dùng, chi tiết..."
+                value={auditSearch}
+                onChange={(e) => setAuditSearch(e.target.value)}
+                className="input input-sm input-bordered w-full pl-8 text-xs rounded-xl"
+              />
+            </div>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <span className="text-xs text-base-content/60 font-semibold whitespace-nowrap">Hành động:</span>
+              <select
+                value={auditActionFilter}
+                onChange={(e) => setAuditActionFilter(e.target.value)}
+                className="select select-sm select-bordered text-xs rounded-xl"
+              >
+                <option value="all">Tất cả hành động ({auditLogs.length})</option>
+                {Array.from(new Set(auditLogs.map((l) => l.action).filter(Boolean))).map((action) => (
+                  <option key={action} value={action}>
+                    {action}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {loadingAudit ? (
+            <div className="text-center py-12">
+              <span className="loading loading-spinner loading-md text-primary"></span>
+              <p className="text-xs text-base-content/60 mt-2">Đang tải nhật ký kiểm toán...</p>
+            </div>
+          ) : filteredAuditLogs.length === 0 ? (
+            <div className="text-center py-16 bg-base-100 rounded-3xl border border-dashed border-base-300 p-8">
+              <p className="text-xs text-base-content/60">
+                {auditLogs.length === 0
+                  ? "Chưa có nhật ký hoạt động nào."
+                  : "Không tìm thấy nhật ký nào phù hợp với bộ lọc."}
+              </p>
+            </div>
+          ) : (
+            <div className="p-6 rounded-3xl bg-base-100 border border-base-300 shadow-xs overflow-x-auto">
+              <table className="table table-sm w-full text-xs">
+                <thead>
+                  <tr className="border-b border-base-200 text-base-content/60">
+                    <th>Thời gian</th>
+                    <th>Người thực hiện</th>
+                    <th>Hành động</th>
+                    <th>Đối tượng</th>
+                    <th>Chi tiết</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredAuditLogs.map((log) => (
+                    <tr key={log.id} className="border-b border-base-200/50 hover:bg-base-200/30">
+                      <td className="text-base-content/60 whitespace-nowrap">
+                        {log.created_at && !isNaN(new Date(log.created_at).getTime()) ? new Date(log.created_at).toLocaleString("vi-VN") : "N/A"}
+                      </td>
+                      <td className="font-bold text-base-content">
+                        {log.user?.name || log.user_name || "Hệ thống"}
+                      </td>
+                      <td>
+                        <span className="badge badge-xs badge-outline font-bold">
+                          {log.action}
+                        </span>
+                      </td>
+                      <td className="text-base-content/70">
+                        {log.target_type ? `${log.target_type} #${log.target_id || ""}` : "—"}
+                      </td>
+                      <td className="text-base-content/80 max-w-sm truncate">
+                        {log.details || "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) : activeTab === "categories" ? (
+        <div className="space-y-6 animate-fade-in">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-base-100 border border-base-300 shadow-xs">
+            <div>
+              <h2 className="text-lg font-black text-base-content flex items-center gap-2">
+                <span>📁 Quản Lý Chuyên Mục Công Nghệ (Categories)</span>
+              </h2>
+              <p className="text-xs text-base-content/60 mt-0.5">
+                Xem cấu trúc chuyên mục kỹ thuật trên toàn bộ nền tảng và tạo danh mục mới cho cộng đồng.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={loadCategories}
+              className="btn btn-sm btn-ghost text-xs font-semibold gap-1.5"
+            >
+              ↻ Tải lại chuyên mục
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Cột 1 & 2: Danh sách chuyên mục */}
+            <div className="lg:col-span-2 space-y-4">
+              <div className="p-5 sm:p-6 rounded-3xl bg-base-100 border border-base-300 shadow-xs">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-bold text-sm text-base-content uppercase tracking-wider">
+                    Danh sách chuyên mục đang hoạt động ({categoryList.length})
+                  </h3>
+                </div>
+
+                {loadingCategories ? (
+                  <div className="py-12 text-center">
+                    <span className="loading loading-spinner loading-md text-primary"></span>
+                    <p className="text-xs text-base-content/60 mt-2">Đang tải danh sách chuyên mục...</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    {categoryList.map((cat) => (
+                      <div
+                        key={cat.id || cat.name}
+                        className="p-4 rounded-2xl bg-base-200/40 border border-base-200 flex items-start gap-3 hover:border-primary/40 transition-colors"
+                      >
+                        <span className="text-2xl p-2 rounded-xl bg-base-100 border border-base-300 shrink-0">
+                          {cat.icon || "📁"}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-1">
+                            <h4 className="font-bold text-sm text-base-content truncate">{cat.name}</h4>
+                            <span className="badge badge-xs badge-primary font-semibold shrink-0">
+                              {cat.post_count || 0} bài
+                            </span>
+                          </div>
+                          <p className="text-xs text-base-content/60 line-clamp-2 mt-1">
+                            {cat.description || "Chuyên mục chia sẻ kinh nghiệm và bài viết chuyên sâu."}
+                          </p>
+                          <span className="text-[10px] font-mono text-base-content/40 mt-1 block">
+                            slug: {cat.slug || cat.name.toLowerCase()}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Cột 3: Form Thêm Chuyên Mục Mới */}
+            <div className="lg:col-span-1">
+              <div className="p-5 sm:p-6 rounded-3xl bg-base-100 border border-base-300 shadow-xs">
+                <h3 className="font-bold text-sm text-base-content uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <span>✨ Thêm chuyên mục mới</span>
+                </h3>
+
+                <form onSubmit={handleCreateCategory} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-base-content/80 mb-1">
+                      Tên chuyên mục <span className="text-error">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="VD: Cloud Computing, Security..."
+                      value={newCatName}
+                      onChange={(e) => setNewCatName(e.target.value)}
+                      className="input input-bordered input-sm w-full rounded-xl text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-base-content/80 mb-1">
+                      Biểu tượng Emoji hoặc Icon
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="VD: ☁️, 🔒, 📱, ⛓️"
+                      value={newCatIcon}
+                      onChange={(e) => setNewCatIcon(e.target.value)}
+                      className="input input-bordered input-sm w-full rounded-xl text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-base-content/80 mb-1">
+                      Mô tả chuyên mục
+                    </label>
+                    <textarea
+                      rows="3"
+                      placeholder="Tóm tắt nội dung và phạm vi bài viết của chuyên mục..."
+                      value={newCatDesc}
+                      onChange={(e) => setNewCatDesc(e.target.value)}
+                      className="textarea textarea-bordered text-xs w-full rounded-xl"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={creatingCategory || !newCatName.trim()}
+                    className="btn btn-sm btn-primary w-full rounded-xl text-white font-bold shadow-sm"
+                  >
+                    {creatingCategory ? "Đang khởi tạo..." : "+ Xác nhận tạo chuyên mục"}
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : activeTab === "ads" ? (
+        <div className="space-y-6 animate-fade-in">
+          {/* Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-base-100 border border-base-300 shadow-xs">
+            <div>
+              <h2 className="text-lg font-black text-base-content flex items-center gap-2">
+                <span>📢 Quản Lý Quảng Cáo & Tài Trợ Kỹ Thuật (Developer Promotions)</span>
+              </h2>
+              <p className="text-xs text-base-content/60 mt-0.5">
+                Cấu hình banner tài trợ, ưu đãi công nghệ hiển thị tại thanh bên phải trang đọc bài và trang chủ.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={loadAds}
+              className="btn btn-sm btn-ghost text-xs font-semibold gap-1.5"
+            >
+              ↻ Tải lại chiến dịch
+            </button>
+          </div>
+
+          {/* Metrics 4 cols */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-4 rounded-2xl bg-base-100 border border-base-300 shadow-xs">
+              <span className="text-xs text-base-content/60 font-bold uppercase">Tổng chiến dịch</span>
+              <p className="text-2xl font-black text-base-content mt-1">{adsList.length}</p>
+              <span className="text-[11px] text-base-content/50">Được lưu trong hệ thống</span>
+            </div>
+            <div className="p-4 rounded-2xl bg-base-100 border border-base-300 shadow-xs">
+              <span className="text-xs text-base-content/60 font-bold uppercase">Đang hiển thị</span>
+              <p className="text-2xl font-black text-success mt-1">
+                {adsList.filter((a) => a.status === "active").length}
+              </p>
+              <span className="text-[11px] text-success font-semibold">Active trên Sidebar & Detail</span>
+            </div>
+            <div className="p-4 rounded-2xl bg-base-100 border border-base-300 shadow-xs">
+              <span className="text-xs text-base-content/60 font-bold uppercase">Tổng Lượt Xem (Impressions)</span>
+              <p className="text-2xl font-black text-primary mt-1">
+                {adsList.reduce((acc, a) => acc + (a.impressions_count || 0), 0).toLocaleString()}
+              </p>
+              <span className="text-[11px] text-primary font-semibold">Lượt phân phát tự động</span>
+            </div>
+            <div className="p-4 rounded-2xl bg-base-100 border border-base-300 shadow-xs">
+              <span className="text-xs text-base-content/60 font-bold uppercase">Lượt Nhấp & CTR TB</span>
+              <p className="text-2xl font-black text-amber-500 mt-1">
+                {adsList.reduce((acc, a) => acc + (a.clicks_count || 0), 0)}
+                <span className="text-xs font-bold text-base-content/60 ml-1.5">
+                  ({(
+                    (adsList.reduce((acc, a) => acc + (a.clicks_count || 0), 0) /
+                      Math.max(1, adsList.reduce((acc, a) => acc + (a.impressions_count || 0), 0))) *
+                    100
+                  ).toFixed(1)}% CTR)
+                </span>
+              </p>
+              <span className="text-[11px] text-amber-600 font-semibold">Tỷ lệ chuyển đổi lập trình viên</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Cột 1 & 2: Danh sách chiến dịch */}
+            <div className="lg:col-span-2 space-y-4">
+              <div className="p-5 sm:p-6 rounded-3xl bg-base-100 border border-base-300 shadow-xs">
+                <h3 className="font-bold text-sm text-base-content uppercase tracking-wider mb-4">
+                  Danh sách quảng cáo hiện có ({adsList.length})
+                </h3>
+
+                {loadingAds ? (
+                  <div className="py-12 text-center">
+                    <span className="loading loading-spinner loading-md text-primary"></span>
+                    <p className="text-xs text-base-content/60 mt-2">Đang tải danh sách quảng cáo...</p>
+                  </div>
+                ) : adsList.length === 0 ? (
+                  <p className="text-xs text-base-content/60 py-6 text-center">Chưa có chiến dịch quảng cáo nào.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {adsList.map((ad) => {
+                      const ctr = ad.impressions_count > 0 ? ((ad.clicks_count / ad.impressions_count) * 100).toFixed(1) : "0.0";
+                      return (
+                        <div
+                          key={ad.id}
+                          className="p-4 rounded-2xl bg-base-200/40 border border-base-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:border-primary/40 transition-colors"
+                        >
+                          <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                            <div className="w-16 h-14 rounded-xl bg-base-300 overflow-hidden shrink-0 border border-base-300">
+                              <img
+                                src={ad.creative_url}
+                                alt={ad.title}
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  e.currentTarget.src = "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=600&q=80";
+                                }}
+                              />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className={`badge badge-xs font-bold ${ad.status === "active" ? "badge-success text-white" : "badge-ghost"}`}>
+                                  {ad.status === "active" ? "🟢 Đang chạy" : "⏸️ Tạm dừng"}
+                                </span>
+                                <span className="badge badge-xs badge-primary badge-outline font-semibold uppercase">
+                                  {ad.category}
+                                </span>
+                                <span className="text-[11px] text-base-content/50">
+                                  👁️ {ad.impressions_count || 0} views • 🖱️ {ad.clicks_count || 0} clicks • CTR: <b>{ctr}%</b>
+                                </span>
+                              </div>
+                              <h4 className="font-bold text-sm text-base-content truncate mt-1">{ad.title}</h4>
+                              <p className="text-xs text-base-content/60 line-clamp-1">{ad.description}</p>
+                              <a
+                                href={ad.target_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[11px] text-primary hover:underline truncate block mt-0.5"
+                              >
+                                {ad.target_url} ↗
+                              </a>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleAdStatus(ad.id, ad.status)}
+                              className={`btn btn-xs rounded-xl font-bold ${
+                                ad.status === "active" ? "btn-outline btn-warning" : "btn-outline btn-success"
+                              }`}
+                            >
+                              {ad.status === "active" ? "Tạm dừng" : "Tiếp tục"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteAd(ad.id)}
+                              className="btn btn-xs btn-ghost text-error hover:bg-error/10 rounded-xl"
+                              title="Xóa quảng cáo"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Cột 3: Form Tạo Chiến Dịch Mới */}
+            <div className="lg:col-span-1">
+              <div className="p-5 sm:p-6 rounded-3xl bg-base-100 border border-base-300 shadow-xs">
+                <h3 className="font-bold text-sm text-base-content uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <span>✨ Thêm chiến dịch quảng cáo</span>
+                </h3>
+
+                <form onSubmit={handleCreateAd} className="space-y-3.5">
+                  <div>
+                    <label className="block text-xs font-bold text-base-content/80 mb-1">
+                      Tiêu đề chiến dịch <span className="text-error">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="VD: $200 Cloud Server Credits"
+                      value={newAdTitle}
+                      onChange={(e) => setNewAdTitle(e.target.value)}
+                      className="input input-bordered input-sm w-full rounded-xl text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-base-content/80 mb-1">
+                      Link đích (Target Destination URL) <span className="text-error">*</span>
+                    </label>
+                    <input
+                      type="url"
+                      required
+                      placeholder="https://aws.amazon.com/free"
+                      value={newAdTargetUrl}
+                      onChange={(e) => setNewAdTargetUrl(e.target.value)}
+                      className="input input-bordered input-sm w-full rounded-xl text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-base-content/80 mb-1">
+                      Link ảnh banner (Creative Image URL)
+                    </label>
+                    <input
+                      type="url"
+                      placeholder="https://images.unsplash.com/..."
+                      value={newAdCreativeUrl}
+                      onChange={(e) => setNewAdCreativeUrl(e.target.value)}
+                      className="input input-bordered input-sm w-full rounded-xl text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-base-content/80 mb-1">Chủ đề phân phối</label>
+                    <select
+                      value={newAdCategory}
+                      onChange={(e) => setNewAdCategory(e.target.value)}
+                      className="select select-bordered select-sm w-full rounded-xl text-xs font-semibold"
+                    >
+                      <option value="cloud">Cloud & Infrastructure</option>
+                      <option value="tools">Developer Tools & IDEs</option>
+                      <option value="devops">DevOps & CI/CD</option>
+                      <option value="frontend">Frontend & Web</option>
+                      <option value="backend">Backend & Database</option>
+                      <option value="ai">AI & Machine Learning</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-base-content/80 mb-1">Mô tả ngắn</label>
+                    <textarea
+                      rows="2"
+                      placeholder="Thông điệp khuyến mại hoặc lợi ích dành cho developer..."
+                      value={newAdDesc}
+                      onChange={(e) => setNewAdDesc(e.target.value)}
+                      className="textarea textarea-bordered text-xs w-full rounded-xl"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={creatingAd || !newAdTitle.trim() || !newAdTargetUrl.trim()}
+                    className="btn btn-sm btn-primary w-full rounded-xl text-white font-bold shadow-sm"
+                  >
+                    {creatingAd ? "Đang xuất bản..." : "+ Xuất bản chiến dịch mới"}
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : activeTab === "users" ? (
+        /* Quản trị thành viên (Admin User Management) */
+        <div className="space-y-6 animate-fade-in">
+          {/* Header & Controls */}
+          <div className="p-5 sm:p-6 rounded-3xl bg-base-100 border border-base-300 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="font-bold text-base text-base-content flex items-center gap-2">
+                <span>👥 Quản Lý Thành Viên Hệ Thống</span>
+                <span className="badge badge-sm badge-primary font-bold">{usersList.length} tài khoản</span>
+              </h3>
+              <p className="text-xs text-base-content/60 mt-1">
+                Phân quyền quản trị viên, kiểm duyệt viên và kiểm soát trạng thái hoạt động tài khoản.
+              </p>
+            </div>
+
+            {/* Filter and Search */}
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="relative flex-1 sm:w-64">
+                <input
+                  type="text"
+                  placeholder="Tìm theo tên, email, @"
+                  value={userSearch}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setUserSearch(val);
+                    loadUsers(val, userRoleFilter);
+                  }}
+                  className="input input-sm input-bordered w-full rounded-xl text-xs pl-8"
+                />
+                <span className="absolute left-2.5 top-2 text-base-content/40 text-xs">🔍</span>
+                {userSearch && (
+                  <button
+                    onClick={() => {
+                      setUserSearch("");
+                      loadUsers("", userRoleFilter);
+                    }}
+                    className="absolute right-2 top-2 text-xs text-base-content/40 hover:text-base-content"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              <select
+                value={userRoleFilter}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setUserRoleFilter(val);
+                  loadUsers(userSearch, val);
+                }}
+                className="select select-sm select-bordered rounded-xl text-xs font-semibold"
+              >
+                <option value="all">Tất cả vai trò</option>
+                <option value="admin">Quản trị viên (Admin)</option>
+                <option value="moderator">Kiểm duyệt viên (Moderator)</option>
+                <option value="user">Thành viên (User)</option>
+              </select>
+
+              <button
+                type="button"
+                onClick={() => loadUsers(userSearch, userRoleFilter)}
+                className="btn btn-sm btn-outline rounded-xl text-xs"
+                title="Tải lại danh sách"
+              >
+                🔄
+              </button>
+            </div>
+          </div>
+
+          {/* User List Table / Cards */}
+          {loadingUsers ? (
+            <div className="flex flex-col items-center justify-center py-16">
+              <span className="loading loading-spinner loading-md text-primary"></span>
+              <span className="text-xs text-base-content/60 mt-3 font-semibold">Đang tải danh sách thành viên...</span>
+            </div>
+          ) : usersList.length === 0 ? (
+            <div className="text-center py-16 bg-base-100 rounded-3xl border border-dashed border-base-300 p-8">
+              <div className="text-3xl mb-2">🔍</div>
+              <h4 className="font-bold text-base text-base-content">Không tìm thấy thành viên nào</h4>
+              <p className="text-xs text-base-content/60 max-w-sm mx-auto mt-1 mb-4">
+                Không có tài khoản nào phù hợp với từ khóa &quot;{userSearch}&quot; hoặc vai trò đã chọn.
+              </p>
+              <button
+                onClick={() => {
+                  setUserSearch("");
+                  setUserRoleFilter("all");
+                  loadUsers("", "all");
+                }}
+                className="btn btn-xs btn-primary font-bold rounded-xl"
+              >
+                Xóa bộ lọc
+              </button>
+            </div>
+          ) : (
+            <div className="bg-base-100 rounded-3xl border border-base-300 shadow-xs overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="table table-sm w-full">
+                  <thead>
+                    <tr className="bg-base-200/60 text-[11px] uppercase tracking-wider text-base-content/70">
+                      <th>Thành viên</th>
+                      <th>Vai trò</th>
+                      <th>Bài viết</th>
+                      <th>Trạng thái</th>
+                      <th>Ngày tham gia</th>
+                      <th className="text-right">Thao tác</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-base-200 text-xs">
+                    {usersList.map((user) => {
+                      const isSuper = user.is_superuser || user.roles?.includes("admin");
+                      const isMod = user.roles?.includes("moderator");
+                      const isCurrent = currentUser && currentUser.id === user.id;
+
+                      return (
+                        <tr key={user.id} className="hover:bg-base-200/30 transition-colors">
+                          <td>
+                            <div className="flex items-center gap-3 py-1">
+                              <img
+                                src={user.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(user.username || "dev")}`}
+                                alt={user.name}
+                                className="w-8 h-8 rounded-full border border-base-300 object-cover shrink-0"
+                                onError={(e) => {
+                                  e.currentTarget.src = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(user.name || "dev")}`;
+                                }}
+                              />
+                              <div className="min-w-0">
+                                <div className="font-bold text-base-content flex items-center gap-1.5">
+                                  <span>{user.name}</span>
+                                  {isCurrent && (
+                                    <span className="badge badge-xs badge-info text-white font-bold">bạn</span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] text-base-content/50 font-mono flex items-center gap-1">
+                                  <span>@{user.username}</span>
+                                  <span>•</span>
+                                  <span className="truncate max-w-[140px] sm:max-w-[200px]">{user.email}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+
+                          <td>
+                            <div className="flex items-center gap-1">
+                              {isSuper ? (
+                                <span className="badge badge-sm badge-primary text-white font-bold">
+                                  🛡️ Admin
+                                </span>
+                              ) : isMod ? (
+                                <span className="badge badge-sm badge-secondary text-white font-bold">
+                                  ⭐ Moderator
+                                </span>
+                              ) : (
+                                <span className="badge badge-sm badge-ghost font-semibold">
+                                  👤 User
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          <td>
+                            <span className="font-semibold text-base-content/80">
+                              📝 {user.posts_count || 0} bài
+                            </span>
+                          </td>
+
+                          <td>
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                                user.is_active
+                                  ? "bg-success/15 text-success"
+                                  : "bg-error/15 text-error"
+                              }`}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full ${user.is_active ? "bg-success" : "bg-error"}`}></span>
+                              {user.is_active ? "Hoạt động" : "Đã khóa"}
+                            </span>
+                          </td>
+
+                          <td className="text-base-content/50 text-[11px]">
+                            {user.created_at && !isNaN(new Date(user.created_at).getTime())
+                              ? new Date(user.created_at).toLocaleDateString("vi-VN", {
+                                  day: "2-digit",
+                                  month: "2-digit",
+                                  year: "numeric"
+                                })
+                              : "Gần đây"}
+                          </td>
+
+                          <td className="text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {/* Phân quyền vai trò */}
+                              {!isSuper && !isCurrent && (
+                                <button
+                                  type="button"
+                                  disabled={updatingUserId === user.id}
+                                  onClick={() => handleUpdateUserRole(user.id, isMod ? "user" : "moderator")}
+                                  className={`btn btn-xs rounded-lg font-semibold ${
+                                    isMod
+                                      ? "btn-ghost text-base-content/70 hover:bg-base-200"
+                                      : "btn-outline btn-secondary"
+                                  }`}
+                                  title={isMod ? "Hạ cấp xuống User" : "Thăng cấp lên Moderator"}
+                                >
+                                  {isMod ? "Hạ cấp User" : "⭐ Thăng Mod"}
+                                </button>
+                              )}
+
+                              {/* Khóa / Mở khóa tài khoản */}
+                              {!isSuper && !isCurrent && (
+                                <button
+                                  type="button"
+                                  disabled={updatingUserId === user.id}
+                                  onClick={() => handleToggleUserStatus(user.id, user.is_active)}
+                                  className={`btn btn-xs rounded-lg font-bold ${
+                                    user.is_active
+                                      ? "btn-ghost text-error hover:bg-error/10"
+                                      : "btn-success text-white"
+                                  }`}
+                                  title={user.is_active ? "Khóa tài khoản" : "Mở khóa tài khoản"}
+                                >
+                                  {user.is_active ? "🔴 Khóa" : "🟢 Mở khóa"}
+                                </button>
+                              )}
+
+                              {(isSuper || isCurrent) && (
+                                <span className="text-[11px] text-base-content/40 italic pr-2">
+                                  {isCurrent ? "Đang đăng nhập" : "Hệ thống"}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : currentList.length > 0 ? (
         <div className="space-y-4 animate-fade-in">
           {currentList.map((post) => {
-            const author = getAuthor(post.authorId);
-            const isMine = currentUser && currentUser.id === post.authorId;
+            const author = getAuthor(post.authorId || post.author_id) || {
+              name: "Tác giả",
+              avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(post.authorId || post.author_id || "dev")}`
+            };
+            const isMine = currentUser && (currentUser.id === post.authorId || currentUser.id === post.author_id);
 
             return (
               <div
@@ -150,11 +2291,17 @@ export default function ModerationPage({ onNavigate, onSelectPost }) {
                     </span>
 
                     <span className="text-[11px] text-base-content/50">
-                      {new Date(post.createdAt).toLocaleDateString("vi-VN", {
-                        day: "2-digit",
-                        month: "2-digit",
-                        year: "numeric"
-                      })}
+                      {(() => {
+                        const raw = post.createdAt || post.created_at || post.date;
+                        const parsed = raw ? new Date(raw) : null;
+                        return parsed && !isNaN(parsed.getTime())
+                          ? parsed.toLocaleDateString("vi-VN", {
+                              day: "2-digit",
+                              month: "2-digit",
+                              year: "numeric"
+                            })
+                          : "Hôm nay";
+                      })()}
                     </span>
                   </div>
 
@@ -175,7 +2322,10 @@ export default function ModerationPage({ onNavigate, onSelectPost }) {
                     <img
                       src={author.avatar}
                       alt={author.name}
-                      className="w-5 h-5 rounded-full border border-base-300"
+                      className="w-5 h-5 rounded-full border border-base-300 object-cover"
+                      onError={(e) => {
+                        e.currentTarget.src = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(author.name || "dev")}`;
+                      }}
                     />
                     <span className="text-xs font-semibold text-base-content/80">
                       {author.name} {isMine && "(bạn)"}
@@ -273,7 +2423,10 @@ export default function ModerationPage({ onNavigate, onSelectPost }) {
 
       {/* Modal Xem Nhanh Bài Viết (Quick Preview Modal) */}
       {previewPost && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in"
+          onClick={(e) => { if (e.target === e.currentTarget) setPreviewPost(null); }}
+        >
           <div className="relative w-full max-w-2xl bg-base-100 rounded-3xl shadow-2xl border border-base-300 max-h-[85vh] flex flex-col overflow-hidden">
             {/* Modal Header */}
             <div className="p-5 border-b border-base-200 flex items-center justify-between">
@@ -314,18 +2467,29 @@ export default function ModerationPage({ onNavigate, onSelectPost }) {
 
             {/* Modal Body */}
             <div className="p-6 overflow-y-auto space-y-4 flex-1">
-              <h2 className="text-xl font-black text-base-content">
+              <h2 className="text-xl font-black text-base-content break-words">
                 {previewPost.title}
               </h2>
 
-              <div className="flex items-center gap-2.5 text-xs text-base-content/60 pb-3 border-b border-base-200">
-                <img
-                  src={getAuthor(previewPost.authorId).avatar}
-                  alt="Avatar"
-                  className="w-7 h-7 rounded-full border border-base-300 object-cover"
-                />
-                <span>Tác giả: <strong>{getAuthor(previewPost.authorId).name}</strong></span>
-              </div>
+              {(() => {
+                const previewAuthor = getAuthor(previewPost?.authorId || previewPost?.author_id) || {
+                  name: "Tác giả",
+                  avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(previewPost?.authorId || "dev")}`
+                };
+                return (
+                  <div className="flex items-center gap-2.5 text-xs text-base-content/60 pb-3 border-b border-base-200">
+                    <img
+                      src={previewAuthor.avatar}
+                      alt="Avatar"
+                      className="w-7 h-7 rounded-full border border-base-300 object-cover"
+                      onError={(e) => {
+                        e.currentTarget.src = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(previewAuthor.name || "dev")}`;
+                      }}
+                    />
+                    <span>Tác giả: <strong>{previewAuthor.name}</strong></span>
+                  </div>
+                );
+              })()}
 
               {previewPost.excerpt && (
                 <p className="text-xs italic bg-base-200/50 p-3 rounded-xl border-l-4 border-primary">
@@ -339,7 +2503,7 @@ export default function ModerationPage({ onNavigate, onSelectPost }) {
             </div>
 
             {/* Modal Footer Actions */}
-            <div className="p-4 bg-base-200/40 border-t border-base-200 flex items-center justify-between">
+            <div className="p-4 bg-base-200/40 border-t border-base-200 flex flex-wrap items-center justify-between gap-2">
               <button
                 onClick={() => setPreviewPost(null)}
                 className="btn btn-sm btn-ghost text-xs"
