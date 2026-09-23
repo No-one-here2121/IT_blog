@@ -70,7 +70,7 @@ def calculate_read_time(content: str) -> str:
 def get_posts(
     db: Session = Depends(get_db),
     page: int = Query(1, ge=1, description="Page number"),
-    limit: int = Query(9, ge=1, le=50, description="Items per page"),
+    limit: int = Query(9, ge=1, le=500, description="Items per page"),
     category: Optional[str] = Query(None, description="Category name or slug"),
     tag: Optional[str] = Query(None, description="Tag name or slug"),
     author_id: Optional[int] = Query(None, description="Filter by author ID"),
@@ -161,6 +161,7 @@ def get_posts(
 @router.get("/{identifier}", response_model=PostResponse)
 def get_post_detail(
     identifier: str,
+    track_view: bool = Query(True, description="Ghi nhận tăng lượt xem thật cho bài viết"),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional)
 ):
@@ -200,8 +201,8 @@ def get_post_detail(
             detail="Không tìm thấy bài viết này."
         )
 
-    # Increment view count only for published posts
-    if is_published:
+    # Increment view count only for published posts when track_view is True
+    if is_published and track_view:
         post.views += 1
         db.add(post)
         db.commit()
@@ -605,7 +606,7 @@ def delete_post(
     db.query(Bookmark).filter(Bookmark.post_id == post_id).delete(synchronize_session=False)
     db.query(UserBehaviorEvent).filter(UserBehaviorEvent.post_id == post_id).delete(synchronize_session=False)
     db.query(PostRevision).filter(PostRevision.post_id == post_id).delete(synchronize_session=False)
-    db.query(Notification).filter(Notification.entity_type.in_(["post", "comment"]), Notification.entity_id == post_id).delete(synchronize_session=False)
+    db.query(Notification).filter(Notification.entity_type == "post", Notification.entity_id == post_id).delete(synchronize_session=False)
     db.query(Report).filter(
         Report.target_type == "post",
         Report.target_id == post_id
@@ -858,5 +859,4 @@ def trigger_bot_comment(
         "comment_id": comment.id,
         "content": content
     }
-
 

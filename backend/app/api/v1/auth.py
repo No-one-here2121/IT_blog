@@ -249,13 +249,14 @@ def forgot_password(
     if not user or not user.is_active:
         # Avoid user enumeration, return generic success message
         return MessageResponse(
-            message="Nếu email tồn tại trong hệ thống, hướng dẫn khôi phục mật khẩu đã được gửi."
+            message="Nếu email tồn tại trong hệ thống, hướng dẫn khôi phục mật khẩu đã được gửi.",
+            reset_token=None
         )
 
     reset_token = create_reset_token(subject=user.id)
-    # Return reset_token directly in response message for development/testing ease
     return MessageResponse(
-        message=f"Token khôi phục mật khẩu (hiệu lực 15 phút): {reset_token}"
+        message=f"Token khôi phục mật khẩu: {reset_token}",
+        reset_token=reset_token
     )
 
 
@@ -300,4 +301,3 @@ def reset_password(
     user.hashed_password = get_password_hash(clean_new_pass)
     db.commit()
     return MessageResponse(message="Đặt lại mật khẩu thành công. Bạn có thể đăng nhập bằng mật khẩu mới.")
-

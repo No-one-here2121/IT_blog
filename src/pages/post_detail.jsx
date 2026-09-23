@@ -15,7 +15,10 @@ export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
   const [commentText, setCommentText] = useState("");
   const [commentSearch, setCommentSearch] = useState("");
 
-  const post = posts.find((p) => p.id === postId);
+  const postInContext = posts.find((p) => String(p.id) === String(postId) || String(p.slug) === String(postId));
+  const [directPost, setDirectPost] = useState(null);
+  const [loadingDirectPost, setLoadingDirectPost] = useState(false);
+  const post = postInContext || directPost;
 
   const [isVerifiedState, setIsVerifiedState] = useState(Boolean(post?.isVerified || post?.is_verified));
   const [pinnedComments, setPinnedComments] = useState({});
@@ -159,47 +162,93 @@ export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
   };
 
 
-  // Tăng lượt xem, nạp dữ liệu mở rộng & ghi nhận hành vi đọc
+  // Tăng lượt xem thật, nạp dữ liệu mở rộng & ghi nhận hành vi đọc (chạy duy nhất theo postId, không lặp vô hạn)
   useEffect(() => {
     let timer = null;
-    if (postId) {
-      incrementViews(postId);
+    if (!postId) return;
 
-      api.posts.getVideos(postId)
-        .then((data) => {
-          if (Array.isArray(data) && data.length > 0) setRelatedVideos(data);
-        })
-        .catch(() => {});
+    // Ghi nhận lượt xem thật qua session và CSDL backend
+    incrementViews(postId);
 
-      api.ads.listActive()
-        .then((ads) => {
-          if (Array.isArray(ads) && ads.length > 0) setSponsoredAd(ads[0]);
-        })
-        .catch(() => {});
-
-      // Lấy bài viết liên quan
-      api.feeds.related(postId, 3)
-        .then((data) => {
-          if (Array.isArray(data) && data.length > 0) {
-            setRelatedPosts(data);
-          } else {
-            const sameCat = posts.filter((p) => p.id !== postId && p.category === post?.category).slice(0, 3);
-            setRelatedPosts(sameCat.length > 0 ? sameCat : posts.filter((p) => p.id !== postId).slice(0, 3));
+    // Nếu chưa có bài viết trong bộ nhớ (độc giả mở đường link trực tiếp /posts/:id)
+    if (!postInContext && !directPost) {
+      setTimeout(() => setLoadingDirectPost(true), 0);
+      api.posts.get(postId, { track_view: "false" })
+        .then((fetched) => {
+          if (fetched && fetched.id) {
+            setDirectPost({
+              id: String(fetched.id),
+              title: fetched.title,
+              slug: fetched.slug,
+              category: fetched.category?.name || fetched.category || "System",
+              tags: Array.isArray(fetched.tags) ? fetched.tags.map((t) => (typeof t === "object" ? t.name : t)) : [],
+              coverImage: fetched.cover_image || fetched.coverImage || "",
+              excerpt: fetched.excerpt || "",
+              content: fetched.content || "",
+              authorId: fetched.author_id || fetched.author?.id || "admin",
+              author: fetched.author ? {
+                id: String(fetched.author.id),
+                name: fetched.author.name || fetched.author.username || "Tác giả IT",
+                username: fetched.author.username,
+                avatar: fetched.author.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${fetched.author.id}`,
+                bio: fetched.author.bio || "Cộng tác viên IT Blog",
+                role: fetched.author.role || "author"
+              } : null,
+              status: fetched.status || "approved",
+              likes: Array.isArray(fetched.likes) ? fetched.likes : [],
+              bookmarks: Array.isArray(fetched.bookmarks) ? fetched.bookmarks : [],
+              comments: Array.isArray(fetched.comments) ? fetched.comments : [],
+              views: fetched.views ?? 0,
+              readTime: fetched.read_time || "5 phút đọc",
+              isVerified: Boolean(fetched.is_verified || fetched.isVerified),
+              createdAt: fetched.created_at || fetched.createdAt || new Date().toISOString()
+            });
           }
         })
-        .catch(() => {
-          const sameCat = posts.filter((p) => p.id !== postId && p.category === post?.category).slice(0, 3);
-          setRelatedPosts(sameCat.length > 0 ? sameCat : posts.filter((p) => p.id !== postId).slice(0, 3));
-        });
-
-      // Ghi nhận tín hiệu tương tác: Xem bài viết (view)
-      api.behavior.track({ event_type: "view", post_id: postId }).catch(() => {});
-
-      // Ghi nhận đọc sâu sau 30 giây (read_30s)
-      timer = setTimeout(() => {
-        api.behavior.track({ event_type: "read_30s", post_id: postId }).catch(() => {});
-      }, 30000);
+        .catch(() => {})
+        .finally(() => setLoadingDirectPost(false));
     }
+
+    api.posts.getVideos(postId)
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) setRelatedVideos(data);
+      })
+      .catch(() => {});
+
+    api.ads.listActive()
+      .then((ads) => {
+        if (Array.isArray(ads) && ads.length > 0) setSponsoredAd(ads[0]);
+      })
+      .catch(() => {});
+
+    // Lấy bài viết liên quan
+    api.feeds.related(postId, 3)
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setRelatedPosts(data);
+        } else {
+          setRelatedPosts((curr) => {
+            if (curr && curr.length > 0) return curr;
+            const sameCat = posts.filter((p) => String(p.id) !== String(postId) && p.category === post?.category).slice(0, 3);
+            return sameCat.length > 0 ? sameCat : posts.filter((p) => String(p.id) !== String(postId)).slice(0, 3);
+          });
+        }
+      })
+      .catch(() => {
+        setRelatedPosts((curr) => {
+          if (curr && curr.length > 0) return curr;
+          const sameCat = posts.filter((p) => String(p.id) !== String(postId) && p.category === post?.category).slice(0, 3);
+          return sameCat.length > 0 ? sameCat : posts.filter((p) => String(p.id) !== String(postId)).slice(0, 3);
+        });
+      });
+
+    // Ghi nhận tín hiệu tương tác: Xem bài viết (view)
+    api.behavior.track({ event_type: "view", post_id: postId }).catch(() => {});
+
+    // Ghi nhận đọc sâu sau 30 giây (read_30s)
+    timer = setTimeout(() => {
+      api.behavior.track({ event_type: "read_30s", post_id: postId }).catch(() => {});
+    }, 30000);
 
     try {
       const params = new URLSearchParams(window.location.search);
@@ -214,7 +263,16 @@ export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
     return () => {
       if (timer) clearTimeout(timer);
     };
-  }, [postId, incrementViews, post?.category, posts]);
+  }, [postId]);
+
+  if (!post && loadingDirectPost) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-24 text-center flex flex-col items-center justify-center">
+        <span className="loading loading-spinner loading-lg text-primary mb-4"></span>
+        <p className="text-sm font-medium text-base-content/70">Đang tải nội dung bài viết...</p>
+      </div>
+    );
+  }
 
   if (!post) {
     return (
@@ -228,9 +286,9 @@ export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
     );
   }
 
-  const author = getAuthor(post.authorId || post.author_id) || {
+  const author = post?.author || getAuthor(post.authorId || post.author_id) || {
     id: post.authorId || post.author_id || "anonymous",
-    name: "Tác giả",
+    name: "Tác giả IT",
     avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(post.authorId || post.author_id || "dev")}`,
     bio: "Tác giả chia sẻ bài viết kỹ thuật trên IT Blog",
     followers: []
@@ -238,7 +296,23 @@ export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
   const isLiked = currentUser && Array.isArray(post.likes) && post.likes.includes(currentUser.id);
   const isBookmarked = currentUser && Array.isArray(post.bookmarks) && post.bookmarks.includes(currentUser.id);
   const isFollowingAuthor = currentUser?.following && Array.isArray(currentUser.following) && currentUser.following.includes(author?.id);
-  const canModifyPost = currentUser && (currentUser.id === post.authorId || currentUser.id === post.author_id);
+    const isAdmin = Boolean(
+    currentUser && (
+      currentUser.role === "admin" ||
+      currentUser.role === "moderator" ||
+      currentUser.is_superuser ||
+      (Array.isArray(currentUser.roles) && (
+        currentUser.roles.includes("admin") ||
+        currentUser.roles.includes("moderator") ||
+        currentUser.roles.some((r) =>
+          typeof r === "string" ? r === "admin" || r === "moderator" : r?.name === "admin" || r?.name === "moderator"
+        )
+      )) ||
+      currentUser.email === "admin@itblog.dev" ||
+      currentUser.username === "admin"
+    )
+  );
+  const canModifyPost = Boolean(currentUser && (currentUser.id === post.authorId || currentUser.id === post.author_id || isAdmin));
 
   // Xử lý Thích bài viết
   const handleLike = () => {
@@ -281,6 +355,10 @@ export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
 
   // Xuất Toàn Bộ Luồng Thảo Luận & Phản Hồi Bài Viết ra Markdown (.md)
   const handleExportDiscussionMd = () => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất thảo luận Markdown (.md)!", "error");
+      return;
+    }
     try {
       const allComments = post.comments || [];
       if (allComments.length === 0) {
@@ -389,6 +467,10 @@ export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
 
   // Tải bài viết định dạng Markdown (.md)
   const handleDownloadMarkdown = () => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền tải bài viết định dạng Markdown (.md)!", "error");
+      return;
+    }
     try {
       const header = `---
 title: "${(post.title || '').replace(/"/g, '\\"')}"
@@ -602,7 +684,7 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
   );
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 relative">
+    <div className="w-full max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-8 relative">
       {/* Thanh tiến độ đọc bài viết cố định trên cùng */}
       <div className="fixed top-0 left-0 w-full h-1 bg-transparent z-50 pointer-events-none print:hidden">
         <div
@@ -799,7 +881,7 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
       )}
 
       {/* Bố cục 2 cột: Cột trái nội dung & thảo luận, Cột phải Mục lục & Quiz */}
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-start">
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
         {/* Cột trái: Bài viết & Thảo luận */}
         <div className="min-w-0 order-1 lg:order-1">
           {/* Bài viết chính */}
@@ -968,13 +1050,15 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
               🕒 Lịch sử sửa
             </button>
 
-            <button
-              onClick={handleDownloadMarkdown}
-              className="btn btn-sm btn-outline btn-ghost text-xs gap-1 font-medium hover:text-primary"
-              title="Tải bài viết dưới định dạng Markdown (.md)"
-            >
-              📥 Tải .md
-            </button>
+            {isAdmin && (
+              <button
+                onClick={handleDownloadMarkdown}
+                className="btn btn-sm btn-outline btn-ghost text-xs gap-1 font-medium hover:text-primary"
+                title="Tải bài viết dưới định dạng Markdown (.md)"
+              >
+                📥 Tải .md
+              </button>
+            )}
 
             <button
               type="button"
@@ -1475,7 +1559,7 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
             </div>
 
             {/* Nút xuất thảo luận ra Markdown */}
-            {post.comments && post.comments.length > 0 && (
+            {isAdmin && post.comments && post.comments.length > 0 && (
               <button
                 type="button"
                 onClick={handleExportDiscussionMd}
@@ -1528,7 +1612,7 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
                 return new Date(b.createdAt || b.created_at || 0) - new Date(a.createdAt || a.created_at || 0);
               })
               .map((comment) => {
-                const canDeleteComment = currentUser && currentUser.id === comment.userId;
+                const canDeleteComment = Boolean(currentUser && (currentUser.id === comment.userId || isAdmin));
                 const canManageComment =
                   currentUser && (currentUser.id === post.authorId || currentUser.role === "admin");
 
@@ -1707,7 +1791,7 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
                     {replies.length > 0 && (
                       <div className="pl-3 sm:pl-8 border-l-2 border-primary/20 space-y-2.5 mt-2 pt-2">
                         {replies.map((reply) => {
-                          const canDeleteReply = currentUser && currentUser.id === reply.userId;
+                          const canDeleteReply = Boolean(currentUser && (currentUser.id === reply.userId || isAdmin));
                           const replyLike = commentLikes[reply.id] || {
                             count: reply.likes_count ?? (Array.isArray(reply.likes) ? reply.likes.length : 0),
                             isLiked: Boolean(reply.is_liked)

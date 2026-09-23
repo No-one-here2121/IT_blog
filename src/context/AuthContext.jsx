@@ -175,17 +175,48 @@ export function AuthProvider({ children }) {
   /**
    * Đăng nhập nhanh 1-chạm tài khoản Demo dùng thử
    */
-  const loginDemo = () => {
-    let targetUser = users.find((u) => u.id === "demo_user");
+  const loginDemo = async (role = "admin") => {
+    let email = "admin@itblog.dev";
+    let password = "AdminPassword123!";
+    let roleLabel = "Quản trị viên (Admin) 👑";
+    let fallbackId = "demo_admin";
 
+    if (role === "moderator") {
+      email = "mod@itblog.dev";
+      password = "ModPassword123!";
+      roleLabel = "Kiểm duyệt viên (Moderator) 🛡️";
+      fallbackId = "demo_moderator";
+    } else if (role === "user") {
+      email = "hoang.dev@itblog.vn";
+      password = "DevPassword123!";
+      roleLabel = "Thành viên Kỹ sư (User) 👤";
+      fallbackId = "demo_user";
+    }
+
+    try {
+      const data = await api.auth.login(email, password);
+      if (data?.user) {
+        setCurrentUser(data.user);
+        setAuthModalOpen(false);
+        addToast(`Đã đăng nhập thành công vai trò: ${roleLabel}`, "success");
+        setTimeout(() => {
+          executePendingAction();
+        }, 100);
+        return true;
+      }
+    } catch {
+      // Backend failed or offline -> fallback to local demo user
+    }
+
+    let targetUser = SEED_USERS.find((u) => u.id === fallbackId || u.role === role);
     if (!targetUser) {
-      targetUser = SEED_USERS.find((u) => u.id === "demo_user") || SEED_USERS[0];
+      targetUser = SEED_USERS[0];
     }
 
     if (targetUser) {
       setCurrentUser(targetUser);
       setAuthModalOpen(false);
-      addToast(`Đã đăng nhập tài khoản trải nghiệm: ${targetUser.name}`, "success");
+      addToast(`Đã đăng nhập tài khoản trải nghiệm: ${targetUser.name} (${roleLabel})`, "success");
 
       setTimeout(() => {
         executePendingAction();
@@ -338,12 +369,48 @@ export function AuthProvider({ children }) {
     return true;
   };
 
+  const isAdmin = Boolean(
+    currentUser && (
+      currentUser.role === "admin" ||
+      currentUser.is_superuser ||
+      currentUser.id === "demo_admin" ||
+      String(currentUser.id) === "1" ||
+      currentUser.email === "admin@itblog.dev" ||
+      currentUser.username === "admin" ||
+      (Array.isArray(currentUser.roles) && (
+        currentUser.roles.includes("admin") ||
+        currentUser.roles.some((r) =>
+          typeof r === "string" ? r === "admin" : r?.name === "admin"
+        )
+      ))
+    )
+  );
+
+  const isModerator = Boolean(
+    currentUser && (
+      isAdmin ||
+      currentUser.role === "moderator" ||
+      currentUser.id === "demo_moderator" ||
+      String(currentUser.id) === "11" ||
+      currentUser.email === "mod@itblog.dev" ||
+      currentUser.username === "mod_dev" ||
+      (Array.isArray(currentUser.roles) && (
+        currentUser.roles.includes("moderator") ||
+        currentUser.roles.some((r) =>
+          typeof r === "string" ? r === "moderator" : r?.name === "moderator"
+        )
+      ))
+    )
+  );
+
   return (
     <AuthContext.Provider
       value={{
         users,
         currentUser,
         isAuthenticated: !!currentUser,
+        isAdmin,
+        isModerator,
         authModalOpen,
         modalMessage,
         pendingAction,

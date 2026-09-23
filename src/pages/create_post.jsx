@@ -156,7 +156,7 @@ jobs:
 ];
 
 export default function CreatePostPage({ editPostData, onNavigate, onPostCreated }) {
-  const { currentUser } = useAuth();
+  const { currentUser, loginDemo, requireAuth, isAdmin } = useAuth();
   const { createPost, updatePost } = useBlog();
 
   const isEditing = !!editPostData;
@@ -390,6 +390,10 @@ export default function CreatePostPage({ editPostData, onNavigate, onPostCreated
 
   // Xuất bản nháp ra tệp Markdown (.md) kèm Frontmatter
   const handleExportMarkdownDraft = () => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất bản nháp Markdown (.md)!", "error");
+      return;
+    }
     if (!title.trim() && !content.trim()) {
       addToast("Chưa có nội dung bài viết để xuất file Markdown! ℹ️", "info");
       return;
@@ -455,28 +459,39 @@ ${content}
     }
   };
 
+
+
   if (!currentUser) {
     return (
-      <div className="max-w-md mx-auto my-16 p-8 bg-base-100 rounded-3xl border border-base-300 shadow-lg text-center space-y-4">
+      <div className="max-w-md mx-auto my-16 p-8 bg-base-100 rounded-3xl border border-base-300 shadow-xl text-center space-y-4 animate-fade-in">
         <div className="w-16 h-16 mx-auto rounded-full bg-primary/10 text-primary flex items-center justify-center text-3xl">
-          ✍️
+          🔒
         </div>
-        <h2 className="text-2xl font-black text-base-content">Đăng nhập để tạo bài viết</h2>
+        <h2 className="text-2xl font-black text-base-content">Yêu cầu đăng nhập</h2>
         <p className="text-sm text-base-content/70">
-          Bạn cần có tài khoản để đăng tải bài viết chia sẻ kiến thức trên IT Blog.
+          Bạn cần đăng nhập tài khoản để có thể tạo và xuất bản bài viết trên IT Blog.
         </p>
         <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
           <button
-            onClick={() => onNavigate("login")}
-            className="btn btn-primary btn-sm rounded-full text-white font-bold"
+            type="button"
+            onClick={() => loginDemo()}
+            className="btn btn-primary btn-sm rounded-xl text-white font-bold gap-1 shadow-xs"
           >
-            Đăng nhập ngay
+            <span>⚡</span> Đăng nhập Demo (1 chạm)
           </button>
           <button
-            onClick={() => onNavigate("home")}
-            className="btn btn-ghost btn-sm rounded-full"
+            type="button"
+            onClick={() => requireAuth(() => {}, "Vui lòng đăng nhập để viết bài mới!")}
+            className="btn btn-outline border-base-300 btn-sm rounded-xl font-semibold"
           >
-            Quay lại trang chủ
+            Đăng nhập / Đăng ký
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate("home")}
+            className="btn btn-ghost btn-sm rounded-xl"
+          >
+            Về trang chủ
           </button>
         </div>
       </div>
@@ -485,6 +500,14 @@ ${content}
 
   const handleSubmit = (submitStatus = "approved") => {
     if (!title.trim() || !content.trim()) return;
+
+    if (!currentUser) {
+      requireAuth(
+        () => handleSubmit(submitStatus),
+        "Vui lòng đăng nhập tài khoản để xuất bản bài viết của bạn!"
+      );
+      return;
+    }
 
     // Chuẩn hóa tags
     const tags = tagsString
@@ -640,7 +663,8 @@ ${content}
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
+        <div className="w-full max-w-[1560px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-8">
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-3 flex-wrap">
@@ -687,15 +711,17 @@ ${content}
             <span>📂</span>
             <span className="hidden sm:inline">Nhập .md</span>
           </button>
-          <button
-            type="button"
-            onClick={handleExportMarkdownDraft}
-            className="btn btn-sm btn-outline btn-ghost font-semibold gap-1.5 rounded-xl text-xs hover:text-primary hover:border-primary"
-            title="Tải bài viết về máy định dạng Markdown (.md) tương thích Obsidian / VS Code"
-          >
-            <span>📥</span>
-            <span className="hidden sm:inline">Xuất .md</span>
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={handleExportMarkdownDraft}
+              className="btn btn-sm btn-outline btn-ghost font-semibold gap-1.5 rounded-xl text-xs hover:text-primary hover:border-primary"
+              title="Tải bài viết về máy định dạng Markdown (.md) tương thích Obsidian / VS Code"
+            >
+              <span>📥</span>
+              <span className="hidden sm:inline">Xuất .md</span>
+            </button>
+          )}
 
           {!isEditing && (
             <button
@@ -1133,15 +1159,15 @@ ${content}
 
           <div className="flex items-center gap-3 py-3 border-y border-base-200 text-xs text-base-content/60">
             <img
-              src={currentUser?.avatar}
-              alt={currentUser?.name}
+              src={currentUser?.avatar || "https://api.dicebear.com/7.x/bottts/svg?seed=guest"}
+              alt={currentUser?.name || "Tác giả khách"}
               className="w-8 h-8 rounded-full border border-base-300 object-cover"
               onError={(e) => {
                 e.currentTarget.src = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(currentUser?.name || "dev")}`;
               }}
             />
             <div>
-              <span className="font-bold text-base-content">{currentUser?.name}</span>
+              <span className="font-bold text-base-content">{currentUser?.name || "Tác giả (Khách)"}</span>
               <p className="text-[11px]">Vừa xong • 4 phút đọc</p>
             </div>
           </div>

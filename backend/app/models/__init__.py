@@ -6,7 +6,7 @@ from app.models.post import Post, PostTag, PostStatus
 from app.models.interaction import PostLike, Bookmark, Follow
 from app.models.comment import Comment, CommentLike
 from app.models.notification import Notification, NotificationType
-from app.models.moderation import Report, ReportStatus, AuditLog
+from app.models.moderation import Report, ReportStatus, BugReport, BugReportStatus, AuditLog
 from app.models.roadmap import Roadmap, RoadmapStep, UserRoadmapProgress
 from app.models.gamification import Badge, UserBadge, ReputationLog
 from app.models.company_job import Company, JobPost
@@ -37,6 +37,8 @@ __all__ = [
     "NotificationType",
     "Report",
     "ReportStatus",
+    "BugReport",
+    "BugReportStatus",
     "AuditLog",
     "Roadmap",
     "RoadmapStep",

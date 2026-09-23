@@ -55,8 +55,8 @@ const INITIAL_ROADMAPS = [
   }
 ];
 
-export default function RoadmapsPage({ onNavigate }) {
-  const { requireAuth } = useAuth();
+export default function RoadmapsPage({ onNavigate, params }) {
+  const { currentUser, requireAuth, loginDemo, isAdmin } = useAuth();
   const { addToast } = useToast();
   const [levelFilter, setLevelFilter] = useState("all");
   const [roadmapSearch, setRoadmapSearch] = useState("");
@@ -93,6 +93,10 @@ export default function RoadmapsPage({ onNavigate }) {
   const handleCreateRoadmap = async (e) => {
     e.preventDefault();
     if (!newTitle.trim() || !newDesc.trim()) return;
+    if (!currentUser) {
+      requireAuth(() => handleCreateRoadmap(e), "Vui lòng đăng nhập để lưu lộ trình mới!");
+      return;
+    }
 
     const validSteps = newSteps
       .filter((s) => s.title.trim().length > 0)
@@ -275,6 +279,10 @@ export default function RoadmapsPage({ onNavigate }) {
   };
 
   const handleExportRoadmapMarkdown = (rm) => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất dữ liệu Markdown (.md)!", "error");
+      return;
+    }
     if (!rm) return;
     const levelLabel = rm.level === "basic" ? "Cơ bản" : rm.level === "intermediate" ? "Trung cấp" : "Nâng cao";
     const lines = [
@@ -310,6 +318,10 @@ export default function RoadmapsPage({ onNavigate }) {
   };
 
   const handleExportRoadmapsCatalogMd = () => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất dữ liệu Markdown (.md)!", "error");
+      return;
+    }
     const list = filteredRoadmaps.length > 0 ? filteredRoadmaps : roadmaps;
     const levelName =
       levelFilter === "basic"
@@ -364,7 +376,7 @@ export default function RoadmapsPage({ onNavigate }) {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+    <div className="w-full max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-8">
       {/* Header */}
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-3">
@@ -384,23 +396,25 @@ export default function RoadmapsPage({ onNavigate }) {
             <h1 className="text-3xl sm:text-4xl font-black text-base-content tracking-tight">
               Lộ Trình Kiến Thức CNTT Chuẩn Hóa
             </h1>
-            <p className="text-base-content/70 mt-2 text-sm sm:text-base max-w-2xl">
+            <p className="text-base-content/70 mt-2 text-sm sm:text-base max-w-4xl">
               Chuỗi bài học và kỹ năng phân cấp theo từng cấp độ, giúp bạn định hướng rõ ràng và theo dõi từng bước hoàn thành lộ trình trở thành kỹ sư phần mềm chuyên nghiệp.
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={handleExportRoadmapsCatalogMd}
+                className="btn btn-sm btn-outline btn-ghost hover:text-primary rounded-xl font-bold gap-1 border border-base-300"
+                title="Xuất toàn bộ danh mục lộ trình hiện tại ra Markdown (.md)"
+              >
+                <span>📥</span>
+                <span>Xuất danh mục (.md)</span>
+              </button>
+            )}
             <button
-              type="button"
-              onClick={handleExportRoadmapsCatalogMd}
-              className="btn btn-sm btn-outline btn-ghost hover:text-primary rounded-xl font-bold gap-1 border border-base-300"
-              title="Xuất toàn bộ danh mục lộ trình hiện tại ra Markdown (.md)"
-            >
-              <span>📥</span>
-              <span>Xuất danh mục (.md)</span>
-            </button>
-            <button
-              onClick={() => requireAuth(() => setShowCreateModal(true), "Vui lòng đăng nhập để tạo lộ trình mới!")}
-              className="btn btn-primary btn-sm text-white font-bold gap-1.5 shadow-sm rounded-xl"
+              onClick={() => requireAuth(() => setShowCreateModal(true), "Vui lòng đăng nhập để tạo lộ trình học tập mới!")}
+              className="btn btn-primary btn-sm text-white font-bold gap-1.5 shadow-sm rounded-xl cursor-pointer"
             >
               <span>+</span>
               <span>Tạo lộ trình mới</span>
@@ -473,7 +487,7 @@ export default function RoadmapsPage({ onNavigate }) {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
           {filteredRoadmaps.map((rm) => (
             <div
               key={rm.id}
@@ -531,14 +545,16 @@ export default function RoadmapsPage({ onNavigate }) {
                     🔄
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => handleExportRoadmapMarkdown(rm)}
-                  className="btn btn-ghost btn-sm rounded-xl text-base-content/70 hover:text-primary text-xs font-semibold px-2.5"
-                  title="Xuất lộ trình dạng Markdown (.md)"
-                >
-                  📥
-                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => handleExportRoadmapMarkdown(rm)}
+                    className="btn btn-ghost btn-sm rounded-xl text-base-content/70 hover:text-primary text-xs font-semibold px-2.5"
+                    title="Xuất lộ trình dạng Markdown (.md)"
+                  >
+                    📥
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     setSelectedRoadmap(rm);
@@ -710,15 +726,17 @@ export default function RoadmapsPage({ onNavigate }) {
                     <span>Đặt lại tiến độ (0%)</span>
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => handleExportRoadmapMarkdown(selectedRoadmap)}
-                  className="btn btn-ghost btn-sm text-primary hover:bg-primary/10 font-bold rounded-xl gap-1.5 border border-primary/20"
-                  title="Tải lộ trình và checklist dạng Markdown (.md) cho Obsidian/Notion"
-                >
-                  <span>📥</span>
-                  <span>Xuất Markdown (.md)</span>
-                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => handleExportRoadmapMarkdown(selectedRoadmap)}
+                    className="btn btn-ghost btn-sm text-primary hover:bg-primary/10 font-bold rounded-xl gap-1.5 border border-primary/20"
+                    title="Tải lộ trình và checklist dạng Markdown (.md) cho Obsidian/Notion"
+                  >
+                    <span>📥</span>
+                    <span>Xuất Markdown (.md)</span>
+                  </button>
+                )}
               </div>
               <button onClick={() => setSelectedRoadmap(null)} className="btn btn-primary text-white rounded-xl font-bold px-6">
                 Đóng
@@ -755,6 +773,21 @@ export default function RoadmapsPage({ onNavigate }) {
               </button>
             </div>
 
+                        {/* Guest Banner */}
+            {!currentUser && (
+              <div className="mx-5 mt-4 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                <span className="text-amber-950 dark:text-amber-200">
+                  💡 Bạn cần đăng nhập để lưu lộ trình học tập với tư cách tác giả.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => loginDemo()}
+                  className="btn btn-xs btn-primary text-white font-bold shrink-0"
+                >
+                  ⚡ Đăng nhập Demo 1 chạm
+                </button>
+              </div>
+            )}
             {/* Modal Form */}
             <form onSubmit={handleCreateRoadmap} className="p-5 overflow-y-auto flex-1 space-y-4">
               <div>

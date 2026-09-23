@@ -44,8 +44,8 @@ const INITIAL_JOBS = [
 
 const POPULAR_SKILL_TAGS = ["Tất cả", "Python", "FastAPI", "React", "TypeScript", "Docker", "Kubernetes", "Node.js", "AWS"];
 
-export default function JobsPage({ onNavigate }) {
-  const { requireAuth, currentUser } = useAuth();
+export default function JobsPage({ onNavigate, params }) {
+  const { requireAuth, currentUser, loginDemo, isAdmin } = useAuth();
   const { addToast } = useToast();
   const [jobs, setJobs] = useState(INITIAL_JOBS);
   const [searchTerm, setSearchTerm] = useState("");
@@ -89,6 +89,10 @@ export default function JobsPage({ onNavigate }) {
   };
 
   const handleExportJobMd = (job) => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất dữ liệu Markdown (.md)!", "error");
+      return;
+    }
     if (!job) return;
     let content = `# 💼 ${job.title}\n\n`;
     content += `> **Công ty:** ${job.company_name}\n`;
@@ -124,6 +128,10 @@ export default function JobsPage({ onNavigate }) {
   };
 
   const handleExportSavedJobsMd = () => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất dữ liệu Markdown (.md)!", "error");
+      return;
+    }
     const savedJobsList = jobs.filter((j) => savedJobIds.includes(j.id));
     if (savedJobsList.length === 0) {
       addToast("Chưa có tin tuyển dụng nào trong danh sách đã lưu để xuất! ℹ️", "info");
@@ -165,6 +173,10 @@ ${rows}
   };
 
   const handleExportAllJobsMd = () => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất dữ liệu Markdown (.md)!", "error");
+      return;
+    }
     if (filteredJobs.length === 0) {
       addToast("Không có tin tuyển dụng nào phù hợp với bộ lọc hiện tại để xuất! ℹ️", "info");
       return;
@@ -216,6 +228,12 @@ ${rows}
 
   // Post a Job Modal States
   const [showCreateJobModal, setShowCreateJobModal] = useState(false);
+
+  useEffect(() => {
+    if (params?.action === "create") {
+      setShowCreateJobModal(true);
+    }
+  }, [params]);
   const [jobTitle, setJobTitle] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [jobLocation, setJobLocation] = useState("Hà Nội / Hybrid");
@@ -398,7 +416,7 @@ ${rows}
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+    <div className="w-full max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-8">
       {/* Header */}
       <div className="mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
@@ -417,17 +435,15 @@ ${rows}
           <h1 className="text-3xl sm:text-4xl font-black text-base-content tracking-tight">
             Việc Làm IT & Tuyển Dụng Developer
           </h1>
-          <p className="text-base-content/70 mt-2 text-sm sm:text-base max-w-2xl">
+          <p className="text-base-content/70 mt-2 text-sm sm:text-base max-w-4xl">
             Kết nối trực tiếp với các doanh nghiệp công nghệ hàng đầu. Tìm kiếm cơ hội việc làm lập trình viên với đãi ngộ hấp dẫn và môi trường chuyên nghiệp.
           </p>
         </div>
 
         <button
           type="button"
-          onClick={() => {
-            requireAuth(() => setShowCreateJobModal(true), "Vui lòng đăng nhập để đăng tin tuyển dụng!");
-          }}
-          className="btn btn-sm btn-primary text-white font-bold rounded-xl gap-1.5 shadow-sm shrink-0"
+          onClick={() => requireAuth(() => setShowCreateJobModal(true), "Vui lòng đăng nhập để đăng tin tuyển dụng!")}
+          className="btn btn-sm btn-primary text-white font-bold rounded-xl gap-1.5 shadow-sm shrink-0 cursor-pointer"
         >
           <span>+</span> Đăng tin tuyển dụng
         </button>
@@ -492,7 +508,7 @@ ${rows}
             <span>Đã lưu ({savedJobIds.length})</span>
           </button>
 
-          {savedJobIds.length > 0 && (
+          {isAdmin && savedJobIds.length > 0 && (
             <button
               type="button"
               onClick={handleExportSavedJobsMd}
@@ -504,15 +520,17 @@ ${rows}
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={handleExportAllJobsMd}
-            className="btn btn-sm btn-outline border-base-300 rounded-xl font-bold gap-1 text-xs hover:border-primary hover:text-primary transition-all w-full sm:w-auto shrink-0 shadow-2xs"
-            title="Xuất bảng danh sách tất cả các cơ hội việc làm đang lọc ra tệp Markdown (.md)"
-          >
-            <span>📥</span>
-            <span>Xuất danh sách (.md)</span>
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={handleExportAllJobsMd}
+              className="btn btn-sm btn-outline border-base-300 rounded-xl font-bold gap-1 text-xs hover:border-primary hover:text-primary transition-all w-full sm:w-auto shrink-0 shadow-2xs"
+              title="Xuất bảng danh sách tất cả các cơ hội việc làm đang lọc ra tệp Markdown (.md)"
+            >
+              <span>📥</span>
+              <span>Xuất danh sách (.md)</span>
+            </button>
+          )}
         </div>
 
         {/* Popular Tech Stack Chips */}
@@ -652,14 +670,16 @@ ${rows}
                   >
                     Chi tiết
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => handleExportJobMd(job)}
-                    className="btn btn-ghost btn-sm px-2.5 rounded-xl text-primary hover:bg-primary/10"
-                    title="Tải bản mô tả công việc JD (.md)"
-                  >
-                    📥
-                  </button>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => handleExportJobMd(job)}
+                      className="btn btn-ghost btn-sm px-2.5 rounded-xl text-primary hover:bg-primary/10"
+                      title="Tải bản mô tả công việc JD (.md)"
+                    >
+                      📥
+                    </button>
+                  )}
                 </div>
                 <button
                   onClick={() => handleOpenApplyModal(job)}
@@ -738,15 +758,17 @@ ${rows}
                 >
                   <span>{savedJobIds.includes(selectedJob.id) ? "🔖 Đã lưu tin" : "🏷️ Lưu tin này"}</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => handleExportJobMd(selectedJob)}
-                  className="btn btn-ghost btn-sm rounded-xl font-bold text-primary hover:bg-primary/10 gap-1"
-                  title="Tải bản mô tả JD (.md) về máy để chuẩn bị phỏng vấn"
-                >
-                  <span>📥</span>
-                  <span>Tải JD (.md)</span>
-                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => handleExportJobMd(selectedJob)}
+                    className="btn btn-ghost btn-sm rounded-xl font-bold text-primary hover:bg-primary/10 gap-1"
+                    title="Tải bản mô tả JD (.md) về máy để chuẩn bị phỏng vấn"
+                  >
+                    <span>📥</span>
+                    <span>Tải JD (.md)</span>
+                  </button>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={() => setSelectedJob(null)} className="btn btn-ghost rounded-xl font-bold">
@@ -908,6 +930,21 @@ ${rows}
               </button>
             </div>
 
+                        {/* Guest Banner */}
+            {!currentUser && (
+              <div className="my-3 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                <span className="text-amber-950 dark:text-amber-200">
+                  💡 Bạn cần đăng nhập để quản lý và gắn quyền tác giả cho tin tuyển dụng.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => loginDemo()}
+                  className="btn btn-xs btn-primary text-white font-bold shrink-0"
+                >
+                  ⚡ Đăng nhập Demo 1 chạm
+                </button>
+              </div>
+            )}
             <form onSubmit={handleCreateJob} className="space-y-4 my-4 max-h-[70vh] overflow-y-auto pr-1">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>

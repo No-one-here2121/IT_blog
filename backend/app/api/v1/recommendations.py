@@ -1,5 +1,6 @@
 from typing import List, Optional
 from datetime import datetime, timezone
+import math
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, or_
@@ -9,6 +10,7 @@ from app.models.post import Post, PostStatus, PostTag
 from app.models.category import Category
 from app.models.tag import Tag
 from app.models.behavior import UserBehaviorEvent
+from app.models.interaction import PostLike, Bookmark
 from app.schemas.behavior import (
     BehaviorEventCreate,
     BehaviorEventResponse,
@@ -19,6 +21,14 @@ from app.schemas.post import PostListItem
 from app.api.deps import get_current_user_optional
 
 router = APIRouter(tags=["Recommendation & Behavior"])
+
+
+def to_aware_utc(dt: Optional[datetime]) -> datetime:
+    if dt is None:
+        return datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 @router.post("/behavior/events", response_model=BehaviorEventResponse, status_code=status.HTTP_201_CREATED)
@@ -64,7 +74,7 @@ def get_recommended_feed(
     current_user: Optional[User] = Depends(get_current_user_optional)
 ):
     """
-    Personalized 'For You' feed using interaction signals from user_behavior_events.
+    Personalized 'For You' feed combining interaction signals, category weights, and recency.
     """
     now = datetime.now(timezone.utc)
     if current_user:
@@ -185,3 +195,50 @@ def get_recommended_topics(
             interest_score=round(min(1.0, 0.4 + (p_count * 0.05)), 2)
         ))
     return results
+
+@router.get("/recommendations/related/{post_id}", response_model=List[PostListItem])
+def get_related_recommendations(
+    post_id: int,
+    limit: int = Query(4, ge=1, le=10),
+    db: Session = Depends(get_db)
+):
+    """
+    Recommend related technical posts based on category and popularity.
+    """
+    post = db.query(Post).filter(Post.id == post_id).first()
+    if not post:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy bài viết."
+        )
+
+    now = datetime.now(timezone.utc)
+    related = (
+        db.query(Post)
+        .filter(
+            Post.id != post_id,
+            Post.status == PostStatus.APPROVED.value,
+            Post.category_id == post.category_id,
+            or_(Post.scheduled_at == None, Post.scheduled_at <= now)
+        )
+        .order_by(Post.views.desc(), Post.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    if len(related) < limit:
+        excluded_ids = [p.id for p in related] + [post_id]
+        more = (
+            db.query(Post)
+            .filter(
+                Post.id.notin_(excluded_ids),
+                Post.status == PostStatus.APPROVED.value,
+                or_(Post.scheduled_at == None, Post.scheduled_at <= now)
+            )
+            .order_by(Post.views.desc(), Post.created_at.desc())
+            .limit(limit - len(related))
+            .all()
+        )
+        related.extend(more)
+
+    return [PostListItem.model_validate(p) for p in related]

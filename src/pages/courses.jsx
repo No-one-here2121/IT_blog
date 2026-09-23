@@ -61,8 +61,8 @@ const INITIAL_COURSES = [
   }
 ];
 
-export default function CoursesPage({ onNavigate }) {
-  const { currentUser, requireAuth } = useAuth();
+export default function CoursesPage({ onNavigate, params }) {
+  const { currentUser, requireAuth, loginDemo, isAdmin } = useAuth();
   const { addToast } = useToast();
   const [courses, setCourses] = useState(INITIAL_COURSES);
   const [selectedCourse, setSelectedCourse] = useState(null);
@@ -76,6 +76,10 @@ export default function CoursesPage({ onNavigate }) {
   const [lessonStatusFilter, setLessonStatusFilter] = useState("all");
 
   const handleExportCourseSyllabusMd = (course) => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất đề cương (.md)!", "error");
+      return;
+    }
     if (!course) return;
     const lessons = course.lessons || [];
     const completedCount = lessons.filter((l) => l.is_completed).length;
@@ -182,6 +186,12 @@ export default function CoursesPage({ onNavigate }) {
 
   // Create Course Modal State
   const [showCreateCourseModal, setShowCreateCourseModal] = useState(false);
+
+  useEffect(() => {
+    if (params?.action === "create") {
+      setShowCreateCourseModal(true);
+    }
+  }, [params]);
   const [newTitle, setNewTitle] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [newLevel, setNewLevel] = useState("beginner");
@@ -204,6 +214,10 @@ export default function CoursesPage({ onNavigate }) {
   const handleCreateCourse = async (e) => {
     e.preventDefault();
     if (!newTitle.trim() || !newDesc.trim()) return;
+    if (!currentUser) {
+      requireAuth(() => handleCreateCourse(e), "Vui lòng đăng nhập để lưu khóa học!");
+      return;
+    }
     setIsCreatingCourse(true);
     try {
       const created = await api.courses.create({
@@ -302,7 +316,7 @@ export default function CoursesPage({ onNavigate }) {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+    <div className="w-full max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-8">
       {/* Header */}
       <div className="mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
@@ -321,17 +335,15 @@ export default function CoursesPage({ onNavigate }) {
           <h1 className="text-3xl sm:text-4xl font-black text-base-content tracking-tight">
             Khóa Học Công Nghệ Chuyên Sâu
           </h1>
-          <p className="text-base-content/70 mt-2 text-sm sm:text-base max-w-2xl">
+          <p className="text-base-content/70 mt-2 text-sm sm:text-base max-w-4xl">
             Nắm vững kiến thức lập trình thực chiến từ các kỹ sư giàu kinh nghiệm với giáo trình bài bản, dự án thực tế và theo dõi tiến độ chi tiết.
           </p>
         </div>
 
         <button
           type="button"
-          onClick={() => {
-            requireAuth(() => setShowCreateCourseModal(true), "Vui lòng đăng nhập để tạo khóa học mới!");
-          }}
-          className="btn btn-sm btn-primary text-white font-bold rounded-xl gap-1.5 shadow-sm shrink-0"
+          onClick={() => requireAuth(() => setShowCreateCourseModal(true), "Vui lòng đăng nhập để tạo khóa học mới!")}
+          className="btn btn-sm btn-primary text-white font-bold rounded-xl gap-1.5 shadow-sm shrink-0 cursor-pointer"
         >
           <span>+</span> Tạo khóa học mới
         </button>
@@ -426,7 +438,7 @@ export default function CoursesPage({ onNavigate }) {
         </div>
       ) : (
         /* Courses Grid */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
           {filteredCourses.map((c) => (
           <div
             key={c.id}
@@ -498,14 +510,16 @@ export default function CoursesPage({ onNavigate }) {
               >
                 Giáo trình
               </button>
-              <button
-                type="button"
-                onClick={() => handleExportCourseSyllabusMd(c)}
-                className="btn btn-ghost btn-sm px-2.5 rounded-xl text-primary hover:bg-primary/10"
-                title="Xuất đề cương khóa học (.md)"
-              >
-                📥
-              </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => handleExportCourseSyllabusMd(c)}
+                  className="btn btn-ghost btn-sm px-2.5 rounded-xl text-primary hover:bg-primary/10"
+                  title="Xuất đề cương khóa học (.md)"
+                >
+                  📥
+                </button>
+              )}
               {c.user_progress_percent === 100 ? (
                 <button
                   onClick={() => setCertificateCourse(c)}
@@ -581,15 +595,17 @@ export default function CoursesPage({ onNavigate }) {
               <h4 className="font-bold text-base-content text-sm uppercase tracking-wider text-base-content/80">
                 Danh sách bài học & Tiến độ
               </h4>
-              <button
-                type="button"
-                onClick={() => handleExportCourseSyllabusMd(selectedCourse)}
-                className="btn btn-ghost btn-xs text-primary hover:bg-primary/10 font-bold gap-1 rounded-lg"
-                title="Tải xuống đề cương (.md) để theo dõi cá nhân"
-              >
-                <span>📥</span>
-                <span>Xuất đề cương (.md)</span>
-              </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => handleExportCourseSyllabusMd(selectedCourse)}
+                  className="btn btn-ghost btn-xs text-primary hover:bg-primary/10 font-bold gap-1 rounded-lg"
+                  title="Tải xuống đề cương (.md) để theo dõi cá nhân"
+                >
+                  <span>📥</span>
+                  <span>Xuất đề cương (.md)</span>
+                </button>
+              )}
             </div>
 
             {/* Lesson Filter Tabs */}

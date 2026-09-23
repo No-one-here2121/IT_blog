@@ -93,4 +93,4 @@ class ResetPasswordRequest(BaseModel):
 class MessageResponse(BaseModel):
     message: str
     success: bool = True
-
+    reset_token: Optional[str] = None

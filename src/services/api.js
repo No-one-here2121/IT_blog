@@ -120,12 +120,18 @@ export const api = {
       if (params.search) query.append("search", params.search);
       if (params.sortBy) query.append("sort_by", params.sortBy);
       if (params.status) query.append("status_filter", params.status);
+      if (params.author_id) query.append("author_id", params.author_id);
 
       const qs = query.toString();
       return request(`/posts${qs ? `?${qs}` : ""}`);
     },
 
-    get: (idOrSlug) => request(`/posts/${idOrSlug}`),
+    get: (idOrSlug, params = {}) => {
+      const query = new URLSearchParams();
+      if (params.track_view !== undefined) query.append("track_view", params.track_view);
+      const qs = query.toString();
+      return request(`/posts/${idOrSlug}${qs ? `?${qs}` : ""}`);
+    },
 
     create: (postData) =>
       request("/posts", {
@@ -357,6 +363,45 @@ export const api = {
       }),
   },
 
+
+  // Bug Reports & Feedback Hub (Nhận & Xem danh sách báo lỗi)
+  bugReports: {
+    create: (data) =>
+      request("/bug-reports", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+
+    list: (params = {}) => {
+      const query = new URLSearchParams();
+      if (params.status && params.status !== "all") query.append("status_filter", params.status);
+      if (params.category && params.category !== "all") query.append("category", params.category);
+      if (params.search) query.append("search", params.search);
+      const qs = query.toString();
+      return request(`/bug-reports${qs ? `?${qs}` : ""}`);
+    },
+
+    adminList: (params = {}) => {
+      const query = new URLSearchParams();
+      if (params.status && params.status !== "all") query.append("status_filter", params.status);
+      if (params.category && params.category !== "all") query.append("category", params.category);
+      if (params.search) query.append("search", params.search);
+      const qs = query.toString();
+      return request(`/admin/bug-reports${qs ? `?${qs}` : ""}`);
+    },
+
+    update: (id, updateData) =>
+      request(`/admin/bug-reports/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(updateData),
+      }),
+
+    delete: (id) =>
+      request(`/admin/bug-reports/${id}`, {
+        method: "DELETE",
+      }),
+  },
+
   // AI Assistant (Code Explain, Context Q&A, Summarize)
   ai: {
     explainCode: (data) => {
@@ -542,6 +587,10 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
+    deleteSource: (id) =>
+      request(`/crawler/sources/${id}`, {
+        method: "DELETE",
+      }),
     jobs: () => request("/crawler/jobs"),
     trigger: (data = {}) =>
       request("/crawler/trigger", {
@@ -659,13 +708,15 @@ export const api = {
 
   // IT Quiz & Knowledge Testing
   quiz: {
+    getTopics: () => request("/quiz/topics"),
     getQuestions: (params = {}) => {
       const query = new URLSearchParams();
       if (params.course_id || params.courseId) query.append("course_id", params.course_id || params.courseId);
       if (params.post_id || params.postId) query.append("post_id", params.post_id || params.postId);
-      if (params.language) query.append("language", params.language);
-      if (params.difficulty) query.append("difficulty", params.difficulty);
+      if (params.language && params.language !== "all") query.append("language", params.language);
+      if (params.difficulty && params.difficulty !== "mixed" && params.difficulty !== "all") query.append("difficulty", params.difficulty);
       if (params.limit) query.append("limit", params.limit);
+      if (params.randomize) query.append("randomize", "true");
       const qs = query.toString();
       return request(`/quiz/questions${qs ? `?${qs}` : ""}`);
     },

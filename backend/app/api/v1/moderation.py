@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, func, or_
 
 from app.core.database import get_db
-from app.models.moderation import Report, ReportStatus, AuditLog
+from datetime import datetime, timezone
+from app.models.moderation import Report, ReportStatus, BugReport, BugReportStatus, AuditLog
 from app.models.post import Post, PostStatus
 from app.models.comment import Comment, CommentLike
 from app.models.user import User, Role
@@ -14,6 +15,9 @@ from app.schemas.moderation import (
     ReportCreate,
     ReportResponse,
     ReportResolve,
+    BugReportCreate,
+    BugReportUpdate,
+    BugReportResponse,
     AuditLogResponse,
     AdminStatsResponse,
     AdminUserResponse,
@@ -21,7 +25,7 @@ from app.schemas.moderation import (
     AdminUserStatusUpdate
 )
 from app.schemas.user import AuthorSummary
-from app.api.deps import get_current_active_user, require_role
+from app.api.deps import get_current_active_user, require_role, get_current_user_optional
 
 router = APIRouter(tags=["Moderation & Admin"])
 
@@ -282,6 +286,7 @@ def get_admin_stats(
     total_views = db.query(func.coalesce(func.sum(Post.views), 0)).scalar()
     pending_posts = db.query(Post).filter(Post.status == PostStatus.PENDING.value).count()
     pending_reports = db.query(Report).filter(Report.status == ReportStatus.PENDING.value).count()
+    pending_bugs = db.query(BugReport).filter(BugReport.status == BugReportStatus.PENDING.value).count()
 
     return AdminStatsResponse(
         total_users=total_users,
@@ -289,7 +294,8 @@ def get_admin_stats(
         total_comments=total_comments,
         total_views=int(total_views),
         pending_posts_count=pending_posts,
-        pending_reports_count=pending_reports
+        pending_reports_count=pending_reports,
+        pending_bugs_count=pending_bugs
     )
 
 
@@ -449,3 +455,243 @@ def update_user_status(
     db.commit()
     return {"message": "Đã cập nhật trạng thái người dùng thành công", "is_active": target_user.is_active}
 
+
+
+# ============================================================================
+# 7. Bug Reports & Feedback Endpoints (Nhận báo lỗi & Xem danh sách sự cố)
+# ============================================================================
+
+@router.post("/bug-reports", response_model=BugReportResponse, status_code=status.HTTP_201_CREATED)
+def create_bug_report(
+    bug_in: BugReportCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional)
+):
+    clean_title = bug_in.title.strip() if bug_in.title else ""
+    clean_desc = bug_in.description.strip() if bug_in.description else ""
+    if not clean_title or not clean_desc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tiêu đề và nội dung báo lỗi không được để trống."
+        )
+
+    reporter_name = bug_in.reporter_name.strip() if bug_in.reporter_name else (current_user.name if current_user else "Khách")
+    reporter_email = bug_in.reporter_email.strip() if bug_in.reporter_email else (current_user.email if current_user else None)
+
+    new_bug = BugReport(
+        user_id=current_user.id if current_user else None,
+        category=bug_in.category or "bug",
+        priority=bug_in.priority or "medium",
+        title=clean_title,
+        description=clean_desc,
+        reporter_name=reporter_name,
+        reporter_email=reporter_email,
+        status=BugReportStatus.PENDING.value
+    )
+    db.add(new_bug)
+    db.commit()
+    db.refresh(new_bug)
+
+    log_audit(
+        db,
+        user_id=current_user.id if current_user else None,
+        action="submit_bug_report",
+        target_type="bug_report",
+        target_id=new_bug.id,
+        details=f"Báo lỗi: {clean_title} [{new_bug.category}]",
+        ip_address=request.client.host if request.client else None
+    )
+
+    return BugReportResponse(
+        id=new_bug.id,
+        user_id=new_bug.user_id,
+        reporter=AuthorSummary.model_validate(new_bug.user) if new_bug.user else None,
+        category=new_bug.category,
+        priority=new_bug.priority,
+        title=new_bug.title,
+        description=new_bug.description,
+        reporter_name=new_bug.reporter_name,
+        reporter_email=new_bug.reporter_email,
+        status=new_bug.status,
+        admin_notes=new_bug.admin_notes,
+        resolved_by=new_bug.resolved_by,
+        created_at=new_bug.created_at,
+        updated_at=new_bug.updated_at
+    )
+
+
+@router.get("/bug-reports", response_model=List[BugReportResponse])
+def get_public_bug_reports(
+    status_filter: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    query = db.query(BugReport)
+    if status_filter and status_filter.lower() != "all":
+        query = query.filter(BugReport.status == status_filter.lower())
+    if category and category.lower() != "all":
+        query = query.filter(BugReport.category == category.lower())
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        query = query.filter(or_(BugReport.title.ilike(term), BugReport.description.ilike(term)))
+
+    bugs = query.order_by(desc(BugReport.created_at)).all()
+    results = []
+    for b in bugs:
+        results.append(
+            BugReportResponse(
+                id=b.id,
+                user_id=b.user_id,
+                reporter=AuthorSummary.model_validate(b.user) if b.user else None,
+                category=b.category,
+                priority=b.priority,
+                title=b.title,
+                description=b.description,
+                reporter_name=b.reporter_name,
+                reporter_email=b.reporter_email,
+                status=b.status,
+                admin_notes=b.admin_notes,
+                resolved_by=b.resolved_by,
+                created_at=b.created_at,
+                updated_at=b.updated_at
+            )
+        )
+    return results
+
+
+@router.get("/admin/bug-reports", response_model=List[BugReportResponse])
+def get_admin_bug_reports(
+    status_filter: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _user=Depends(require_role("admin", "moderator"))
+):
+    query = db.query(BugReport)
+    if status_filter and status_filter.lower() != "all":
+        query = query.filter(BugReport.status == status_filter.lower())
+    if category and category.lower() != "all":
+        query = query.filter(BugReport.category == category.lower())
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        query = query.filter(or_(BugReport.title.ilike(term), BugReport.description.ilike(term)))
+
+    bugs = query.order_by(desc(BugReport.created_at)).all()
+    results = []
+    for b in bugs:
+        results.append(
+            BugReportResponse(
+                id=b.id,
+                user_id=b.user_id,
+                reporter=AuthorSummary.model_validate(b.user) if b.user else None,
+                category=b.category,
+                priority=b.priority,
+                title=b.title,
+                description=b.description,
+                reporter_name=b.reporter_name,
+                reporter_email=b.reporter_email,
+                status=b.status,
+                admin_notes=b.admin_notes,
+                resolved_by=b.resolved_by,
+                created_at=b.created_at,
+                updated_at=b.updated_at
+            )
+        )
+    return results
+
+
+@router.put("/admin/bug-reports/{report_id}", response_model=BugReportResponse)
+def update_bug_report(
+    report_id: int,
+    bug_update: BugReportUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("admin", "moderator"))
+):
+    bug = db.query(BugReport).filter(BugReport.id == report_id).first()
+    if not bug:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Báo cáo lỗi không tồn tại."
+        )
+
+    if bug_update.status:
+        st = bug_update.status.lower().strip()
+        valid_statuses = [s.value for s in BugReportStatus]
+        if st not in valid_statuses:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Trạng thái không hợp lệ."
+            )
+        bug.status = st
+        if st in [BugReportStatus.RESOLVED.value, BugReportStatus.DISMISSED.value]:
+            bug.resolved_by = current_user.id
+
+    if bug_update.admin_notes is not None:
+        bug.admin_notes = bug_update.admin_notes.strip() if bug_update.admin_notes else None
+
+    if bug_update.priority:
+        bug.priority = bug_update.priority.lower().strip()
+
+    bug.updated_at = datetime.now(timezone.utc)
+    db.add(bug)
+    db.commit()
+    db.refresh(bug)
+
+    log_audit(
+        db,
+        user_id=current_user.id,
+        action=f"update_bug_report_{bug.status}",
+        target_type="bug_report",
+        target_id=bug.id,
+        details=f"Cập nhật trạng thái sang '{bug.status}'. Ghi chú: {bug.admin_notes or 'Không có'}",
+        ip_address=request.client.host if request.client else None
+    )
+
+    return BugReportResponse(
+        id=bug.id,
+        user_id=bug.user_id,
+        reporter=AuthorSummary.model_validate(bug.user) if bug.user else None,
+        category=bug.category,
+        priority=bug.priority,
+        title=bug.title,
+        description=bug.description,
+        reporter_name=bug.reporter_name,
+        reporter_email=bug.reporter_email,
+        status=bug.status,
+        admin_notes=bug.admin_notes,
+        resolved_by=bug.resolved_by,
+        created_at=bug.created_at,
+        updated_at=bug.updated_at
+    )
+
+
+@router.delete("/admin/bug-reports/{report_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_bug_report(
+    report_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_role("admin", "moderator"))
+):
+    bug = db.query(BugReport).filter(BugReport.id == report_id).first()
+    if not bug:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Báo cáo lỗi không tồn tại."
+        )
+
+    log_audit(
+        db,
+        user_id=current_user.id,
+        action="delete_bug_report",
+        target_type="bug_report",
+        target_id=bug.id,
+        details=f"Đã xóa báo cáo lỗi: {bug.title}",
+        ip_address=request.client.host if request.client else None
+    )
+
+    db.delete(bug)
+    db.commit()
+    return None

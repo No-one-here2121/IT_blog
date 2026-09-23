@@ -114,3 +114,22 @@ def test_delete_quiz_question(client: TestClient, db_session: Session):
     check_res = client.get(f"/api/v1/quiz/questions?limit=100")
     remaining_ids = [item["id"] for item in check_res.json()["questions"]]
     assert q.id not in remaining_ids
+
+def test_get_quiz_topics(client: TestClient, db_session: Session):
+    res = client.get("/api/v1/quiz/topics")
+    assert res.status_code == 200
+    topics = res.json()
+    assert isinstance(topics, list)
+    assert len(topics) >= 8
+    topic_ids = [t["id"] for t in topics]
+    assert "all" in topic_ids
+    assert "React" in topic_ids
+    assert "FastAPI" in topic_ids
+
+
+def test_get_quiz_questions_with_limit_and_randomize(client: TestClient, db_session: Session):
+    res = client.get("/api/v1/quiz/questions?limit=5&randomize=true")
+    assert res.status_code == 200
+    data = res.json()
+    assert "questions" in data
+    assert len(data["questions"]) <= 5

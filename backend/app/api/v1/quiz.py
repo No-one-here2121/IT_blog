@@ -1,3 +1,4 @@
+import os
 import json
 import logging
 import random
@@ -100,18 +101,59 @@ def build_fallback_questions(
     return results
 
 
+
+_TOPICS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "quiz_topics.json")
+
+
+def get_topics_metadata() -> List[Dict[str, Any]]:
+    if os.path.exists(_TOPICS_FILE):
+        try:
+            with open(_TOPICS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"Error loading quiz_topics.json: {e}")
+    return []
+
+
+@router.get("/topics", response_model=List[Dict[str, Any]])
+def get_quiz_topics(db: Session = Depends(get_db)):
+    """
+    Lấy danh sách các chuyên đề thi trắc nghiệm kèm số lượng câu hỏi thực tế trong CSDL.
+    """
+    counts = dict(
+        db.query(QuizQuestion.language, func.count(QuizQuestion.id))
+        .group_by(QuizQuestion.language)
+        .all()
+    )
+    total_all = sum(counts.values())
+
+    topics = []
+    for item in get_topics_metadata():
+        t_id = item["id"]
+        if t_id == "all":
+            cnt = total_all
+        else:
+            cnt = sum(c for lang, c in counts.items() if t_id.lower() in (lang or "").lower())
+        topics.append({
+            **item,
+            "question_count": cnt
+        })
+    return topics
+
+
 @router.get("/questions", response_model=Dict[str, List[QuizQuestionResponse]])
 def get_quiz_questions(
-    course_id: Optional[int] = Query(None, description="Lọc theo ID khóa học"),
-    post_id: Optional[int] = Query(None, description="Lọc theo ID bài viết"),
-    language: Optional[str] = Query(None, description="Lọc theo ngôn ngữ lập trình / công nghệ"),
-    difficulty: Optional[str] = Query(None, description="Lọc theo độ khó (easy, medium, hard)"),
-    limit: int = Query(50, ge=1, le=100, description="Giới hạn số lượng câu hỏi"),
+    course_id: Optional[int] = Query(None, description="L?c theo ID kh?a h?c"),
+    post_id: Optional[int] = Query(None, description="L?c theo ID b?i vi?t"),
+    language: Optional[str] = Query(None, description="L?c theo ng?n ng? l?p tr?nh / c?ng ngh?"),
+    difficulty: Optional[str] = Query(None, description="L?c theo ?? kh? (easy, medium, hard)"),
+    limit: int = Query(50, ge=1, le=500, description="Gi?i h?n s? l??ng c?u h?i"),
+    randomize: bool = Query(False, description="X?o tr?n th? t? c?u h?i ng?u nhi?n"),
     db: Session = Depends(get_db)
 ):
     """
-    Lấy danh sách câu hỏi trắc nghiệm từ ngân hàng đề thi.
-    Hỗ trợ lọc theo Khóa học, Bài viết liên quan, Ngôn ngữ, hoặc Độ khó.
+    L?y danh s?ch c?u h?i tr?c nghi?m t? ng?n h?ng ?? thi.
+    H? tr? l?c theo Kh?a h?c, B?i vi?t li?n quan, Ng?n ng?, ho?c ?? kh?, k?m t?nh n?ng l?y ng?u nhi?n v? ch?n s? l??ng c?u h?i.
     """
     query = db.query(QuizQuestion)
 
@@ -121,20 +163,27 @@ def get_quiz_questions(
     elif course_id is not None:
         query = query.filter(QuizQuestion.course_id == course_id)
 
-    if language:
+    if language and language.strip().lower() not in ["all", "t?t c?", "tat ca"]:
         query = query.filter(QuizQuestion.language.ilike(f"%{language.strip()}%"))
 
     if difficulty and difficulty != "mixed":
         query = query.filter(QuizQuestion.difficulty == difficulty.lower().strip())
 
-    # Lấy danh sách ngẫu nhiên hoặc theo thứ tự
-    items = query.order_by(QuizQuestion.id.asc()).limit(limit).all()
+    # L?y danh s?ch ng?u nhi?n ho?c theo th? t?
+    if randomize:
+        items = query.order_by(func.random()).limit(limit).all()
+    else:
+        items = query.order_by(QuizQuestion.id.asc()).limit(limit).all()
 
-    # Nếu chưa có câu hỏi nào theo filter và không chỉ định post_id/course_id, lấy ngẫu nhiên câu hỏi chung
+    # N?u ch?a c? c?u h?i n?o theo filter v? kh?ng ch? ??nh post_id/course_id, l?y c?u h?i chung
     if not items and post_id is None and course_id is None:
-        items = db.query(QuizQuestion).order_by(QuizQuestion.id.asc()).limit(limit).all()
+        fallback_q = db.query(QuizQuestion)
+        if randomize:
+            items = fallback_q.order_by(func.random()).limit(limit).all()
+        else:
+            items = fallback_q.order_by(QuizQuestion.id.asc()).limit(limit).all()
 
-    # Batch fetch post links for all retrieved questions to eliminate N+1 queries
+        # Batch fetch post links for all retrieved questions to eliminate N+1 queries
     q_ids = [item.id for item in items]
     links_by_qid = {}
     if q_ids:

@@ -11,8 +11,27 @@ const POPULAR_SEARCH_TAGS = [
 ];
 
 export default function Navbar({ onNavigate, currentPage = "home" }) {
-  const { currentUser, logout, requireAuth } = useAuth();
+  const { currentUser, logout, requireAuth, isAdmin } = useAuth();
   const { searchQuery, setSearchQuery, pendingPosts } = useBlog();
+
+  const canAccessModeration = Boolean(
+    currentUser && (
+      currentUser.role === "admin" ||
+      currentUser.role === "moderator" ||
+      currentUser.is_superuser ||
+      currentUser.id === "demo_user" ||
+      String(currentUser.id) === "1" ||
+      currentUser.email === "admin@itblog.dev" ||
+      currentUser.username === "admin" ||
+      (Array.isArray(currentUser.roles) && (
+        currentUser.roles.includes("admin") ||
+        currentUser.roles.includes("moderator") ||
+        currentUser.roles.some((r) =>
+          typeof r === "string" ? r === "admin" || r === "moderator" : r?.name === "admin" || r?.name === "moderator"
+        )
+      ))
+    )
+  );
   const { addToast } = useToast();
 
   // Search input ref & shortcuts modal state
@@ -172,11 +191,7 @@ export default function Navbar({ onNavigate, currentPage = "home" }) {
           onNavigate("home");
         } else if (key === "n" && onNavigate) {
           e.preventDefault();
-          if (requireAuth) {
-            requireAuth(() => onNavigate("create_post"), "Vui lòng đăng nhập để viết bài mới!");
-          } else {
-            onNavigate("create_post");
-          }
+          requireAuth(() => onNavigate("create_post"), "Vui lòng đăng nhập để viết bài mới!");
         } else if (key === "r" && onNavigate) {
           e.preventDefault();
           onNavigate("roadmaps");
@@ -298,6 +313,10 @@ export default function Navbar({ onNavigate, currentPage = "home" }) {
   };
 
   const handleExportNotificationsMd = () => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất dữ liệu Markdown (.md)!", "error");
+      return;
+    }
     if (notifications.length === 0) {
       addToast("Chưa có thông báo nào để xuất! ℹ️", "info");
       return;
@@ -340,15 +359,15 @@ ${rows}
   const handleCreatePost = () => {
     requireAuth(
       () => onNavigate && onNavigate("create_post"),
-      "Vui lòng đăng nhập để đăng bài viết mới!"
+      "Vui lòng đăng nhập để viết bài mới!"
     );
   };
 
   return (
     <header className="sticky top-0 z-40 w-full bg-base-100/90 backdrop-blur-md border-b border-base-300">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      <div className="w-full max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 h-16 flex items-center justify-between gap-2 sm:gap-4">
         {/* Left: Logo & Navigation */}
-        <div className="flex items-center gap-1 sm:gap-3">
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           {/* Mobile Navigation Dropdown (chỉ hiển thị khi màn hình < lg) */}
           <div className="dropdown dropdown-bottom lg:hidden">
             <div
@@ -446,20 +465,22 @@ ${rows}
                   <span>Bảng xếp hạng</span>
                 </button>
               </li>
-              <li>
-                <button
-                  onClick={() => handleNavAndCloseMobile("moderation")}
-                  className={`flex items-center justify-between py-2 font-semibold ${currentPage === "moderation" ? "active text-white bg-primary font-bold" : ""}`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span>📋</span>
-                    <span>Duyệt bài</span>
-                  </div>
-                  {pendingPosts?.length > 0 && (
-                    <span className="badge badge-xs bg-amber-400 text-amber-950 font-bold">{pendingPosts.length}</span>
-                  )}
-                </button>
-              </li>
+              {canAccessModeration && (
+                <li>
+                  <button
+                    onClick={() => handleNavAndCloseMobile("moderation")}
+                    className={`flex items-center justify-between py-2 font-semibold ${currentPage === "moderation" ? "active text-white bg-primary font-bold" : ""}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span>⚙️</span>
+                      <span>Cài đặt hệ thống</span>
+                    </div>
+                    {pendingPosts?.length > 0 && (
+                      <span className="badge badge-xs bg-amber-400 text-amber-950 font-bold">{pendingPosts.length}</span>
+                    )}
+                  </button>
+                </li>
+              )}
               <li>
                 <button
                   onClick={() => {
@@ -525,7 +546,7 @@ ${rows}
 
           <button
             onClick={() => onNavigate && onNavigate("home")}
-            className="btn btn-ghost px-1.5 sm:px-2 normal-case flex items-center gap-1.5 sm:gap-2 text-lg sm:text-xl font-black tracking-tight"
+            className="btn btn-ghost px-1.5 sm:px-2 normal-case flex items-center gap-1.5 sm:gap-2 text-lg sm:text-xl font-black tracking-tight shrink-0"
           >
             <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-primary text-white flex items-center justify-center font-extrabold text-sm sm:text-base shadow-sm">
               IT
@@ -533,10 +554,10 @@ ${rows}
             <span className="text-base-content">Blog</span>
           </button>
 
-          <div className="hidden lg:flex items-center gap-1">
+          <div className="hidden lg:flex items-center gap-0.5 xl:gap-1">
             <button
               onClick={() => onNavigate && onNavigate("home")}
-              className={`btn btn-sm text-xs font-semibold rounded-lg transition-all px-2.5 ${
+              className={`btn btn-sm text-xs font-semibold rounded-lg transition-all px-2 sm:px-2.5 ${
                 currentPage === "home"
                   ? "bg-primary/10 text-primary font-bold shadow-2xs"
                   : "btn-ghost text-base-content/80 hover:text-base-content"
@@ -546,7 +567,7 @@ ${rows}
             </button>
             <button
               onClick={() => onNavigate && onNavigate("roadmaps")}
-              className={`btn btn-sm text-xs font-semibold rounded-lg transition-all px-2.5 ${
+              className={`btn btn-sm text-xs font-semibold rounded-lg transition-all px-2 sm:px-2.5 ${
                 currentPage === "roadmaps"
                   ? "bg-primary/10 text-primary font-bold shadow-2xs"
                   : "btn-ghost text-base-content/80 hover:text-base-content"
@@ -556,7 +577,7 @@ ${rows}
             </button>
             <button
               onClick={() => onNavigate && onNavigate("courses")}
-              className={`btn btn-sm text-xs font-semibold rounded-lg transition-all px-2.5 ${
+              className={`btn btn-sm text-xs font-semibold rounded-lg transition-all px-2 sm:px-2.5 ${
                 currentPage === "courses"
                   ? "bg-primary/10 text-primary font-bold shadow-2xs"
                   : "btn-ghost text-base-content/80 hover:text-base-content"
@@ -566,7 +587,7 @@ ${rows}
             </button>
             <button
               onClick={() => onNavigate && onNavigate("quiz")}
-              className={`btn btn-sm text-xs font-semibold rounded-lg transition-all px-2.5 ${
+              className={`btn btn-sm text-xs font-semibold rounded-lg transition-all px-2 sm:px-2.5 ${
                 currentPage === "quiz"
                   ? "bg-primary/10 text-primary font-bold shadow-2xs"
                   : "btn-ghost text-base-content/80 hover:text-base-content"
@@ -576,7 +597,7 @@ ${rows}
             </button>
             <button
               onClick={() => onNavigate && onNavigate("jobs")}
-              className={`btn btn-sm text-xs font-semibold rounded-lg transition-all px-2.5 ${
+              className={`btn btn-sm text-xs font-semibold rounded-lg transition-all px-2 sm:px-2.5 hidden xl:inline-flex ${
                 currentPage === "jobs"
                   ? "bg-primary/10 text-primary font-bold shadow-2xs"
                   : "btn-ghost text-base-content/80 hover:text-base-content"
@@ -586,7 +607,7 @@ ${rows}
             </button>
             <button
               onClick={() => onNavigate && onNavigate("events")}
-              className={`btn btn-sm text-xs font-semibold rounded-lg transition-all px-2.5 ${
+              className={`btn btn-sm text-xs font-semibold rounded-lg transition-all px-2 sm:px-2.5 hidden xl:inline-flex ${
                 currentPage === "events"
                   ? "bg-primary/10 text-primary font-bold shadow-2xs"
                   : "btn-ghost text-base-content/80 hover:text-base-content"
@@ -596,7 +617,7 @@ ${rows}
             </button>
             <button
               onClick={() => onNavigate && onNavigate("leaderboard")}
-              className={`btn btn-sm text-xs font-semibold rounded-lg transition-all px-2.5 ${
+              className={`btn btn-sm text-xs font-semibold rounded-lg transition-all px-2 sm:px-2.5 hidden xl:inline-flex ${
                 currentPage === "leaderboard"
                   ? "bg-primary/10 text-primary font-bold shadow-2xs"
                   : "btn-ghost text-base-content/80 hover:text-base-content"
@@ -604,27 +625,99 @@ ${rows}
             >
               Xếp hạng
             </button>
-            <button
-              onClick={() => onNavigate && onNavigate("moderation")}
-              className={`btn btn-sm text-xs font-semibold rounded-lg transition-all gap-1 px-2.5 ${
-                currentPage === "moderation"
-                  ? "bg-primary/10 text-primary font-bold shadow-2xs"
-                  : "btn-ghost text-base-content/80 hover:text-base-content"
-              }`}
-            >
-              <span>Duyệt bài</span>
-              {pendingPosts?.length > 0 && (
-                <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-[11px] font-extrabold text-amber-950 bg-amber-400 rounded-full shadow-xs leading-none shrink-0">
-                  {pendingPosts.length}
-                </span>
-              )}
-            </button>
+            {canAccessModeration && (
+              <button
+                onClick={() => onNavigate && onNavigate("moderation")}
+                className={`btn btn-sm text-xs font-semibold rounded-lg transition-all gap-1.5 px-2 sm:px-2.5 hidden xl:inline-flex ${
+                  currentPage === "moderation"
+                    ? "bg-primary/10 text-primary font-bold shadow-2xs"
+                    : "btn-ghost text-base-content/80 hover:text-base-content"
+                }`}
+                title="Cài đặt & Quản trị hệ thống"
+              >
+                <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                <span className="hidden 2xl:inline">Cài đặt hệ thống</span>
+                {pendingPosts?.length > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-[11px] font-extrabold text-amber-950 bg-amber-400 rounded-full shadow-xs leading-none shrink-0">
+                    {pendingPosts.length}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {/* Dropdown menu phụ khi màn hình lg (1024px-1279px) để không bao giờ bị đè nút tìm kiếm */}
+            <div className="dropdown dropdown-bottom xl:hidden">
+              <div
+                tabIndex={0}
+                role="button"
+                className={`btn btn-sm text-xs font-semibold rounded-lg transition-all px-2 gap-1 ${
+                  ["jobs", "events", "leaderboard", "moderation"].includes(currentPage)
+                    ? "bg-primary/10 text-primary font-bold shadow-2xs"
+                    : "btn-ghost text-base-content/80 hover:text-base-content"
+                }`}
+              >
+                <span>Thêm</span>
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                </svg>
+                {pendingPosts?.length > 0 && (
+                  <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0"></span>
+                )}
+              </div>
+              <ul
+                tabIndex={0}
+                className="dropdown-content menu menu-sm bg-base-100 rounded-2xl z-50 w-52 p-2 shadow-2xl border border-base-300 mt-2 space-y-1"
+              >
+                <li>
+                  <button
+                    onClick={() => onNavigate && onNavigate("jobs")}
+                    className={currentPage === "jobs" ? "active text-white bg-primary font-bold" : ""}
+                  >
+                    <span>💼</span> Việc làm IT
+                  </button>
+                </li>
+                <li>
+                  <button
+                    onClick={() => onNavigate && onNavigate("events")}
+                    className={currentPage === "events" ? "active text-white bg-primary font-bold" : ""}
+                  >
+                    <span>📅</span> Sự kiện & Workshop
+                  </button>
+                </li>
+                <li>
+                  <button
+                    onClick={() => onNavigate && onNavigate("leaderboard")}
+                    className={currentPage === "leaderboard" ? "active text-white bg-primary font-bold" : ""}
+                  >
+                    <span>🏆</span> Bảng xếp hạng
+                  </button>
+                </li>
+                {canAccessModeration && (
+                  <li>
+                    <button
+                      onClick={() => onNavigate && onNavigate("moderation")}
+                      className={currentPage === "moderation" ? "active text-white bg-primary font-bold" : ""}
+                    >
+                      <span>⚙️</span> Cài đặt hệ thống
+                      {pendingPosts?.length > 0 && (
+                        <span className="badge badge-xs bg-amber-400 text-amber-950 font-bold ml-auto">
+                          {pendingPosts.length}
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                )}
+              </ul>
+            </div>
           </div>
         </div>
 
         {/* Center: Search input */}
-        <div className="flex-1 max-w-lg hidden sm:block relative">
-          <div className="relative">
+        <div className="relative flex-1 max-w-xs xl:max-w-sm min-w-[160px] mx-2 transition-all duration-200 hidden sm:block">
+          <div className="relative w-full">
             <input
               ref={searchInputRef}
               type="text"
@@ -633,8 +726,8 @@ ${rows}
               onFocus={() => setSearchFocused(true)}
               onBlur={() => setTimeout(() => setSearchFocused(false), 250)}
               onKeyDown={handleSearchKeyDown}
-              placeholder="Tìm kiếm bài viết, công nghệ, tác giả..."
-              className="input input-sm input-bordered w-full pl-9 pr-14 bg-base-200/50 focus:bg-base-100 transition-all rounded-full"
+              placeholder="Tìm kiếm bài viết, công nghệ..."
+              className="input input-sm input-bordered w-full pl-9 pr-14 bg-base-200/60 hover:bg-base-200 focus:bg-base-100 transition-all rounded-full text-xs shadow-2xs"
             />
             <svg
               className="w-4 h-4 text-base-content/50 absolute left-3 top-2.5"
@@ -659,10 +752,10 @@ ${rows}
             )}
           </div>
 
-          {/* Gợi ý Tìm kiếm & Lịch sử truy vấn gần đây */}
+          {/* Gợi ý Tìm kiếm & Lịch sử truy vấn gần đây - Rộng rãi và không bao giờ bị bóp méo */}
           {searchFocused && (
             <div
-              className="absolute left-0 right-0 top-full mt-2 bg-base-100 rounded-2xl border border-base-300 shadow-2xl p-3.5 z-50 animate-fade-in text-xs space-y-3"
+              className="absolute right-0 sm:left-0 top-full mt-2 w-80 sm:w-96 min-w-[320px] max-w-[95vw] bg-base-100 rounded-2xl border border-base-300 shadow-2xl p-4 z-50 animate-fade-in text-xs space-y-3.5"
               onMouseDown={(e) => e.preventDefault()}
             >
               {/* Lịch sử tìm kiếm gần đây */}
@@ -736,16 +829,135 @@ ${rows}
             </svg>
           </button>
 
-          {/* Nút Viết bài mới */}
-          <button
-            onClick={handleCreatePost}
-            className="btn btn-sm btn-primary text-white rounded-lg flex items-center gap-1.5 shadow-sm font-semibold px-2 sm:px-3"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
-            <span className="hidden sm:inline">Viết bài</span>
-          </button>
+          {/* Nút Viết bài & Menu Tạo Mới Phân Quyền: Admin có đầy đủ các quyền, người dùng thường chỉ viết bài */}
+          {isAdmin ? (
+            <div className="dropdown dropdown-end">
+              <div
+                tabIndex={0}
+                role="button"
+                className="btn btn-sm btn-primary text-white rounded-lg flex items-center gap-1.5 shadow-sm font-semibold px-2 sm:px-3 cursor-pointer"
+                title="Khởi tạo nội dung quản trị (Admin): Viết bài, Khóa học, Trắc nghiệm, Việc làm, Lộ trình, Sự kiện"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                <span className="hidden sm:inline">Tạo mới</span>
+                <span className="badge badge-xs bg-amber-400 text-amber-950 font-black">Admin</span>
+                <svg className="w-3.5 h-3.5 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
+              <ul
+                tabIndex={0}
+                className="dropdown-content menu z-50 p-2 shadow-2xl bg-base-100 rounded-2xl w-64 border border-base-300 text-xs font-medium space-y-1 mt-1"
+              >
+                <li className="menu-title px-2 py-1 text-[11px] font-extrabold uppercase tracking-wider text-base-content/60">
+                  <span>Bài viết cộng đồng</span>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      requireAuth(
+                        () => onNavigate && onNavigate("create_post"),
+                        "Vui lòng đăng nhập để viết bài mới!"
+                      );
+                    }}
+                    className="flex items-center gap-2.5 py-2 font-semibold text-primary hover:bg-primary/10 rounded-xl cursor-pointer"
+                  >
+                    <span className="text-base">✍️</span>
+                    <div>
+                      <p className="font-bold">Viết bài mới</p>
+                      <p className="text-[10px] text-base-content/60 font-normal">Soạn thảo bài viết & chia sẻ kiến thức IT</p>
+                    </div>
+                  </button>
+                </li>
+                <div className="divider my-0.5"></div>
+                <li className="menu-title px-2 py-1 text-[11px] font-extrabold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center justify-between">
+                  <span>Quyền Quản trị viên</span>
+                  <span className="badge badge-xs badge-warning text-amber-950 font-bold">Admin Only</span>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate && onNavigate("courses", { action: "create" })}
+                    className="flex items-center gap-2.5 py-2 hover:bg-base-200 rounded-xl cursor-pointer"
+                  >
+                    <span className="text-base">🎓</span>
+                    <div>
+                      <p className="font-bold text-base-content">Tạo khóa học mới</p>
+                      <p className="text-[10px] text-base-content/60 font-normal">Biên soạn chuỗi bài giảng công nghệ</p>
+                    </div>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate && onNavigate("quiz", { action: "create" })}
+                    className="flex items-center gap-2.5 py-2 hover:bg-base-200 rounded-xl cursor-pointer"
+                  >
+                    <span className="text-base">🧠</span>
+                    <div>
+                      <p className="font-bold text-base-content">Thêm bài trắc nghiệm</p>
+                      <p className="text-[10px] text-base-content/60 font-normal">Tạo câu hỏi trắc nghiệm hoặc tạo đề AI</p>
+                    </div>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate && onNavigate("jobs", { action: "create" })}
+                    className="flex items-center gap-2.5 py-2 hover:bg-base-200 rounded-xl cursor-pointer"
+                  >
+                    <span className="text-base">💼</span>
+                    <div>
+                      <p className="font-bold text-base-content">Đăng tin tuyển dụng</p>
+                      <p className="text-[10px] text-base-content/60 font-normal">Tìm kiếm ứng viên kỹ sư IT</p>
+                    </div>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate && onNavigate("roadmaps", { action: "create" })}
+                    className="flex items-center gap-2.5 py-2 hover:bg-base-200 rounded-xl cursor-pointer"
+                  >
+                    <span className="text-base">🗺️</span>
+                    <div>
+                      <p className="font-bold text-base-content">Tạo lộ trình học tập</p>
+                      <p className="text-[10px] text-base-content/60 font-normal">Xây dựng roadmap kỹ năng cho lập trình viên</p>
+                    </div>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate && onNavigate("events", { action: "create" })}
+                    className="flex items-center gap-2.5 py-2 hover:bg-base-200 rounded-xl cursor-pointer"
+                  >
+                    <span className="text-base">📅</span>
+                    <div>
+                      <p className="font-bold text-base-content">Tổ chức sự kiện</p>
+                      <p className="text-[10px] text-base-content/60 font-normal">Webinar, workshop & meetup công nghệ</p>
+                    </div>
+                  </button>
+                </li>
+              </ul>
+            </div>
+          ) : (
+            /* Người dùng thông thường hoặc chưa đăng nhập: Nút Viết bài trực tiếp */
+            <button
+              type="button"
+              onClick={handleCreatePost}
+              className="btn btn-sm btn-primary text-white rounded-lg flex items-center gap-1.5 shadow-sm font-semibold px-2 sm:px-3 cursor-pointer"
+              title="Viết bài mới"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              <span className="hidden sm:inline">Viết bài</span>
+            </button>
+          )}
 
           {/* Nút Phím tắt bàn phím */}
           <button
@@ -877,16 +1089,18 @@ ${rows}
 
                     {/* Notification Popover Footer: Clear All & Export Markdown */}
                     <div className="pt-2 border-t border-base-200 flex items-center justify-between text-[11px]">
-                      <button
-                        type="button"
-                        onClick={handleExportNotificationsMd}
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={handleExportNotificationsMd}
                         disabled={notifications.length === 0}
                         className="btn btn-ghost btn-xs text-primary font-bold hover:underline gap-1 p-1 h-auto min-h-0 disabled:opacity-40"
                         title="Xuất toàn bộ nhật ký thông báo ra định dạng Markdown (.md)"
                       >
                         <span>📥</span>
                         <span>Xuất nhật ký (.md)</span>
-                      </button>
+                        </button>
+                      )}
 
                       <button
                         type="button"
@@ -960,24 +1174,26 @@ ${rows}
                   </button>
                 </li>
 
-                <li>
-                  <button
-                    onClick={() => handleNavAndCloseMobile("moderation")}
-                    className="flex items-center justify-between py-2"
-                  >
-                    <div className="flex items-center gap-2">
-                      <svg className="w-4 h-4 text-base-content/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                      </svg>
-                      <span>Duyệt bài viết</span>
-                    </div>
-                    {pendingPosts?.length > 0 && (
-                      <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-[11px] font-extrabold text-amber-950 bg-amber-400 rounded-full shadow-xs leading-none shrink-0">
-                        {pendingPosts.length}
-                      </span>
-                    )}
-                  </button>
-                </li>
+                {canAccessModeration && (
+                  <li>
+                    <button
+                      onClick={() => handleNavAndCloseMobile("moderation")}
+                      className="flex items-center justify-between py-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <svg className="w-4 h-4 text-base-content/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                        </svg>
+                        <span>Cài đặt hệ thống</span>
+                      </div>
+                      {pendingPosts?.length > 0 && (
+                        <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-[11px] font-extrabold text-amber-950 bg-amber-400 rounded-full shadow-xs leading-none shrink-0">
+                          {pendingPosts.length}
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                )}
 
                 <li>
                   <button

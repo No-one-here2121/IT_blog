@@ -1,3 +1,4 @@
+import { useAuth } from "../context/AuthContext";
 import { useState, useEffect } from "react";
 import { useToast } from "../context/ToastContext";
 import api from "../services/api";
@@ -19,6 +20,7 @@ const PLATFORM_BADGES = [
 ];
 
 export default function LeaderboardPage({ onNavigate }) {
+  const { isAdmin } = useAuth();
   const { addToast } = useToast();
   const [leaderboard, setLeaderboard] = useState(DEFAULT_LEADERBOARD);
   const [badges, setBadges] = useState(PLATFORM_BADGES);
@@ -57,6 +59,10 @@ export default function LeaderboardPage({ onNavigate }) {
     .map((user, idx) => ({ ...user, displayRank: idx + 1 }));
 
   const handleExportLeaderboardMd = () => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất bảng xếp hạng (.md)!", "error");
+      return;
+    }
     const criteriaName =
       timeframe === "posts"
         ? "Số Lượng Bài Viết"
@@ -92,6 +98,10 @@ export default function LeaderboardPage({ onNavigate }) {
   };
 
   const handleExportBadgesCatalogMd = () => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất danh mục huy hiệu (.md)!", "error");
+      return;
+    }
     let content = `# 🏅 Danh Mục Huy Hiệu Nền Tảng & Đặc Quyền Tác Giả - IT Blog\n\n`;
     content += `> Thời gian trích xuất: ${new Date().toLocaleString("vi-VN")}\n`;
     content += `> Tổng số huy hiệu: **${badges.length} huy hiệu**\n\n`;
@@ -129,7 +139,7 @@ export default function LeaderboardPage({ onNavigate }) {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+    <div className="w-full max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-8">
       {/* Header */}
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-3">
@@ -147,7 +157,7 @@ export default function LeaderboardPage({ onNavigate }) {
         <h1 className="text-3xl sm:text-4xl font-black text-base-content tracking-tight">
           Bảng Xếp Hạng & Vinh Danh Tác Giả
         </h1>
-        <p className="text-base-content/70 mt-2 text-sm sm:text-base max-w-2xl">
+        <p className="text-base-content/70 mt-2 text-sm sm:text-base max-w-4xl">
           Tôn vinh những tác giả và chuyên gia có đóng góp xuất sắc nhất cho cộng đồng công nghệ qua hệ thống điểm Uy Tín (Reputation) và Huy Hiệu Thành Tựu (Badges).
         </p>
       </div>
@@ -186,15 +196,17 @@ export default function LeaderboardPage({ onNavigate }) {
                     </button>
                   )}
                 </div>
-                <button
-                  type="button"
-                  onClick={handleExportLeaderboardMd}
-                  className="btn btn-xs btn-outline btn-primary rounded-lg font-bold gap-1 shrink-0"
-                  title="Tải bảng xếp hạng dạng Markdown (.md)"
-                >
-                  <span>📥</span>
-                  <span>Xuất .md</span>
-                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={handleExportLeaderboardMd}
+                    className="btn btn-xs btn-outline btn-primary rounded-lg font-bold gap-1 shrink-0"
+                    title="Tải bảng xếp hạng dạng Markdown (.md)"
+                  >
+                    <span>📥</span>
+                    <span>Xuất .md</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -305,15 +317,17 @@ export default function LeaderboardPage({ onNavigate }) {
                 <span>🏅</span>
                 <span>Bộ Huy Hiệu Nền Tảng</span>
               </h3>
-              <button
-                type="button"
-                onClick={handleExportBadgesCatalogMd}
-                className="btn btn-xs btn-outline btn-ghost hover:text-primary rounded-lg font-bold gap-1"
-                title="Tải danh mục huy hiệu dạng Markdown (.md)"
-              >
-                <span>📥</span>
-                <span>Xuất .md</span>
-              </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={handleExportBadgesCatalogMd}
+                  className="btn btn-xs btn-outline btn-ghost hover:text-primary rounded-lg font-bold gap-1"
+                  title="Tải danh mục huy hiệu dạng Markdown (.md)"
+                >
+                  <span>📥</span>
+                  <span>Xuất .md</span>
+                </button>
+              )}
             </div>
             <p className="text-xs text-base-content/60 mb-4 leading-relaxed">
               Tích lũy điểm Uy tín bằng cách viết bài hữu ích, được chuyên gia kiểm chứng chuẩn kỹ thuật hoặc có câu trả lời chuẩn (Accepted Answer).

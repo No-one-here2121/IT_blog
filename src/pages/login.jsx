@@ -322,18 +322,70 @@ export default function Login_page({ onNavigate }) {
           </button>
         </div>
 
-        {/* Nút đăng nhập Demo 1-chạm */}
-        <div className="mt-3">
-          <button
-            type="button"
-            onClick={() => {
-              loginDemo();
-              if (onNavigate) onNavigate("home");
-            }}
-            className="btn btn-sm btn-ghost w-full border border-dashed border-primary/40 text-primary hover:bg-primary/10 text-xs font-bold rounded-lg"
-          >
-            ⚡ Đăng nhập dùng thử ngay (Tài khoản Demo)
-          </button>
+        {/* Lựa chọn Đăng nhập Demo theo từng vai trò cụ thể */}
+        <div className="mt-4 pt-3.5 border-t border-base-200/80 space-y-2">
+          <div className="flex items-center justify-between text-[11px] font-bold text-base-content/60">
+            <span className="flex items-center gap-1.5 text-primary">
+              <span>⚡</span>
+              <span>DÙNG THỬ NHANH THEO VAI TRÒ (DEMO ROLES):</span>
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {/* Vai trò 1: Admin */}
+            <button
+              type="button"
+              onClick={async () => {
+                await loginDemo("admin");
+                if (onNavigate) onNavigate("home");
+              }}
+              className="btn btn-sm btn-outline btn-primary flex flex-col items-center justify-center h-auto py-2.5 px-2 rounded-xl text-left border-primary/40 hover:border-primary transition-all group shadow-2xs cursor-pointer"
+            >
+              <div className="flex items-center gap-1 font-black text-xs text-primary group-hover:text-white">
+                <span>👑</span>
+                <span>Admin</span>
+              </div>
+              <span className="text-[10px] text-base-content/60 group-hover:text-white/80 font-normal leading-tight text-center mt-0.5">
+                Toàn quyền & Xuất .md
+              </span>
+            </button>
+
+            {/* Vai trò 2: Moderator */}
+            <button
+              type="button"
+              onClick={async () => {
+                await loginDemo("moderator");
+                if (onNavigate) onNavigate("home");
+              }}
+              className="btn btn-sm btn-outline btn-secondary flex flex-col items-center justify-center h-auto py-2.5 px-2 rounded-xl text-left border-secondary/40 hover:border-secondary transition-all group shadow-2xs cursor-pointer"
+            >
+              <div className="flex items-center gap-1 font-black text-xs text-secondary group-hover:text-white">
+                <span>🛡️</span>
+                <span>Moderator</span>
+              </div>
+              <span className="text-[10px] text-base-content/60 group-hover:text-white/80 font-normal leading-tight text-center mt-0.5">
+                Kiểm duyệt bài viết
+              </span>
+            </button>
+
+            {/* Vai trò 3: User */}
+            <button
+              type="button"
+              onClick={async () => {
+                await loginDemo("user");
+                if (onNavigate) onNavigate("home");
+              }}
+              className="btn btn-sm btn-outline btn-neutral flex flex-col items-center justify-center h-auto py-2.5 px-2 rounded-xl text-left border-base-300 hover:border-base-content/40 transition-all group shadow-2xs cursor-pointer"
+            >
+              <div className="flex items-center gap-1 font-black text-xs text-base-content group-hover:text-white">
+                <span>👤</span>
+                <span>Thành viên</span>
+              </div>
+              <span className="text-[10px] text-base-content/60 group-hover:text-white/80 font-normal leading-tight text-center mt-0.5">
+                Độc giả & Viết bài
+              </span>
+            </button>
+          </div>
         </div>
       </div>
 

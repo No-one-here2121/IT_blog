@@ -55,8 +55,8 @@ const getGoogleCalendarUrl = (evt) => {
   return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${dates}&details=${details}&location=${location}`;
 };
 
-export default function EventsPage({ onNavigate }) {
-  const { requireAuth, currentUser } = useAuth();
+export default function EventsPage({ onNavigate, params }) {
+  const { requireAuth, currentUser, loginDemo, isAdmin } = useAuth();
   const { addToast } = useToast();
   const [events, setEvents] = useState(INITIAL_EVENTS);
   const [typeFilter, setTypeFilter] = useState("all");
@@ -69,6 +69,12 @@ export default function EventsPage({ onNavigate }) {
 
   // Host Event Modal State
   const [showCreateEventModal, setShowCreateEventModal] = useState(false);
+
+  useEffect(() => {
+    if (params?.action === "create") {
+      setShowCreateEventModal(true);
+    }
+  }, [params]);
   const [eventTitle, setEventTitle] = useState("");
   const [eventType, setEventType] = useState("workshop");
   const [eventOrganizer, setEventOrganizer] = useState("");
@@ -201,6 +207,10 @@ export default function EventsPage({ onNavigate }) {
   };
 
   const handleExportEventMd = (evt) => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất dữ liệu Markdown (.md)!", "error");
+      return;
+    }
     const validStartTime = evt.start_time && !isNaN(new Date(evt.start_time).getTime())
       ? new Date(evt.start_time).toLocaleString("vi-VN")
       : "Sắp diễn ra";
@@ -242,6 +252,10 @@ ${evt.description || "Tham gia buổi hội thảo để cập nhật các xu h�
   };
 
   const handleExportMyTicketsMd = () => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất dữ liệu Markdown (.md)!", "error");
+      return;
+    }
     if (myTickets.length === 0) {
       addToast("Chưa có vé sự kiện nào để xuất! ℹ️", "info");
       return;
@@ -281,6 +295,10 @@ ${rows}
   };
 
   const handleExportEventsScheduleMd = () => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất dữ liệu Markdown (.md)!", "error");
+      return;
+    }
     const list = filteredEvents.length > 0 ? filteredEvents : events;
     if (list.length === 0) {
       addToast("Không có sự kiện nào để xuất lịch! ℹ️", "info");
@@ -342,7 +360,7 @@ ${rows}
 
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+    <div className="w-full max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-8">
       {/* Header */}
       <div className="mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
@@ -361,17 +379,15 @@ ${rows}
           <h1 className="text-3xl sm:text-4xl font-black text-base-content tracking-tight">
             Hội Thảo & Sự Kiện Công Nghệ
           </h1>
-          <p className="text-base-content/70 mt-2 text-sm sm:text-base max-w-2xl">
+          <p className="text-base-content/70 mt-2 text-sm sm:text-base max-w-4xl">
             Tham gia các buổi workshop thực chiến, webinar trực tuyến và hội thảo chuyên sâu để nâng cao kỹ năng và mở rộng mạng lưới quan hệ trong ngành CNTT.
           </p>
         </div>
 
         <button
           type="button"
-          onClick={() => {
-            requireAuth(() => setShowCreateEventModal(true), "Vui lòng đăng nhập để tổ chức sự kiện!");
-          }}
-          className="btn btn-sm btn-primary text-white font-bold rounded-xl gap-1.5 shadow-sm shrink-0"
+          onClick={() => requireAuth(() => setShowCreateEventModal(true), "Vui lòng đăng nhập để tổ chức sự kiện mới!")}
+          className="btn btn-sm btn-primary text-white font-bold rounded-xl gap-1.5 shadow-sm shrink-0 cursor-pointer"
         >
           <span>+</span> Tổ chức sự kiện mới
         </button>
@@ -406,15 +422,17 @@ ${rows}
 
         {typeFilter !== "my_tickets" && (
           <div className="flex items-center gap-2 w-full sm:w-auto">
-            <button
-              type="button"
-              onClick={handleExportEventsScheduleMd}
-              className="btn btn-sm btn-outline btn-ghost hover:text-primary rounded-xl font-bold gap-1 border border-base-300 shrink-0"
-              title="Xuất danh sách sự kiện hiện tại ra Markdown (.md)"
-            >
-              <span>📥</span>
-              <span>Xuất lịch (.md)</span>
-            </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={handleExportEventsScheduleMd}
+                className="btn btn-sm btn-outline btn-ghost hover:text-primary rounded-xl font-bold gap-1 border border-base-300 shrink-0"
+                title="Xuất danh sách sự kiện hiện tại ra Markdown (.md)"
+              >
+                <span>📥</span>
+                <span>Xuất lịch (.md)</span>
+              </button>
+            )}
             <div className="relative w-full sm:w-64">
               <input
                 type="text"
@@ -472,18 +490,20 @@ ${rows}
                     • Quản lý mã vé và lịch trình tham gia sự kiện
                   </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleExportMyTicketsMd}
-                  className="btn btn-xs btn-outline btn-primary rounded-xl font-bold gap-1 shadow-2xs"
-                  title="Tải lịch trình toàn bộ vé tham dự dưới dạng Markdown (.md)"
-                >
-                  <span>📥</span>
-                  <span>Xuất lịch trình (.md)</span>
-                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={handleExportMyTicketsMd}
+                    className="btn btn-xs btn-outline btn-primary rounded-xl font-bold gap-1 shadow-2xs"
+                    title="Tải lịch trình toàn bộ vé tham dự dưới dạng Markdown (.md)"
+                  >
+                    <span>📥</span>
+                    <span>Xuất lịch trình (.md)</span>
+                  </button>
+                )}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
               {myTickets.map((ticket) => (
                 <div
                   key={ticket.id}
@@ -585,7 +605,7 @@ ${rows}
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
           {filteredEvents.map((evt) => {
             const hasTicket = myTickets.some((t) => t.event_id === evt.id);
 
@@ -642,14 +662,16 @@ ${rows}
                   >
                     📅
                   </a>
-                  <button
-                    type="button"
-                    onClick={() => handleExportEventMd(evt)}
-                    className="btn btn-outline border-base-300 btn-sm rounded-xl font-bold px-3 hover:border-primary hover:text-primary"
-                    title="Xuất thông tin sự kiện ra Markdown (.md)"
-                  >
-                    📥
-                  </button>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => handleExportEventMd(evt)}
+                      className="btn btn-outline border-base-300 btn-sm rounded-xl font-bold px-3 hover:border-primary hover:text-primary"
+                      title="Xuất thông tin sự kiện ra Markdown (.md)"
+                    >
+                      📥
+                    </button>
+                  )}
                   {hasTicket ? (
                     <button
                       onClick={() => {

@@ -1,6 +1,6 @@
 import html
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from app.core.database import get_db
@@ -12,11 +12,11 @@ router = APIRouter(tags=["SEO & RSS"])
 
 
 @router.get("/sitemap.xml")
-def get_sitemap_xml(db: Session = Depends(get_db)):
+def get_sitemap_xml(request: Request, db: Session = Depends(get_db)):
     """
     Section 15: XML Sitemap generation for search engines (Googlebot, Bingbot).
     """
-    base_url = "http://localhost:5173"
+    base_url = str(request.base_url).rstrip("/")
     now = datetime.now(timezone.utc)
     
     posts = (
@@ -100,28 +100,29 @@ def get_sitemap_xml(db: Session = Depends(get_db)):
 
 
 @router.get("/robots.txt")
-def get_robots_txt():
+def get_robots_txt(request: Request):
     """
     Section 15: Standard robots.txt for search crawler guidance.
     """
-    robots_content = """User-agent: *
+    base_url = str(request.base_url).rstrip("/")
+    robots_content = f"""User-agent: *
 Allow: /
 Disallow: /admin
 Disallow: /moderation
 Disallow: /api/
 
-Sitemap: http://localhost:8000/sitemap.xml
+Sitemap: {base_url}/sitemap.xml
 """
     return Response(content=robots_content, media_type="text/plain")
 
 
 @router.get("/feeds/rss")
 @router.get("/rss.xml")
-def get_rss_feed(db: Session = Depends(get_db)):
+def get_rss_feed(request: Request, db: Session = Depends(get_db)):
     """
     Section 15: RSS 2.0 Technical News Feed for readers & aggregators.
     """
-    base_url = "http://localhost:5173"
+    base_url = str(request.base_url).rstrip("/")
     now = datetime.now(timezone.utc)
     posts = (
         db.query(Post)

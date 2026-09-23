@@ -31,7 +31,7 @@ const formatFeedPost = (p) => ({
   status: p.status || "approved",
 });
 
-export default function Menu_main({ onNavigate, onSelectPost }) {
+export default function Menu_main({ onNavigate, onSelectPost, onEditPost }) {
   const {
     posts,
     filteredPosts,
@@ -46,11 +46,29 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
     setTimeRange,
     readDuration,
     setReadDuration,
-    resetFilters
+    resetFilters,
+    deletePost
   } = useBlog();
 
   const { users, currentUser, requireAuth, toggleFollow } = useAuth();
   const { addToast } = useToast();
+
+  const isAdmin = Boolean(
+    currentUser && (
+      currentUser.role === "admin" ||
+      currentUser.role === "moderator" ||
+      currentUser.is_superuser ||
+      (Array.isArray(currentUser.roles) && (
+        currentUser.roles.includes("admin") ||
+        currentUser.roles.includes("moderator") ||
+        currentUser.roles.some((r) =>
+          typeof r === "string" ? r === "admin" || r === "moderator" : r?.name === "admin" || r?.name === "moderator"
+        )
+      )) ||
+      currentUser.email === "admin@itblog.dev" ||
+      currentUser.username === "admin"
+    )
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [categoriesList, setCategoriesList] = useState(CATEGORIES);
   const [popularTagsList, setPopularTagsList] = useState(POPULAR_TAGS);
@@ -121,12 +139,28 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
         .then((res) => {
           const items = res?.items || (Array.isArray(res) ? res : []);
           if (isMounted) {
-            if (items.length > 0) setFeedPosts(items.map(formatFeedPost));
-            else setFeedPosts(posts.slice(0, 6));
+            if (items.length > 0) {
+              setFeedPosts(items.map(formatFeedPost));
+            } else {
+              // Smart recommendation ranking
+              const ranked = [...posts].sort((a, b) => {
+                const aScore = (a.isVerified ? 30 : 0) + (a.views || 0) * 0.1 + (Array.isArray(a.likes) ? a.likes.length * 5 : 0);
+                const bScore = (b.isVerified ? 30 : 0) + (b.views || 0) * 0.1 + (Array.isArray(b.likes) ? b.likes.length * 5 : 0);
+                return bScore - aScore;
+              });
+              setFeedPosts(ranked.slice(0, 18));
+            }
           }
         })
         .catch(() => {
-          if (isMounted) setFeedPosts(posts.slice(0, 6));
+          if (isMounted) {
+            const ranked = [...posts].sort((a, b) => {
+              const aScore = (a.isVerified ? 30 : 0) + (a.views || 0) * 0.1 + (Array.isArray(a.likes) ? a.likes.length * 5 : 0);
+              const bScore = (b.isVerified ? 30 : 0) + (b.views || 0) * 0.1 + (Array.isArray(b.likes) ? b.likes.length * 5 : 0);
+              return bScore - aScore;
+            });
+            setFeedPosts(ranked.slice(0, 18));
+          }
         })
         .finally(() => {
           if (isMounted) setIsFeedLoading(false);
@@ -212,6 +246,10 @@ export default function Menu_main({ onNavigate, onSelectPost }) {
   };
 
   const handleExportFeedMd = () => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất dữ liệu Markdown (.md)!", "error");
+      return;
+    }
     if (displayedPosts.length === 0) {
       addToast("Không có bài viết nào trong danh sách để xuất! ℹ️", "info");
       return;
@@ -267,7 +305,7 @@ ${rows}
       {/* Thân trang chính */}
       <main
         id="posts-container"
-        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full scroll-mt-20"
+        className="w-full max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-8 scroll-mt-20"
         >
           {/* Thanh chuyển đổi Discovery Feed Mode */}
           <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1 scrollbar-none">
@@ -381,7 +419,7 @@ ${rows}
                   Đặt lại bộ lọc
                 </button>
               )}
-              {displayedPosts.length > 0 && (
+              {isAdmin && displayedPosts.length > 0 && (
                 <button
                   type="button"
                   onClick={handleExportFeedMd}
@@ -534,24 +572,49 @@ ${rows}
             </div>
           )}
 
+                    {/* Admin On-Feed Moderation Banner */}
+          {isAdmin && (
+            <div className="mb-6 p-4 rounded-3xl bg-gradient-to-r from-primary/15 via-base-100 to-secondary/15 border border-primary/30 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5">
+                <span className="text-xl">🛡️</span>
+                <div>
+                  <p className="font-black text-base-content text-sm">Chế độ Quản trị viên trên Newfeed</p>
+                  <p className="text-base-content/70">Bạn có quyền Xóa bài viết, Ghim bài lên đầu trang (📌) và Xóa bình luận trực tiếp trên Feed.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigate("moderation")}
+                className="btn btn-xs btn-primary text-white font-bold rounded-xl px-3.5 gap-1.5 shadow-xs shrink-0 self-start sm:self-center"
+              >
+                <span>⚙️</span> Cài đặt hệ thống
+              </button>
+            </div>
+          )}
+
           {/* Bố cục nội dung chính: Tùy theo layoutMode */}
           {layoutMode === "grid" ? (
             /* Chế độ 1: Lưới 3 Cột Rộng Toàn Màn Hình */
             <div>
               {isPostListLoading ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {[...Array(6)].map((_, i) => (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                  {[...Array(8)].map((_, i) => (
                     <PostCardSkeleton key={i} />
                   ))}
                 </div>
               ) : displayedPosts.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 animate-fade-in">
                   {displayedPosts.map((post) => (
                     <PostCard
                       key={post.id}
                       post={post}
                       onNavigate={onNavigate}
                       onSelectPost={onSelectPost}
+                      onDelete={(id) => deletePost(id)}
+                      onEdit={(p) => {
+                        if (onEditPost) onEditPost(p);
+                        else onNavigate("edit_post", { post: p });
+                      }}
                     />
                   ))}
                 </div>
@@ -602,19 +665,24 @@ ${rows}
               {/* Cột chính: Danh sách bài viết (3 Cột trong hệ 4) */}
               <div className="lg:col-span-3">
                 {isPostListLoading ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                     {[...Array(6)].map((_, i) => (
                       <PostCardSkeleton key={i} />
                     ))}
                   </div>
                 ) : displayedPosts.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in">
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 animate-fade-in">
                     {displayedPosts.map((post) => (
                       <PostCard
                         key={post.id}
                         post={post}
                         onNavigate={onNavigate}
                         onSelectPost={onSelectPost}
+                        onDelete={(id) => deletePost(id)}
+                        onEdit={(p) => {
+                          if (onEditPost) onEditPost(p);
+                          else onNavigate("edit_post", { post: p });
+                        }}
                       />
                     ))}
                   </div>

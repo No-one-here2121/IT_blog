@@ -6,7 +6,7 @@ import { api } from "../services/api";
 import PostCard from "../components/PostCard";
 
 export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, authorId, initialTab }) {
-  const { currentUser, updateProfile, users, toggleFollow, requireAuth } = useAuth();
+  const { currentUser, updateProfile, users, toggleFollow, requireAuth, isAdmin } = useAuth();
   const { posts, deletePost, toggleBookmark } = useBlog();
   const { addToast } = useToast();
 
@@ -311,7 +311,7 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
     };
 
     return (
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+      <div className="w-full max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-8">
         {/* Nút quay lại & Header */}
         <div className="flex items-center justify-between gap-4 mb-6">
           <button
@@ -538,6 +538,10 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
 
   // Xuất danh sách bài viết của tôi dưới dạng Markdown (.md)
   const handleExportMyPostsMd = () => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất danh mục (.md)!", "error");
+      return;
+    }
     try {
       if (myPosts.length === 0) {
         addToast("Chưa có bài viết nào để xuất! ℹ️", "info");
@@ -615,6 +619,10 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
 
   // Xuất danh sách bài viết đã lưu dưới dạng Markdown (.md)
   const handleExportBookmarksMd = () => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất bài viết đã lưu (.md)!", "error");
+      return;
+    }
     try {
       let md = `# Danh Sách Bài Viết Đã Lưu - IT Blog\n\n`;
       md += `*Thời gian xuất: ${new Date().toLocaleDateString("vi-VN")} | Tổng cộng: ${bookmarkedPosts.length} bài viết*\n\n---\n\n`;
@@ -676,6 +684,10 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
 
   // Xuất Toàn Bộ Hồ Sơ Năng Lực & CV Lập Trình Viên ra Markdown (.md)
   const handleExportDeveloperResumeMd = () => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất hồ sơ năng lực (.md)!", "error");
+      return;
+    }
     try {
       const devName = currentUser?.name || "Kỹ sư Phần mềm";
       const devEmail = currentUser?.email || "developer@itblog.vn";
@@ -824,7 +836,7 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
 
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+    <div className="w-full max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-8">
       {/* Khung Thông tin cá nhân (Profile Header) */}
       <div className="bg-base-100 rounded-2xl border border-base-300 p-6 sm:p-8 shadow-sm mb-8">
         <div className="flex flex-col sm:flex-row items-center sm:items-start justify-between gap-6">
@@ -875,15 +887,17 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
 
           {/* Nút Hành động Profile */}
           <div className="flex items-center gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={handleExportDeveloperResumeMd}
-              className="btn btn-sm btn-outline border-base-300 gap-1.5 font-bold hover:border-primary hover:text-primary transition-all shadow-2xs"
-              title="Xuất toàn bộ Hồ sơ năng lực, thành tựu, chỉ số đóng góp và portfolio bài viết ra tệp Markdown (.md) chuẩn CV"
-            >
-              <span>📄</span>
-              <span>Xuất Hồ sơ / CV (.md)</span>
-            </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={handleExportDeveloperResumeMd}
+                className="btn btn-sm btn-outline border-base-300 gap-1.5 font-bold hover:border-primary hover:text-primary transition-all shadow-2xs"
+                title="Xuất toàn bộ Hồ sơ năng lực, thành tựu, chỉ số đóng góp và portfolio bài viết ra tệp Markdown (.md) chuẩn CV"
+              >
+                <span>📄</span>
+                <span>Xuất Hồ sơ / CV (.md)</span>
+              </button>
+            )}
             <button
               onClick={handleToggleEdit}
               className="btn btn-sm btn-outline btn-primary"
@@ -1063,7 +1077,7 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
       </div>
 
       {/* Tabs điều hướng nội dung */}
-      <div className="tabs tabs-boxed p-1 bg-base-200 mb-6 max-w-full w-full overflow-x-auto scrollbar-none flex-nowrap">
+      <div className="flex flex-wrap items-center gap-1.5 p-1.5 bg-base-200 rounded-2xl mb-6 max-w-full w-full border border-base-300">
         <button
           onClick={() => setActiveTab("my_posts")}
           className={`tab whitespace-nowrap shrink-0 text-xs sm:text-sm font-medium px-2.5 sm:px-3.5 ${
@@ -1137,15 +1151,17 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleExportMyPostsMd}
-                  className="btn btn-xs btn-outline btn-primary rounded-xl font-bold gap-1 shadow-2xs"
-                  title="Tải danh mục bài viết cá nhân dưới dạng Markdown (.md)"
-                >
-                  <span>📥</span>
-                  <span>Xuất .md</span>
-                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={handleExportMyPostsMd}
+                    className="btn btn-xs btn-outline btn-primary rounded-xl font-bold gap-1 shadow-2xs"
+                    title="Tải danh mục bài viết cá nhân dưới dạng Markdown (.md)"
+                  >
+                    <span>📥</span>
+                    <span>Xuất .md</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handleExportMyPostsJson}
@@ -1217,15 +1233,17 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleExportBookmarksMd}
-                  className="btn btn-xs btn-outline btn-primary rounded-xl font-bold gap-1 shadow-2xs"
-                  title="Tải danh sách bài viết đã lưu dưới dạng Markdown (.md) cho Obsidian / Notion"
-                >
-                  <span>📥</span>
-                  <span>Xuất .md</span>
-                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={handleExportBookmarksMd}
+                    className="btn btn-xs btn-outline btn-primary rounded-xl font-bold gap-1 shadow-2xs"
+                    title="Tải danh sách bài viết đã lưu dưới dạng Markdown (.md) cho Obsidian / Notion"
+                  >
+                    <span>📥</span>
+                    <span>Xuất .md</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handleExportBookmarksJson}

@@ -1,15 +1,21 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 
 export default function AuthModal() {
   const { authModalOpen, modalMessage, closeAuthModal, login, loginDemo, register } = useAuth();
   const [tab, setTab] = useState("login"); // 'login' | 'register'
-
-  // Form states
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+
+  // Reset tab to login whenever modal opens
+  useEffect(() => {
+    if (authModalOpen) {
+      setTab("login");
+      setShowPassword(false);
+    }
+  }, [authModalOpen]);
 
   if (!authModalOpen) return null;
 
@@ -62,14 +68,42 @@ export default function AuthModal() {
           )}
         </div>
 
-        {/* Nút Đăng nhập Nhanh Demo */}
-        <button
-          onClick={() => loginDemo()}
-          className="btn btn-outline btn-primary btn-sm w-full gap-2 mb-4 font-semibold hover:text-white"
-        >
-          <span>⚡</span>
-          <span>Đăng nhập tài khoản dùng thử (Demo)</span>
-        </button>
+        {/* Nút Đăng nhập Nhanh Demo theo từng vai trò */}
+        <div className="space-y-1.5 mb-3">
+          <p className="text-[11px] font-bold text-base-content/60 flex items-center gap-1">
+            <span>⚡</span>
+            <span>Đăng nhập trải nghiệm theo vai trò:</span>
+          </p>
+          <div className="grid grid-cols-3 gap-1.5">
+            <button
+              type="button"
+              onClick={() => loginDemo("admin")}
+              className="btn btn-xs btn-outline btn-primary font-bold py-1.5 h-auto flex flex-col gap-0.5 cursor-pointer"
+              title="Quản trị viên toàn quyền & Xuất Markdown"
+            >
+              <span className="text-xs">👑</span>
+              <span className="text-[10px]">Admin</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => loginDemo("moderator")}
+              className="btn btn-xs btn-outline btn-secondary font-bold py-1.5 h-auto flex flex-col gap-0.5 cursor-pointer"
+              title="Kiểm duyệt viên nội dung"
+            >
+              <span className="text-xs">🛡️</span>
+              <span className="text-[10px]">Moderator</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => loginDemo("user")}
+              className="btn btn-xs btn-outline font-bold py-1.5 h-auto flex flex-col gap-0.5 cursor-pointer"
+              title="Thành viên / Tác giả thông thường"
+            >
+              <span className="text-xs">👤</span>
+              <span className="text-[10px]">Member</span>
+            </button>
+          </div>
+        </div>
 
         <div className="divider text-xs text-base-content/40 my-2">HOẶC</div>
 

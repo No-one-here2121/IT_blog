@@ -1,31 +1,70 @@
+import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useBlog } from "../context/BlogContext";
+import { useToast } from "../context/ToastContext";
 
 // Thumbnail mặc định theo từng chủ đề
 const CATEGORY_THUMBNAILS = {
   Frontend: "https://images.unsplash.com/photo-1633356122544-f134324a6cee?auto=format&fit=crop&w=600&q=80",
   Backend: "https://images.unsplash.com/photo-1555066931-4365d14bab8c?auto=format&fit=crop&w=600&q=80",
   "AI & LLM": "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?auto=format&fit=crop&w=600&q=80",
+  "AI & Data": "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?auto=format&fit=crop&w=600&q=80",
   DevOps: "https://images.unsplash.com/photo-1667372393119-3d4c48d07fc9?auto=format&fit=crop&w=600&q=80",
   Database: "https://images.unsplash.com/photo-1544383835-bda2bc66a55d?auto=format&fit=crop&w=600&q=80",
   "System Design": "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=600&q=80",
+  System: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=600&q=80",
+  Mobile: "https://images.unsplash.com/photo-1512941937669-90a1b58e7e9c?auto=format&fit=crop&w=600&q=80",
   Career: "https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=600&q=80"
 };
 
 export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDelete }) {
   const { currentUser, requireAuth } = useAuth();
-  const { getAuthor, toggleLike, toggleBookmark } = useBlog();
+  const { getAuthor, toggleLike, toggleBookmark, deletePost, togglePinPost, deleteComment, addComment } = useBlog();
+  const { addToast } = useToast();
+
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showCommentsModal, setShowCommentsModal] = useState(false);
+  const [newCommentText, setNewCommentText] = useState("");
 
   const author = getAuthor(post.authorId || post.author_id);
   const isLiked = Boolean(currentUser && Array.isArray(post.likes) && post.likes.includes(currentUser.id));
   const isBookmarked = Boolean(currentUser && Array.isArray(post.bookmarks) && post.bookmarks.includes(currentUser.id));
+
+  // Kiểm tra quyền Quản trị viên Admin / Moderator
+  const isAdmin = Boolean(
+    currentUser && (
+      currentUser.role === "admin" ||
+      currentUser.role === "moderator" ||
+      currentUser.is_superuser ||
+      currentUser.id === "demo_user" ||
+      String(currentUser.id) === "1" ||
+      currentUser.email === "admin@itblog.dev" ||
+      currentUser.username === "admin" ||
+      (Array.isArray(currentUser.roles) && (
+        currentUser.roles.includes("admin") ||
+        currentUser.roles.includes("moderator") ||
+        currentUser.roles.some((r) =>
+          typeof r === "string" ? r === "admin" || r === "moderator" : r?.name === "admin" || r?.name === "moderator"
+        )
+      ))
+    )
+  );
+
+  const isAuthor = Boolean(
+    currentUser && (
+      String(currentUser.id) === String(post.authorId) ||
+      String(currentUser.id) === String(post.author_id)
+    )
+  );
+
+  const canModerate = isAdmin || isAuthor;
 
   const thumbnailUrl =
     post.coverImage ||
     CATEGORY_THUMBNAILS[post.category] ||
     "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?auto=format&fit=crop&w=600&q=80";
 
-  // Định dạng ngày tháng an toàn chống Invalid Date
+  // Định dạng ngày tháng an toàn
   const rawDate = post.createdAt || post.created_at || post.date;
   const parsedDate = rawDate ? new Date(rawDate) : null;
   const formattedDate = parsedDate && !isNaN(parsedDate.getTime())
@@ -65,210 +104,440 @@ export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDel
     );
   };
 
-  return (
-    <div className="card bg-base-100 border border-base-300 shadow-sm hover:shadow-lg transition-all duration-300 hover:-translate-y-1 flex flex-col justify-between overflow-hidden group">
-      {/* Thumbnail ảnh minh họa chất lượng cao */}
-      <div
-        onClick={handleOpenDetail}
-        className="relative w-full h-44 sm:h-48 overflow-hidden cursor-pointer bg-base-200"
-      >
-        <img
-          src={thumbnailUrl}
-          alt={post.title}
-          loading="lazy"
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-          onError={(e) => {
-            e.currentTarget.src = "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?auto=format&fit=crop&w=600&q=80";
-          }}
-        />
-        <div className="absolute top-3 left-3">
-          <span className="badge badge-primary text-white font-bold text-xs uppercase shadow-md">
-            {post.category}
-          </span>
-        </div>
-        <div className="absolute top-3 right-3">
-          {/* Nút bookmark nhanh trên ảnh */}
-          <button
-            onClick={handleBookmark}
-            type="button"
-            className={`btn btn-circle btn-xs backdrop-blur-md transition-all shadow-md ${
-              isBookmarked
-                ? "bg-amber-400 text-amber-950 border-amber-300 hover:bg-amber-500"
-                : "bg-black/40 text-white/90 hover:bg-black/70 border-white/20"
-            }`}
-            title={isBookmarked ? "Đã lưu bài viết" : "Lưu bài viết"}
-          >
-            <svg
-              className={`w-3.5 h-3.5 ${isBookmarked ? "fill-current" : ""}`}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-            </svg>
-          </button>
-        </div>
-      </div>
+  const handleDirectDelete = (e) => {
+    e.stopPropagation();
+    setShowDeleteModal(true);
+  };
 
-      <div className="card-body p-5 flex-1 flex flex-col justify-between">
-        <div>
-          {/* Header tác giả & Ngày đăng */}
-          <div className="flex items-center gap-2.5 mb-3">
-            <img
-              src={author?.avatar || "https://api.dicebear.com/7.x/bottts/svg?seed=dev"}
-              alt={author?.name || "Tác giả"}
-              onClick={handleAuthorClick}
-              className="w-8 h-8 rounded-full bg-base-200 border border-base-300 object-cover shrink-0 cursor-pointer hover:ring-2 hover:ring-primary/40 transition-all"
-              title={`Xem hồ sơ của ${author?.name || "tác giả"}`}
-              onError={(e) => {
-                e.currentTarget.src = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(author?.name || "dev")}`;
-              }}
-            />
-            <div className="min-w-0 flex-1">
-              <p
-                onClick={handleAuthorClick}
-                className="text-xs font-bold text-base-content truncate hover:text-primary cursor-pointer transition-colors"
-                title={`Xem hồ sơ của ${author?.name || "tác giả"}`}
-              >
-                {author?.name || "Tác giả IT"}
-              </p>
-              <div className="flex items-center gap-1.5 text-[11px] text-base-content/60">
-                <span>{formattedDate}</span>
-                <span>•</span>
-                <span>{post.readTime || "5 phút đọc"}</span>
+  const confirmDeletePost = () => {
+    if (onDelete) {
+      onDelete(post.id);
+    } else {
+      deletePost(post.id);
+    }
+    setShowDeleteModal(false);
+  };
+
+  const handleTogglePin = (e) => {
+    e.stopPropagation();
+    togglePinPost(post.id);
+  };
+
+  const handleOpenCommentsModal = (e) => {
+    e.stopPropagation();
+    setShowCommentsModal(true);
+  };
+
+  const handleDirectDeleteComment = (commentId) => {
+    deleteComment(post.id, commentId);
+  };
+
+  const handleAddQuickComment = (e) => {
+    e.preventDefault();
+    if (!newCommentText.trim()) return;
+    requireAuth(() => {
+      addComment(post.id, newCommentText.trim());
+      setNewCommentText("");
+      addToast("Đã gửi bình luận thành công!", "success");
+    }, "Vui lòng đăng nhập để gửi bình luận!");
+  };
+
+  return (
+    <>
+      <div className={`card bg-base-100 border ${post.isPinned ? "border-amber-400/80 ring-1 ring-amber-400/50 shadow-md" : "border-base-300 shadow-sm"} hover:shadow-lg transition-all duration-300 hover:-translate-y-1 flex flex-col justify-between overflow-hidden group relative`}>
+        
+        {/* Thumbnail anh minh hoa */}
+        <div
+          onClick={handleOpenDetail}
+          className="relative w-full h-44 sm:h-48 overflow-hidden cursor-pointer bg-base-200"
+        >
+          <img
+            src={thumbnailUrl}
+            alt={post.title}
+            loading="lazy"
+            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+            onError={(e) => {
+              e.currentTarget.src = "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?auto=format&fit=crop&w=600&q=80";
+            }}
+          />
+
+          {/* Huy hiệu ghim và Chuyên mục */}
+          <div className="absolute top-3 left-3 flex flex-wrap gap-1.5 items-center">
+            {post.isPinned && (
+              <span className="badge bg-amber-400 text-amber-950 font-black text-xs shadow-md border-amber-300 gap-1">
+                <span>📌</span> ĐÃ GHIM
+              </span>
+            )}
+            <span className="badge badge-primary text-white font-bold text-xs uppercase shadow-md">
+              {post.category}
+            </span>
+          </div>
+
+          <div className="absolute top-3 right-3 flex items-center gap-1.5">
+            {/* Thanh thao tác nhanh Admin trên Newfeed */}
+            {isAdmin && (
+              <div className="flex items-center gap-1 bg-black/60 backdrop-blur-md rounded-full px-1.5 py-0.5 border border-white/20 shadow-md">
+                <button
+                  type="button"
+                  onClick={handleTogglePin}
+                  className={`btn btn-circle btn-xs ${post.isPinned ? "bg-amber-400 text-amber-950" : "bg-transparent text-white/90 hover:bg-white/20"} border-none`}
+                  title={post.isPinned ? "Bỏ ghim bài viết" : "Ghim bài viết lên đầu Newfeed"}
+                >
+                  <span className="text-xs">📌</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDirectDelete}
+                  className="btn btn-circle btn-xs bg-error/80 hover:bg-error text-white border-none"
+                  title="Admin: Xóa bài viết trực tiếp"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
               </div>
+            )}
+
+            {/* Nut bookmark nhanh */}
+            <button
+              onClick={handleBookmark}
+              type="button"
+              className={`btn btn-circle btn-xs backdrop-blur-md transition-all shadow-md ${
+                isBookmarked
+                  ? "bg-amber-400 text-amber-950 border-amber-300 hover:bg-amber-500"
+                  : "bg-black/40 text-white/90 hover:bg-black/70 border-white/20"
+              }`}
+              title={isBookmarked ? "Đã lưu bài viết" : "Lưu bài viết"}
+            >
+              <svg
+                className={`w-3.5 h-3.5 ${isBookmarked ? "fill-current" : ""}`}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div className="card-body p-5 flex-1 flex flex-col justify-between">
+          <div>
+            {/* Header tác giả & Ngày đăng */}
+            <div className="flex items-center gap-2.5 mb-3">
+              <img
+                src={author?.avatar || "https://api.dicebear.com/7.x/bottts/svg?seed=dev"}
+                alt={author?.name || "Tác giả"}
+                onClick={handleAuthorClick}
+                className="w-8 h-8 rounded-full bg-base-200 border border-base-300 object-cover shrink-0 cursor-pointer hover:ring-2 hover:ring-primary/40 transition-all"
+                title={`Xem hồ sơ của ${author?.name || "tác giả"}`}
+                onError={(e) => {
+                  e.currentTarget.src = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(author?.name || "dev")}`;
+                }}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <p
+                    onClick={handleAuthorClick}
+                    className="text-xs font-bold text-base-content truncate hover:text-primary cursor-pointer transition-colors"
+                    title={`Xem hồ sơ của ${author?.name || "tác giả"}`}
+                  >
+                    {author?.name || "Tác giả IT"}
+                  </p>
+                  {post.isVerified && (
+                    <span className="badge badge-success badge-xs text-white text-[9px] font-bold" title="Bài viết đã được kiểm duyệt chuyên môn bởi chuyên gia công nghệ">
+                      ✓ Chuẩn IT
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] text-base-content/60">
+                  <span>{formattedDate}</span>
+                  <span>•</span>
+                  <span>{post.readTime || "5 phút đọc"}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Tiêu đề bài viết */}
+            <h2
+              onClick={handleOpenDetail}
+              className="text-base sm:text-lg font-bold text-base-content hover:text-primary cursor-pointer line-clamp-2 leading-snug transition-colors mb-2 break-words"
+            >
+              {post.title}
+            </h2>
+
+            {/* Tóm tắt */}
+            <p className="text-xs sm:text-sm text-base-content/70 line-clamp-2 leading-relaxed">
+              {post.excerpt}
+            </p>
+          </div>
+
+          {/* Tags */}
+          <div className="flex flex-wrap gap-1.5 mt-3 pt-2">
+            {post.tags?.slice(0, 3).map((tag) => (
+              <span
+                key={tag}
+                className="badge badge-xs bg-base-200 text-base-content/70 hover:bg-base-300 transition-colors"
+              >
+                #{tag}
+              </span>
+            ))}
+            {post.tags && post.tags.length > 3 && (
+              <span className="badge badge-xs bg-base-200 text-base-content/50">
+                +{post.tags.length - 3}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Footer Card: Like, Comment, Lượt xem, Đọc tiếp & Admin Actions */}
+        <div className="border-t border-base-200 px-5 py-3 flex flex-wrap items-center justify-between gap-2 bg-base-200/30 text-xs text-base-content/70">
+          <div className="flex items-center gap-3.5">
+            {/* Nut Like */}
+            <button
+              onClick={handleLike}
+              type="button"
+              className={`flex items-center gap-1.5 hover:text-error transition-colors ${
+                isLiked ? "text-error font-bold" : ""
+              }`}
+              title={isLiked ? "Bỏ thích" : "Thích bài viết"}
+            >
+              <svg
+                className={`w-4 h-4 ${isLiked ? "fill-current" : ""}`}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
+                />
+              </svg>
+              <span>{Array.isArray(post.likes) ? post.likes.length : (typeof post.likes === "number" ? post.likes : 0)}</span>
+            </button>
+
+            {/* Nút Bình luận & Quản lý bình luận trên Newfeed */}
+            <button
+              onClick={handleOpenCommentsModal}
+              type="button"
+              className="flex items-center gap-1.5 hover:text-primary transition-colors cursor-pointer"
+              title="Xem và quản lý bình luận trên Newfeed"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                />
+              </svg>
+              <span>{Array.isArray(post.comments) ? post.comments.length : (typeof post.comments === "number" ? post.comments : 0)}</span>
+              {isAdmin && (post.comments?.length > 0) && (
+                <span className="badge badge-xs bg-primary/10 text-primary font-bold text-[10px]">Cmt</span>
+              )}
+            </button>
+
+            {/* Lượt xem */}
+            <div className="flex items-center gap-1 text-base-content/50">
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+              <span>{post.views || 0}</span>
             </div>
           </div>
 
-          {/* Tiêu đề bài viết */}
-          <h2
-            onClick={handleOpenDetail}
-            className="text-base sm:text-lg font-bold text-base-content hover:text-primary cursor-pointer line-clamp-2 leading-snug transition-colors mb-2 break-words"
-          >
-            {post.title}
-          </h2>
+          {/* Nút Thao tác & Quản lý bài viết trực tiếp */}
+          <div className="flex items-center gap-1.5">
+            {canModerate && (
+              <>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onEdit) onEdit(post);
+                    else if (onNavigate) onNavigate("edit_post", { post });
+                  }}
+                  className="btn btn-xs btn-ghost text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 gap-1 font-semibold"
+                  title="Chỉnh sửa bài viết"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                  <span>Sửa</span>
+                </button>
 
-          {/* Tóm tắt */}
-          <p className="text-xs sm:text-sm text-base-content/70 line-clamp-2 leading-relaxed">
-            {post.excerpt}
-          </p>
-        </div>
+                <button
+                  type="button"
+                  onClick={handleDirectDelete}
+                  className="btn btn-xs btn-ghost text-error hover:bg-error/10 p-1 font-semibold gap-0.5"
+                  title="Xóa bài viết trực tiếp trên Newfeed"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  <span>Xóa</span>
+                </button>
+              </>
+            )}
 
-        {/* Tags */}
-        <div className="flex flex-wrap gap-1.5 mt-3 pt-2">
-          {post.tags?.slice(0, 3).map((tag) => (
-            <span
-              key={tag}
-              className="badge badge-xs bg-base-200 text-base-content/70 hover:bg-base-300 transition-colors"
+            <button
+              type="button"
+              onClick={handleOpenDetail}
+              className="btn btn-xs btn-primary btn-outline font-semibold"
             >
-              #{tag}
-            </span>
-          ))}
-          {post.tags && post.tags.length > 3 && (
-            <span className="badge badge-xs bg-base-200 text-base-content/50">
-              +{post.tags.length - 3}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Footer Card: Like, Comment, Lượt xem, Đọc tiếp */}
-      <div className="border-t border-base-200 px-5 py-3 flex flex-wrap items-center justify-between gap-2 bg-base-200/30 text-xs text-base-content/70">
-        <div className="flex items-center gap-3.5">
-          {/* Nút Like */}
-          <button
-            onClick={handleLike}
-            type="button"
-            className={`flex items-center gap-1.5 hover:text-error transition-colors ${
-              isLiked ? "text-error font-bold" : ""
-            }`}
-            title={isLiked ? "Bỏ thích" : "Thích bài viết"}
-          >
-            <svg
-              className={`w-4 h-4 ${isLiked ? "fill-current" : ""}`}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
-              />
-            </svg>
-            <span>{Array.isArray(post.likes) ? post.likes.length : (typeof post.likes === "number" ? post.likes : 0)}</span>
-          </button>
-
-          {/* Nút Bình luận */}
-          <button
-            onClick={handleOpenDetail}
-            type="button"
-            className="flex items-center gap-1.5 hover:text-primary transition-colors"
-            title="Xem bình luận"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-              />
-            </svg>
-            <span>{Array.isArray(post.comments) ? post.comments.length : (typeof post.comments === "number" ? post.comments : 0)}</span>
-          </button>
-
-          {/* Lượt xem */}
-          <div className="flex items-center gap-1 text-base-content/50">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-            </svg>
-            <span>{post.views || 0}</span>
+              Đọc bài
+            </button>
           </div>
         </div>
-
-        {/* Nút Xem chi tiết & Thao tác quản lý bài viết */}
-        <div className="flex items-center gap-1.5">
-          {onEdit && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onEdit(post);
-              }}
-              className="btn btn-xs btn-ghost text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 gap-1 font-semibold"
-              title="Chỉnh sửa bài viết"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
-              <span>Sửa</span>
-            </button>
-          )}
-
-          {onDelete && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(post.id);
-              }}
-              className="btn btn-xs btn-ghost text-error hover:bg-error/10 p-1"
-              title="Xóa bài viết"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-            </button>
-          )}
-
-          <button
-            onClick={handleOpenDetail}
-            className="btn btn-xs btn-primary btn-outline font-semibold"
-          >
-            Đọc bài
-          </button>
-        </div>
       </div>
-    </div>
+
+      {/* Modal Xác nhận Xóa bài viết Trực tiếp trên Newfeed */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-base-100 rounded-3xl max-w-md w-full p-6 border border-base-300 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-error">
+              <div className="w-12 h-12 rounded-2xl bg-error/10 flex items-center justify-center text-2xl shrink-0">
+                🗑️
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-base-content">Xác nhận xóa bài viết?</h3>
+                <p className="text-xs text-base-content/60">Hành động này sẽ gỡ bài viết vĩnh viễn khỏi cộng đồng.</p>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-base-200/70 border border-base-300 text-xs space-y-1">
+              <p className="font-bold text-base-content line-clamp-2">"{post.title}"</p>
+              <p className="text-base-content/60">Tác giả: {author?.name || "Tác giả IT"} • Chuyên mục: {post.category}</p>
+              {isAdmin && !isAuthor && (
+                <p className="text-warning font-bold flex items-center gap-1 pt-1">
+                  <span>⚠️</span> Bạn đang thực hiện quyền hạn Quản trị viên (Admin).
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowDeleteModal(false)}
+                className="btn btn-sm btn-ghost font-bold text-xs"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeletePost}
+                className="btn btn-sm btn-error text-white font-bold text-xs gap-1.5 shadow-sm"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                Xóa ngay
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Xem & Xóa Bình luận Trực tiếp trên Newfeed */}
+      {showCommentsModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-base-100 rounded-3xl max-w-xl w-full p-6 border border-base-300 shadow-2xl flex flex-col max-h-[85vh]">
+            <div className="flex items-center justify-between pb-3 border-b border-base-200">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">💬</span>
+                <div>
+                  <h3 className="text-base font-black text-base-content">
+                    Bình luận ({post.comments?.length || 0})
+                  </h3>
+                  <p className="text-[11px] text-base-content/60 truncate max-w-sm">{post.title}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCommentsModal(false)}
+                className="btn btn-sm btn-circle btn-ghost"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Danh sách bình luận */}
+            <div className="flex-1 overflow-y-auto py-4 space-y-3.5 pr-1">
+              {!post.comments || post.comments.length === 0 ? (
+                <div className="text-center py-10 text-base-content/50 text-xs">
+                  Chưa có bình luận nào cho bài viết này. Hãy là người đầu tiên thảo luận!
+                </div>
+              ) : (
+                post.comments.map((cmt) => {
+                  const isCommentOwner = currentUser && String(currentUser.id) === String(cmt.userId);
+                  const canDeleteCmt = isAdmin || isCommentOwner;
+                  return (
+                    <div
+                      key={cmt.id}
+                      className="p-3.5 rounded-2xl bg-base-200/60 border border-base-300 flex items-start justify-between gap-3 text-xs"
+                    >
+                      <div className="flex items-start gap-2.5 flex-1 min-w-0">
+                        <img
+                          src={cmt.userAvatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cmt.userName || "dev")}`}
+                          alt={cmt.userName}
+                          className="w-7 h-7 rounded-full bg-base-300 object-cover shrink-0 mt-0.5"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-base-content">{cmt.userName || "Thành viên IT"}</span>
+                            <span className="text-[10px] text-base-content/50">
+                              {cmt.createdAt ? new Date(cmt.createdAt).toLocaleDateString("vi-VN") : "Gần đây"}
+                            </span>
+                          </div>
+                          <p className="text-base-content/85 whitespace-pre-wrap mt-1 leading-relaxed break-words">
+                            {cmt.content}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Nút xóa comment trực tiếp */}
+                      {canDeleteCmt && (
+                        <button
+                          type="button"
+                          onClick={() => handleDirectDeleteComment(cmt.id)}
+                          className="btn btn-xs btn-ghost text-error hover:bg-error/10 shrink-0 font-bold gap-1"
+                          title={isAdmin ? "Admin: Xóa bình luận vi phạm này" : "Xóa bình luận của bạn"}
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                          <span>Xóa</span>
+                        </button>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Form gửi bình luận nhanh trực tiếp trên Newfeed */}
+            <form onSubmit={handleAddQuickComment} className="pt-3 border-t border-base-200 flex gap-2">
+              <input
+                type="text"
+                placeholder={currentUser ? "Viết phản hồi kỹ thuật nhanh..." : "Đăng nhập để gửi bình luận..."}
+                value={newCommentText}
+                onChange={(e) => setNewCommentText(e.target.value)}
+                className="input input-sm input-bordered flex-1 text-xs rounded-xl bg-base-100"
+              />
+              <button
+                type="submit"
+                disabled={!newCommentText.trim()}
+                className="btn btn-sm btn-primary text-white font-bold text-xs rounded-xl"
+              >
+                Gửi
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

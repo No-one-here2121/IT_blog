@@ -1,0 +1,65 @@
+[
+  {
+    "id": "all",
+    "title": "Tất cả Đề tài",
+    "icon": "🌐",
+    "badge": "Toàn diện",
+    "description": "Luyện tập tổng hợp câu hỏi từ tất cả các chuyên đề kỹ thuật."
+  },
+  {
+    "id": "React",
+    "title": "React 19 & Frontend",
+    "icon": "⚛️",
+    "badge": "Frontend",
+    "description": "Hooks, Server Actions, useActionState, Suspense, Fiber và React Compiler."
+  },
+  {
+    "id": "FastAPI",
+    "title": "FastAPI & Backend",
+    "icon": "⚡",
+    "badge": "Backend",
+    "description": "Async def, Pydantic V2, Dependency Injection, Lifespan và CORS."
+  },
+  {
+    "id": "PostgreSQL",
+    "title": "PostgreSQL & Database",
+    "icon": "🐘",
+    "badge": "Database",
+    "description": "Connection Pooling, GIN Index, EXPLAIN ANALYZE, MVCC và Partitioning."
+  },
+  {
+    "id": "DevOps",
+    "title": "DevOps, Docker & K8s",
+    "icon": "🐳",
+    "badge": "DevOps",
+    "description": "Multi-stage builds, Kubernetes Pods/Probes, CI/CD và Reverse Proxy."
+  },
+  {
+    "id": "Python",
+    "title": "Python Core & Async",
+    "icon": "🐍",
+    "badge": "Language",
+    "description": "Asyncio TaskGroup, Faster CPython 3.11+, Generators, GIL và Metaclasses."
+  },
+  {
+    "id": "Security",
+    "title": "Bảo mật Web & Ứng dụng",
+    "icon": "🛡️",
+    "badge": "Security",
+    "description": "OWASP Top 10, SQL Injection, XSS, CSRF, JWT và Password Hashing."
+  },
+  {
+    "id": "Architecture",
+    "title": "Kiến trúc Hệ thống",
+    "icon": "🏗️",
+    "badge": "System Design",
+    "description": "Microservices, Saga Pattern, Caching Redis, Kafka vs RabbitMQ và CAP."
+  },
+  {
+    "id": "Fullstack",
+    "title": "Fullstack Engineering",
+    "icon": "💻",
+    "badge": "Software Eng",
+    "description": "gRPC vs REST, HTTP/2 & 3, SSE, SOLID, Clean Architecture và SemVer."
+  }
+]

@@ -30,9 +30,12 @@ class SlidingWindowRateLimiter:
             self._records[key] = timestamps
             return True
 
-    def get_remaining(self, key: str, max_requests: int) -> int:
+    def get_remaining(self, key: str, max_requests: int, window_seconds: int = 60) -> int:
         with self._lock:
             timestamps = self._records.get(key, [])
+            window_start = time.time() - window_seconds
+            timestamps = [t for t in timestamps if t > window_start]
+            self._records[key] = timestamps
             return max(0, max_requests - len(timestamps))
 
     def reset(self):
@@ -109,7 +112,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             )
 
         response = await call_next(request)
-        remaining = limiter.get_remaining(key, limit)
+        remaining = limiter.get_remaining(key, limit, self.window_seconds)
         response.headers["X-RateLimit-Limit"] = str(limit)
         response.headers["X-RateLimit-Remaining"] = str(remaining)
         return response

@@ -3,8 +3,8 @@ import { useRef, useState } from "react";
 import { saveLocalImage } from "../utils/imageStore";
 
 /**
- * Thanh cong cu soan thao kieu Word cho IT Blog.
- * Khong cai them lib ngoai — thao tac truc tiep len textarea qua ref.
+ * Thanh công cụ soạn thảo kiểu Word cho IT Blog.
+ * Không cài thêm thư viện ngoài — thao tác trực tiếp lên textarea qua ref.
  */
 const TOOLS = [
   { id: "bold", icon: "B", label: "Bôi đen chữ rồi bấm: In đậm", cls: "font-black" },
@@ -82,9 +82,9 @@ export default function RichEditorToolbar({ textareaRef, value, onChange }) {
   };
 
   const handleImageUrl = () => {
-    const url = window.prompt("Dan URL anh (https://...):");
+    const url = window.prompt("Dán URL ảnh (https://...):");
     if (!url || !url.trim()) return;
-    const alt = window.prompt("Mo ta anh (alt text):", "Minh hoa bai viet") || "Minh hoa bai viet";
+    const alt = window.prompt("Mô tả ảnh (alt text):", "Minh họa bài viết") || "Minh họa bài viết";
     insertBlock("![" + alt.trim() + "](" + url.trim() + ")");
   };
 
@@ -106,7 +106,7 @@ export default function RichEditorToolbar({ textareaRef, value, onChange }) {
             canvas.height = h;
             canvas.getContext("2d").drawImage(img, 0, 0, w, h);
             const blob = await new Promise((res) => canvas.toBlob(res, "image/jpeg", 0.82));
-            if (!blob) throw new Error("Khong nen duoc anh");
+            if (!blob) throw new Error("Không nén được ảnh");
             const id =
               "img_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
             await saveLocalImage(id, blob);
@@ -116,17 +116,17 @@ export default function RichEditorToolbar({ textareaRef, value, onChange }) {
             reject(e);
           }
         };
-        img.onerror = () => reject(new Error("Khong doc duoc file anh"));
+        img.onerror = () => reject(new Error("Không đọc được file ảnh"));
         img.src = reader.result;
       };
-      reader.onerror = () => reject(new Error("Khong doc duoc file anh"));
+      reader.onerror = () => reject(new Error("Không đọc được file ảnh"));
       reader.readAsDataURL(file);
     });
 
   const handleImageFile = async (file) => {
     if (!file || uploading) return;
     if (!file.type.startsWith("image/")) {
-      alert("Vui long chon file anh (png, jpg, gif, webp).");
+      alert("Vui lòng chọn file ảnh (png, jpg, gif, webp).");
       return;
     }
     setUploading(true);
@@ -134,27 +134,27 @@ export default function RichEditorToolbar({ textareaRef, value, onChange }) {
       const md = await fileToLocalRef(file);
       insertBlock(md);
     } catch {
-      alert("Khong doc duoc file anh, vui long chon file khac.");
+      alert("Không đọc được file ảnh, vui lòng chọn file khác.");
     } finally {
       setUploading(false);
     }
   };
 
   const handleVideo = () => {
-    const url = window.prompt("Dan link YouTube hoac file MP4 (https://...):");
+    const url = window.prompt("Dán link YouTube hoặc file MP4 (https://...):");
     if (!url || !url.trim()) return;
     insertBlock(toVideoMarkdown(url));
   };
 
   const handleLink = () => {
-    const url = window.prompt("Dan URL lien ket (https://...):");
+    const url = window.prompt("Dán URL liên kết (https://...):");
     if (!url || !url.trim()) return;
     const ta = textareaRef?.current;
     let selected = "";
     if (ta && ta.selectionStart !== ta.selectionEnd) {
       selected = safeValue.slice(ta.selectionStart, ta.selectionEnd);
     }
-    const text = selected || window.prompt("Chu hien thi:", "Xem tai lieu") || "Xem tai lieu";
+    const text = selected || window.prompt("Chữ hiển thị:", "Xem tài liệu") || "Xem tài liệu";
     applyAtCursor("[", "](" + url.trim() + ")", text);
   };
 
@@ -171,9 +171,9 @@ export default function RichEditorToolbar({ textareaRef, value, onChange }) {
     let le = end;
     while (le < cur.length && cur[le] !== "\n") le += 1;
     if (ls === le) {
-      if (kind === "ul") insertBlock("- Y chinh thu nhat\n- Y chinh thu hai\n- Luu y quan trong");
-      else if (kind === "ol") insertBlock("1. Mo cong cu can dung\n2. Thuc hien thao tac chinh\n3. Kiem tra ket qua");
-      else insertBlock("> Meo hay: viet 1 cau chot lai y chinh cua doan o day.");
+      if (kind === "ul") insertBlock("- Ý chính thứ nhất\n- Ý chính thứ hai\n- Lưu ý quan trọng");
+      else if (kind === "ol") insertBlock("1. Mở công cụ cần dùng\n2. Thực hiện thao tác chính\n3. Kiểm tra kết quả");
+      else insertBlock("> Mẹo hay: viết 1 câu chốt lại ý chính của đoạn ở đây.");
       return;
     }
     const lines = cur.slice(ls, le).split("\n");
@@ -226,7 +226,7 @@ export default function RichEditorToolbar({ textareaRef, value, onChange }) {
     while (ls > 0 && cur[ls - 1] !== "\n") ls -= 1;
     let le = end;
     while (le < cur.length && cur[le] !== "\n") le += 1;
-    const chunk = cur.slice(ls, le) || "Tieu de muc";
+    const chunk = cur.slice(ls, le) || "Tiêu đề mục";
     const lines = chunk.split("\n").map((ln) => {
       const t = ln.replace(/^\s+/, "");
       if (/^#{1,3}\s/.test(t)) return prefix + " " + t.replace(/^#{1,3}\s+/, "");
@@ -253,12 +253,12 @@ export default function RichEditorToolbar({ textareaRef, value, onChange }) {
     else if (id === "link") handleLink();
     else if (id === "image") handleImageUrl();
     else if (id === "video") handleVideo();
-    else if (id === "code") insertBlock("```js\n// Viet code mau o day\nconsole.log(\"Hello IT Blog\");\n```");
+    else if (id === "code") insertBlock("```js\n// Viết code mẫu ở đây\nconsole.log(\"Hello IT Blog\");\n```");
     else if (id === "quote") applyListPrefix("quote");
     else if (id === "ul") applyListPrefix("ul");
     else if (id === "ol") applyListPrefix("ol");
     else if (id === "hr") insertBlock("---");
-    else if (id === "step") insertBlock("## Buoc 1: ghi ten buoc o day\n\nMo ta ngan gon viec can lam (1-2 cau).\n\n![Minh hoa buoc 1](https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=800&auto=format&fit=crop&q=80)\n\n> Meo: ghi loi khuyen giup nguoi doc tranh loi sai pho bien.");
+    else if (id === "step") insertBlock("## Bước 1: ghi tên bước ở đây\n\nMô tả ngắn gọn việc cần làm (1-2 câu).\n\n![Minh họa bước 1](https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=800&auto=format&fit=crop&q=80)\n\n> Mẹo: ghi lời khuyên giúp người đọc tránh lỗi sai phổ biến.");
   };
 
   return (

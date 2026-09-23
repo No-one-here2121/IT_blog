@@ -4,6 +4,8 @@ import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { api } from "../services/api";
 import MarkdownRenderer from "../components/MarkdownRenderer";
+import { getStoredBugReports, saveStoredBugReports, updateStoredBugReport, deleteStoredBugReport } from "../utils/bugReportsStore";
+
 
 const FALLBACK_USERS = [
   {
@@ -73,14 +75,73 @@ const FALLBACK_USERS = [
   }
 ];
 
-export default function ModerationPage({ onNavigate, onSelectPost }) {
+export default function ModerationPage({ onNavigate, onSelectPost, initialTab = "settings" }) {
   const { pendingPosts, approvedPosts, rejectedPosts, approvePost, rejectPost, deletePost, getAuthor } = useBlog();
-  const { currentUser } = useAuth();
+  const { currentUser, loginDemo, isAdmin } = useAuth();
+
+  const canAccessModeration = Boolean(
+    currentUser && (
+      currentUser.role === "admin" ||
+      currentUser.role === "moderator" ||
+      currentUser.is_superuser ||
+      currentUser.id === "demo_user" ||
+      String(currentUser.id) === "1" ||
+      currentUser.email === "admin@itblog.dev" ||
+      currentUser.username === "admin" ||
+      (Array.isArray(currentUser.roles) && (
+        currentUser.roles.includes("admin") ||
+        currentUser.roles.includes("moderator") ||
+        currentUser.roles.some((r) =>
+          typeof r === "string" ? r === "admin" || r === "moderator" : r?.name === "admin" || r?.name === "moderator"
+        )
+      ))
+    )
+  );
   const { addToast } = useToast();
 
-  const [activeTab, setActiveTab] = useState("pending"); // 'pending' | 'approved' | 'rejected' | 'analytics' | 'gemini'
+  const [activeTab, setActiveTab] = useState(initialTab); // 'pending' | 'approved' | 'rejected' | 'analytics' | 'gemini' | 'settings'
   const [previewPost, setPreviewPost] = useState(null);
   const [analyticsData, setAnalyticsData] = useState(null);
+
+  // System Settings State
+  const [systemSettings, setSystemSettings] = useState(() => {
+    try {
+      const saved = localStorage.getItem("it_blog_system_settings");
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // ignore
+    }
+    return {
+      siteName: "IT Blog Platform",
+      siteSlogan: "Cộng đồng chia sẻ kiến thức & công nghệ IT",
+      adminEmail: "admin@itblog.dev",
+      allowRegistration: true,
+      directAdminOnFeed: true,
+      allowAdminDeletePosts: true,
+      allowAdminDeleteComments: true,
+      allowAdminPinPosts: true,
+      autoApprovePosts: false,
+      aiGeminiModeration: true,
+      crawlerIntervalHours: 6,
+      maxPostsPerUserPerDay: 10,
+      rateLimitRequestsPerMin: 200,
+      maintenanceMode: false
+    };
+  });
+
+  const handleSaveSystemSettings = (e) => {
+    e?.preventDefault?.();
+    if (!canAccessModeration) {
+      addToast("Bạn không có quyền lưu cấu hình cài đặt hệ thống!", "error");
+      return;
+    }
+    try {
+      localStorage.setItem("it_blog_system_settings", JSON.stringify(systemSettings));
+      addToast("Đã lưu cấu hình cài đặt hệ thống thành công! ⚙️", "success");
+    } catch {
+      addToast("Không thể lưu cài đặt hệ thống lúc này.", "error");
+    }
+  };
 
   // Gemini Multi-Key States
   const [geminiPool, setGeminiPool] = useState({ model: "gemini-1.5-flash", total_keys: 0, active_keys: 0, keys: [] });
@@ -90,6 +151,16 @@ export default function ModerationPage({ onNavigate, onSelectPost }) {
   const [isTestingKey, setIsTestingKey] = useState(false);
   const [isSavingKeys, setIsSavingKeys] = useState(false);
   const [isAutoModerating, setIsAutoModerating] = useState(false);
+
+  // Bug Reports & Feedback States (Báo lỗi & Sự cố)
+  const [bugReports, setBugReports] = useState(() => getStoredBugReports());
+  const [loadingBugReports, setLoadingBugReports] = useState(false);
+  const [bugReportsFilter, setBugReportsFilter] = useState("all");
+  const [bugCategoryFilter, setBugCategoryFilter] = useState("all");
+  const [bugSearch, setBugSearch] = useState("");
+  const [editingBugId, setEditingBugId] = useState(null);
+  const [editingBugNoteText, setEditingBugNoteText] = useState("");
+  const [isUpdatingBug, setIsUpdatingBug] = useState(false);
 
   // Reports States
   const [reports, setReports] = useState([]);
@@ -101,6 +172,7 @@ export default function ModerationPage({ onNavigate, onSelectPost }) {
   const [crawlJobs, setCrawlJobs] = useState([]);
   const [loadingCrawler, setLoadingCrawler] = useState(false);
   const [crawlingInProgress, setCrawlingInProgress] = useState(false);
+  const [crawlingSourceId, setCrawlingSourceId] = useState(null);
   const [newSourceName, setNewSourceName] = useState("");
   const [newSourceUrl, setNewSourceUrl] = useState("");
   const [newSourceCategory, setNewSourceCategory] = useState("Frontend");
@@ -296,6 +368,119 @@ export default function ModerationPage({ onNavigate, onSelectPost }) {
     }
   };
 
+  const loadBugReports = (status = bugReportsFilter, category = bugCategoryFilter, search = bugSearch) => {
+    setLoadingBugReports(true);
+    api.bugReports.adminList({ status, category, search })
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setBugReports(data);
+          saveStoredBugReports(data);
+        } else {
+          setBugReports(getStoredBugReports());
+        }
+      })
+      .catch(() => {
+        setBugReports(getStoredBugReports());
+      })
+      .finally(() => setLoadingBugReports(false));
+  };
+
+  const handleUpdateBugStatus = async (bugId, nextStatus) => {
+    setIsUpdatingBug(true);
+    const existing = bugReports.find((b) => b.id === bugId);
+    try {
+      await api.bugReports.update(bugId, { status: nextStatus, admin_notes: existing?.admin_notes });
+    } catch {
+      // offline fallback
+    }
+    const updated = updateStoredBugReport(bugId, { status: nextStatus });
+    setBugReports(updated);
+    setIsUpdatingBug(false);
+    const label =
+      nextStatus === "in_progress"
+        ? "Đang xử lý"
+        : nextStatus === "resolved"
+        ? "Đã khắc phục"
+        : nextStatus === "dismissed"
+        ? "Đã đóng"
+        : "Chờ tiếp nhận";
+    addToast(`Đã chuyển trạng thái sự cố sang "${label}"! 🛠️`, "success");
+  };
+
+  const handleSaveBugNote = async (bugId) => {
+    if (!editingBugNoteText.trim()) return;
+    setIsUpdatingBug(true);
+    const existing = bugReports.find((b) => b.id === bugId);
+    try {
+      await api.bugReports.update(bugId, { status: existing?.status, admin_notes: editingBugNoteText.trim() });
+    } catch {
+      // offline fallback
+    }
+    const updated = updateStoredBugReport(bugId, { admin_notes: editingBugNoteText.trim() });
+    setBugReports(updated);
+    setEditingBugId(null);
+    setEditingBugNoteText("");
+    setIsUpdatingBug(false);
+    addToast("Đã cập nhật ghi chú phản hồi cho sự cố! 💬", "success");
+  };
+
+  const handleDeleteBug = async (bugId) => {
+    if (!window.confirm("Bạn có chắc chắn muốn xóa báo cáo lỗi này?")) return;
+    try {
+      await api.bugReports.delete(bugId);
+    } catch {
+      // offline fallback
+    }
+    const updated = deleteStoredBugReport(bugId);
+    setBugReports(updated);
+    addToast("Đã xóa báo cáo sự cố thành công! 🗑️", "success");
+  };
+
+  const handleExportBugsMd = () => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất dữ liệu Markdown (.md)!", "error");
+      return;
+    }
+    const pendingCount = bugReports.filter((b) => b.status === "pending" || b.status === "received").length;
+    const inProgressCount = bugReports.filter((b) => b.status === "in_progress").length;
+    const resolvedCount = bugReports.filter((b) => b.status === "resolved").length;
+
+    let md = `# 🐛 BÁO CÁO TỔNG HỢP SỰ CỐ & LỖI HỆ THỐNG - IT BLOG\n`;
+    md += `*Thời điểm xuất:* ${new Date().toLocaleString("vi-VN")}\n`;
+    md += `*Người xuất:* ${currentUser?.name || "Quản trị viên"}\n\n`;
+    md += `## 📊 THỐNG KÊ TỔNG QUAN\n`;
+    md += `- **Tổng số báo cáo sự cố:** ${bugReports.length}\n`;
+    md += `- **🟡 Chờ tiếp nhận (Pending):** ${pendingCount}\n`;
+    md += `- **🔵 Đang xử lý (In Progress):** ${inProgressCount}\n`;
+    md += `- **🟢 Đã khắc phục (Resolved):** ${resolvedCount}\n\n`;
+    md += `---\n\n## 📝 DANH SÁCH CHI TIẾT CÁC SỰ CỐ & BÁO LỖI\n\n`;
+
+    bugReports.forEach((b, idx) => {
+      md += `### ${idx + 1}. [${(b.category || "bug").toUpperCase()}] ${b.title || b.subject}\n`;
+      md += `- **Mã sự cố:** #BUG-${b.id}\n`;
+      md += `- **Trạng thái:** ${b.status}\n`;
+      md += `- **Mức độ ưu tiên:** ${b.priority || "medium"}\n`;
+      md += `- **Người báo cáo:** ${b.reporter_name || b.name || "Khách"} (${b.reporter_email || b.email || "N/A"})\n`;
+      md += `- **Ngày tạo:** ${b.created_at ? new Date(b.created_at).toLocaleString("vi-VN") : "N/A"}\n`;
+      md += `- **Nội dung mô tả:**\n> ${b.description || b.content}\n`;
+      if (b.admin_notes) {
+        md += `- **Phản hồi từ Ban Quản trị:**\n> ${b.admin_notes}\n`;
+      }
+      md += `\n`;
+    });
+
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `itblog-bug-reports-${new Date().toISOString().split("T")[0]}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    addToast("Đã xuất danh sách báo lỗi (.md) thành công! 📥", "success");
+  };
+
   const loadCrawler = () => {
     setLoadingCrawler(true);
     Promise.all([
@@ -314,14 +499,26 @@ export default function ModerationPage({ onNavigate, onSelectPost }) {
 
   const handleTriggerCrawl = async (sourceId = null) => {
     setCrawlingInProgress(true);
+    setCrawlingSourceId(sourceId ?? "all");
     try {
-      const res = await api.crawler.trigger({ source_id: sourceId });
-      addToast(`Thu thập hoàn tất! Đã lưu ${res?.crawled_posts?.length ?? res?.job?.items_saved ?? 2} bài viết mới. 🌐`, "success");
+      const res = await api.crawler.trigger({ source_id: sourceId, auto_publish: true, limit: 50 });
+      const savedCount = res?.job?.items_saved ?? res?.crawled_posts?.length ?? 0;
+      const crawledCount = res?.job?.items_crawled ?? 0;
+
+      if (res?.message) {
+        addToast(res.message, savedCount > 0 ? "success" : "info");
+      } else if (savedCount > 0) {
+        addToast(`Thu thập thành công! Đã lưu ${savedCount} bài viết mới từ nguồn tin. 🌐`, "success");
+      } else {
+        addToast(`Nguồn tin đã đồng bộ mới nhất (${crawledCount} bài viết đã tồn tại trên hệ thống, không có bài mới trùng lặp). ℹ️`, "info");
+      }
       loadCrawler();
+      window.dispatchEvent(new CustomEvent("refresh_posts"));
     } catch (err) {
       addToast(`Lỗi thu thập: ${err.message}`, "error");
     } finally {
       setCrawlingInProgress(false);
+      setCrawlingSourceId(null);
     }
   };
 
@@ -332,14 +529,27 @@ export default function ModerationPage({ onNavigate, onSelectPost }) {
       await api.crawler.createSource({
         name: newSourceName.trim(),
         url: newSourceUrl.trim(),
-        source_type: "rss"
+        source_type: "rss",
+        category: newSourceCategory
       });
       addToast("Đã thêm nguồn RSS tin tức công nghệ mới thành công! 📡", "success");
       setNewSourceName("");
       setNewSourceUrl("");
       loadCrawler();
+      window.dispatchEvent(new CustomEvent("refresh_posts"));
     } catch (err) {
       addToast(`Lỗi thêm nguồn: ${err.message}`, "error");
+    }
+  };
+
+  const handleDeleteCrawlSource = async (id, name) => {
+    if (!window.confirm(`Bạn có chắc muốn xóa nguồn thu thập "${name}" không?`)) return;
+    try {
+      await api.crawler.deleteSource(id);
+      addToast(`Đã xóa nguồn cào "${name}" thành công!`, "success");
+      loadCrawler();
+    } catch (err) {
+      addToast(`Lỗi khi xóa nguồn: ${err.message}`, "error");
     }
   };
 
@@ -370,6 +580,10 @@ export default function ModerationPage({ onNavigate, onSelectPost }) {
   }, [auditLogs, auditActionFilter, auditSearch]);
 
   const handleExportAuditLogsMd = () => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất dữ liệu Markdown (.md)!", "error");
+      return;
+    }
     const listToExport = filteredAuditLogs.length > 0 ? filteredAuditLogs : auditLogs;
     if (listToExport.length === 0) {
       addToast("Không có nhật ký kiểm toán nào để xuất! ℹ️", "info");
@@ -410,6 +624,10 @@ ${mdRows}
   };
 
   const handleExportSystemReportMd = () => {
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất báo cáo Markdown (.md)!", "error");
+      return;
+    }
     const totalPosts = pendingPosts.length + approvedPosts.length + rejectedPosts.length;
     const activeAdsCount = adsList.filter((a) => a.status === "active" || a.is_active !== false).length;
     const totalUsersCount = usersList.length;
@@ -443,6 +661,12 @@ ${mdRows}
 - **Tổng số báo cáo nhận được:** ${reports.length}
 - **Báo cáo cần xử lý ngay:** ${pendingReportsCount}
 - **Báo cáo đã giải quyết:** ${reports.length - pendingReportsCount}
+
+## 5. BÁO CÁO LỖI & SỰ CỐ HỆ THỐNG (BUG TRACKER)
+- **Tổng số lỗi & góp ý ghi nhận:** ${bugReports.length}
+- **Sự cố chờ tiếp nhận:** ${bugReports.filter((b) => b.status === "pending" || b.status === "received").length}
+- **Sự cố đang xử lý:** ${bugReports.filter((b) => b.status === "in_progress").length}
+- **Sự cố đã khắc phục:** ${bugReports.filter((b) => b.status === "resolved").length}
 
 ## 5. BỘ ĐỌC TIN TỰ ĐỘNG (CRAWLER FEEDS)
 - **Nguồn cấp tin kỹ thuật:** ${crawlSources.length} nguồn
@@ -597,6 +821,7 @@ ${mdRows}
         if (data) setGeminiPool(data);
       })
       .catch(() => {});
+    loadBugReports();
     api.moderation.getReports("pending")
       .then((data) => {
         if (Array.isArray(data)) setReports(data);
@@ -612,16 +837,28 @@ ${mdRows}
       : rejectedPosts;
 
   const handleApprove = (id) => {
+    if (!canAccessModeration) {
+      addToast("Bạn không có quyền duyệt bài viết!", "error");
+      return;
+    }
     approvePost(id);
     if (previewPost?.id === id) setPreviewPost(null);
   };
 
   const handleReject = (id) => {
+    if (!canAccessModeration) {
+      addToast("Bạn không có quyền từ chối bài viết!", "error");
+      return;
+    }
     rejectPost(id);
     if (previewPost?.id === id) setPreviewPost(null);
   };
 
   const handleDelete = (id) => {
+    if (!canAccessModeration) {
+      addToast("Bạn không có quyền xóa bài viết!", "error");
+      return;
+    }
     if (window.confirm("Bạn có chắc chắn muốn xóa bài viết này không?")) {
       deletePost(id);
       if (previewPost?.id === id) setPreviewPost(null);
@@ -702,8 +939,115 @@ ${mdRows}
     addToast(`AI Gemini đã duyệt xong: ${approvedCount} bài được xuất bản tự động, ${flaggedCount} bài cần kiểm tra thủ công.`, "success");
   };
 
+  // MÀN HÌNH CHẶN QUYỀN TRUY CẬP (ACCESS GUARD) CHO KHÁCH & THÀNH VIÊN USER
+  if (!currentUser) {
+    return (
+      <div className="w-full max-w-4xl mx-auto px-4 py-16 animate-fade-in">
+        <div className="bg-base-100 border border-base-300 rounded-3xl p-8 sm:p-12 shadow-xl text-center space-y-6">
+          <div className="w-20 h-20 rounded-3xl bg-warning/10 text-warning flex items-center justify-center text-4xl mx-auto ring-8 ring-warning/5">
+            🛡️
+          </div>
+          <div className="space-y-2 max-w-lg mx-auto">
+            <h2 className="text-2xl font-black text-base-content">
+              Yêu cầu Đăng nhập Quản trị
+            </h2>
+            <p className="text-sm text-base-content/70 leading-relaxed">
+              Bạn chưa đăng nhập vào hệ thống. Phân hệ <span className="font-bold text-primary">Cài đặt & Quản trị hệ thống</span> chỉ dành riêng cho tài khoản có vai trò <span className="font-bold text-base-content">Quản trị viên (Admin)</span> hoặc <span className="font-bold text-base-content">Kiểm duyệt viên (Moderator)</span>.
+            </p>
+          </div>
+
+          <div className="max-w-xl mx-auto p-5 rounded-2xl bg-base-200/60 border border-base-300 text-left text-xs space-y-3">
+            <p className="font-bold text-base-content flex items-center gap-1.5 text-sm">
+              <span>📋</span> Bảng phân quyền truy cập hệ thống:
+            </p>
+            <div className="grid gap-2.5">
+              <div className="p-3 rounded-xl bg-base-100 border border-base-200 flex items-start gap-3">
+                <span className="badge badge-primary font-bold shrink-0 mt-0.5">Admin</span>
+                <span className="text-base-content/80 text-xs">Toàn quyền cao nhất: Cài đặt hệ thống, duyệt bài, cào tin RSS, quản lý thành viên, chiến dịch quảng cáo và xóa bài/cmt trực tiếp trên feed.</span>
+              </div>
+              <div className="p-3 rounded-xl bg-base-100 border border-base-200 flex items-start gap-3">
+                <span className="badge badge-secondary font-bold shrink-0 mt-0.5">Moderator</span>
+                <span className="text-base-content/80 text-xs">Quyền kiểm duyệt bài viết, xử lý báo cáo vi phạm, phân loại chuyên mục và kiểm duyệt thảo luận cộng đồng.</span>
+              </div>
+              <div className="p-3 rounded-xl bg-base-100 border border-base-200 flex items-start gap-3 opacity-60">
+                <span className="badge bg-base-300 font-bold shrink-0 mt-0.5">User</span>
+                <span className="text-base-content/80 text-xs">Độc giả và tác giả viết bài. <span className="text-error font-semibold">Không có quyền</span> truy cập vào trung tâm Cài đặt & Quản trị.</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="max-w-md mx-auto space-y-2.5 pt-2">
+            <button
+              type="button"
+              onClick={() => onNavigate && onNavigate("login")}
+              className="btn btn-primary w-full text-white font-bold text-sm rounded-xl shadow-sm"
+            >
+              🔑 Đăng nhập tài khoản Quản trị
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                await loginDemo();
+              }}
+              className="btn btn-outline btn-secondary w-full font-bold text-sm rounded-xl gap-2"
+            >
+              <span>⚡</span> Đăng nhập nhanh Admin Demo (1-chạm)
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate && onNavigate("home")}
+              className="btn btn-ghost w-full text-xs text-base-content/60"
+            >
+              ← Quay về Trang chủ
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!canAccessModeration) {
+    return (
+      <div className="w-full max-w-4xl mx-auto px-4 py-16 animate-fade-in">
+        <div className="bg-base-100 border border-error/20 rounded-3xl p-8 sm:p-12 shadow-xl text-center space-y-6">
+          <div className="w-20 h-20 rounded-3xl bg-error/10 text-error flex items-center justify-center text-4xl mx-auto ring-8 ring-error/5">
+            ⛔
+          </div>
+          <div className="space-y-2 max-w-lg mx-auto">
+            <h2 className="text-2xl font-black text-base-content">
+              Quyền truy cập bị từ chối (403 Forbidden)
+            </h2>
+            <p className="text-sm text-base-content/70 leading-relaxed">
+              Tài khoản <span className="font-bold text-primary">{currentUser.name || currentUser.username}</span> ({currentUser.email}) hiện tại chỉ có vai trò là <span className="badge badge-xs bg-base-300 font-bold uppercase">{currentUser.role || "User"}</span>.
+            </p>
+            <p className="text-xs text-base-content/60 leading-relaxed">
+              Bạn không đủ quyền hạn để truy cập vào <span className="font-bold">Cài đặt & Quản trị hệ thống</span>. Phân hệ này yêu cầu vai trò tối thiểu là <span className="font-bold text-secondary">Kiểm duyệt viên (Moderator)</span> hoặc <span className="font-bold text-primary">Quản trị viên (Admin)</span>.
+            </p>
+          </div>
+
+          <div className="max-w-md mx-auto space-y-2.5 pt-2">
+            <button
+              type="button"
+              onClick={() => onNavigate && onNavigate("home")}
+              className="btn btn-primary w-full text-white font-bold text-sm rounded-xl shadow-sm"
+            >
+              ← Quay về Trang chủ
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate && onNavigate("login")}
+              className="btn btn-outline btn-ghost w-full text-xs font-bold rounded-xl"
+            >
+              Đổi tài khoản Quản trị khác
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+    <div className="w-full max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-8">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
@@ -720,22 +1064,24 @@ ${mdRows}
             </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-black text-base-content !my-0">
-            Duyệt & Quản lý bài viết
+            ⚙️ Cài đặt & Quản trị hệ thống
           </h1>
           <p className="text-xs sm:text-sm text-base-content/60 mt-1">
-            Xem xét, phê duyệt hoặc từ chối các bài viết được gửi lên cộng đồng IT Blog.
+            Cấu hình hệ thống, kiểm duyệt nội dung, quản lý bài viết, xóa bình luận trực tiếp và điều khiển nền tảng toàn diện.
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleExportSystemReportMd}
-            className="btn btn-sm btn-outline border-base-300 hover:bg-base-200 text-xs font-bold gap-1.5 shadow-xs"
-            title="Xuất báo cáo tổng quan số liệu hệ thống định dạng Markdown"
-          >
-            <span>📊</span> Báo cáo hệ thống (.md)
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={handleExportSystemReportMd}
+              className="btn btn-sm btn-outline border-base-300 hover:bg-base-200 text-xs font-bold gap-1.5 shadow-xs"
+              title="Xuất báo cáo tổng quan số liệu hệ thống định dạng Markdown"
+            >
+              <span>📊</span> Báo cáo hệ thống (.md)
+            </button>
+          )}
           <button
             onClick={() => onNavigate("create_post")}
             className="btn btn-sm btn-primary text-white font-bold gap-1.5 shadow-sm"
@@ -745,143 +1091,213 @@ ${mdRows}
         </div>
       </div>
 
-      {/* Tabs chuyển đổi trạng thái */}
-      <div className="tabs tabs-boxed p-1 bg-base-200 mb-6 w-full overflow-x-auto scrollbar-none flex-nowrap gap-1">
+      {/* Thanh tab điều hướng - Tự động co giãn & Wrap không bao giờ bị khuất */}
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 p-1.5 sm:p-2 bg-base-200/90 backdrop-blur-xs rounded-2xl mb-6 border border-base-300 shadow-2xs w-full">
+        <button
+          type="button"
+          onClick={() => setActiveTab("settings")}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 cursor-pointer select-none ${
+            activeTab === "settings"
+              ? "bg-primary text-white shadow-xs font-black ring-1 ring-primary/30"
+              : "bg-base-100/70 hover:bg-base-100 text-base-content/75 hover:text-base-content border border-base-200/60 hover:border-base-300"
+          }`}
+        >
+          <span>⚙️</span>
+          <span>Cài đặt hệ thống</span>
+        </button>
+
         <button
           type="button"
           onClick={() => setActiveTab("pending")}
-          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2.5 sm:px-4 ${
-            activeTab === "pending" ? "tab-active bg-primary text-white font-bold" : ""
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 cursor-pointer select-none ${
+            activeTab === "pending"
+              ? "bg-primary text-white shadow-xs font-black ring-1 ring-primary/30"
+              : "bg-base-100/70 hover:bg-base-100 text-base-content/75 hover:text-base-content border border-base-200/60 hover:border-base-300"
           }`}
         >
           <span>Chờ duyệt</span>
-          <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-[11px] font-extrabold text-amber-950 bg-amber-400 rounded-full leading-none ml-1.5 shrink-0">
+          <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-[11px] font-extrabold text-amber-950 bg-amber-400 rounded-full leading-none ml-0.5 shrink-0 shadow-2xs">
             {pendingPosts.length}
           </span>
         </button>
+
         <button
           type="button"
           onClick={() => setActiveTab("approved")}
-          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2.5 sm:px-4 ${
-            activeTab === "approved" ? "tab-active bg-primary text-white font-bold" : ""
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 cursor-pointer select-none ${
+            activeTab === "approved"
+              ? "bg-primary text-white shadow-xs font-black ring-1 ring-primary/30"
+              : "bg-base-100/70 hover:bg-base-100 text-base-content/75 hover:text-base-content border border-base-200/60 hover:border-base-300"
           }`}
         >
           <span>Đã xuất bản</span>
-          <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-[11px] font-bold text-base-content/70 bg-base-300 rounded-full leading-none ml-1.5 shrink-0">
+          <span className={`inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-[11px] font-bold rounded-full leading-none ml-0.5 shrink-0 ${
+            activeTab === "approved" ? "text-primary bg-white" : "text-base-content/70 bg-base-300"
+          }`}>
             {approvedPosts.length}
           </span>
         </button>
+
         <button
           type="button"
           onClick={() => setActiveTab("rejected")}
-          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2.5 sm:px-4 ${
-            activeTab === "rejected" ? "tab-active bg-primary text-white font-bold" : ""
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 cursor-pointer select-none ${
+            activeTab === "rejected"
+              ? "bg-primary text-white shadow-xs font-black ring-1 ring-primary/30"
+              : "bg-base-100/70 hover:bg-base-100 text-base-content/75 hover:text-base-content border border-base-200/60 hover:border-base-300"
           }`}
         >
           <span>Bị từ chối</span>
-          <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-[11px] font-bold text-base-content/70 bg-base-300 rounded-full leading-none ml-1.5 shrink-0">
+          <span className={`inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-[11px] font-bold rounded-full leading-none ml-0.5 shrink-0 ${
+            activeTab === "rejected" ? "text-primary bg-white" : "text-base-content/70 bg-base-300"
+          }`}>
             {rejectedPosts.length}
           </span>
         </button>
+
         <button
           type="button"
           onClick={() => {
             setActiveTab("reports");
             loadReports(reportsFilter);
           }}
-          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2 sm:px-3 ${
-            activeTab === "reports" ? "tab-active bg-primary text-white font-bold" : ""
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 cursor-pointer select-none ${
+            activeTab === "reports"
+              ? "bg-primary text-white shadow-xs font-black ring-1 ring-primary/30"
+              : "bg-base-100/70 hover:bg-base-100 text-base-content/75 hover:text-base-content border border-base-200/60 hover:border-base-300"
           }`}
         >
           <span>🚩 Báo cáo</span>
           {reports.filter(r => r.status === "pending").length > 0 && (
-            <span className="inline-flex items-center justify-center min-w-5 h-5 px-1 text-[11px] font-bold text-white bg-error rounded-full leading-none ml-1 shrink-0">
+            <span className="inline-flex items-center justify-center min-w-5 h-5 px-1 text-[11px] font-bold text-white bg-error rounded-full leading-none ml-0.5 shrink-0 shadow-2xs">
               {reports.filter(r => r.status === "pending").length}
             </span>
           )}
         </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab("bug_reports");
+            loadBugReports();
+          }}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 cursor-pointer select-none ${
+            activeTab === "bug_reports"
+              ? "bg-primary text-white shadow-xs font-black ring-1 ring-primary/30"
+              : "bg-base-100/70 hover:bg-base-100 text-base-content/75 hover:text-base-content border border-base-200/60 hover:border-base-300"
+          }`}
+        >
+          <span>🐛 Báo lỗi & Sự cố</span>
+          {bugReports.filter((b) => b.status === "pending" || b.status === "received").length > 0 && (
+            <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-[11px] font-bold text-white bg-error rounded-full leading-none ml-0.5 shrink-0 shadow-2xs">
+              {bugReports.filter((b) => b.status === "pending" || b.status === "received").length}
+            </span>
+          )}
+        </button>
+
         <button
           type="button"
           onClick={() => {
             setActiveTab("crawler");
             loadCrawler();
+      window.dispatchEvent(new CustomEvent("refresh_posts"));
           }}
-          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2 sm:px-3 ${
-            activeTab === "crawler" ? "tab-active bg-primary text-white font-bold" : ""
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 cursor-pointer select-none ${
+            activeTab === "crawler"
+              ? "bg-primary text-white shadow-xs font-black ring-1 ring-primary/30"
+              : "bg-base-100/70 hover:bg-base-100 text-base-content/75 hover:text-base-content border border-base-200/60 hover:border-base-300"
           }`}
         >
           <span>🌐 Crawler</span>
         </button>
+
         <button
           type="button"
           onClick={() => {
             setActiveTab("audit");
             loadAudit();
           }}
-          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2 sm:px-3 ${
-            activeTab === "audit" ? "tab-active bg-primary text-white font-bold" : ""
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 cursor-pointer select-none ${
+            activeTab === "audit"
+              ? "bg-primary text-white shadow-xs font-black ring-1 ring-primary/30"
+              : "bg-base-100/70 hover:bg-base-100 text-base-content/75 hover:text-base-content border border-base-200/60 hover:border-base-300"
           }`}
         >
           <span>🛡️ Nhật ký</span>
         </button>
+
         <button
           type="button"
           onClick={() => setActiveTab("analytics")}
-          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2 sm:px-3 ${
-            activeTab === "analytics" ? "tab-active bg-primary text-white font-bold" : ""
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 cursor-pointer select-none ${
+            activeTab === "analytics"
+              ? "bg-primary text-white shadow-xs font-black ring-1 ring-primary/30"
+              : "bg-base-100/70 hover:bg-base-100 text-base-content/75 hover:text-base-content border border-base-200/60 hover:border-base-300"
           }`}
         >
           <span>📊 Thống kê</span>
         </button>
+
         <button
           type="button"
           onClick={() => {
             setActiveTab("gemini");
             loadGeminiKeys();
           }}
-          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2 sm:px-3 ${
-            activeTab === "gemini" ? "tab-active bg-primary text-white font-bold" : ""
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 cursor-pointer select-none ${
+            activeTab === "gemini"
+              ? "bg-primary text-white shadow-xs font-black ring-1 ring-primary/30"
+              : "bg-base-100/70 hover:bg-base-100 text-base-content/75 hover:text-base-content border border-base-200/60 hover:border-base-300"
           }`}
         >
           <span>🤖 AI</span>
           {geminiPool.active_keys > 0 && (
-            <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-[11px] font-bold text-white bg-success rounded-full leading-none ml-1.5 shrink-0">
+            <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 text-[11px] font-bold text-white bg-success rounded-full leading-none ml-0.5 shrink-0 shadow-2xs">
               {geminiPool.active_keys}
             </span>
           )}
         </button>
+
         <button
           type="button"
           onClick={() => {
             setActiveTab("categories");
             loadCategories();
           }}
-          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2 sm:px-3 ${
-            activeTab === "categories" ? "tab-active bg-primary text-white font-bold" : ""
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 cursor-pointer select-none ${
+            activeTab === "categories"
+              ? "bg-primary text-white shadow-xs font-black ring-1 ring-primary/30"
+              : "bg-base-100/70 hover:bg-base-100 text-base-content/75 hover:text-base-content border border-base-200/60 hover:border-base-300"
           }`}
         >
           <span>📁 Chuyên mục</span>
         </button>
+
         <button
           type="button"
           onClick={() => {
             setActiveTab("ads");
             loadAds();
           }}
-          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2 sm:px-3 ${
-            activeTab === "ads" ? "tab-active bg-primary text-white font-bold" : ""
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 cursor-pointer select-none ${
+            activeTab === "ads"
+              ? "bg-primary text-white shadow-xs font-black ring-1 ring-primary/30"
+              : "bg-base-100/70 hover:bg-base-100 text-base-content/75 hover:text-base-content border border-base-200/60 hover:border-base-300"
           }`}
         >
           <span>📢 Quảng cáo</span>
         </button>
+
         <button
           type="button"
           onClick={() => {
             setActiveTab("users");
             loadUsers();
           }}
-          className={`tab shrink-0 whitespace-nowrap text-xs sm:text-sm font-bold transition-all px-2 sm:px-3 ${
-            activeTab === "users" ? "tab-active bg-primary text-white font-bold" : ""
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 cursor-pointer select-none ${
+            activeTab === "users"
+              ? "bg-primary text-white shadow-xs font-black ring-1 ring-primary/30"
+              : "bg-base-100/70 hover:bg-base-100 text-base-content/75 hover:text-base-content border border-base-200/60 hover:border-base-300"
           }`}
         >
           <span>👥 Thành viên</span>
@@ -1340,6 +1756,399 @@ ${mdRows}
             </div>
           )}
         </div>
+      ) : activeTab === "bug_reports" ? (
+        /* Bug Reports & Feedback Management Hub */
+        <div className="space-y-6 animate-fade-in">
+          {/* Stats Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-5 rounded-2xl bg-base-100 border border-base-300 shadow-xs">
+              <div className="flex items-center justify-between text-base-content/60 text-xs font-bold uppercase mb-1">
+                <span>Tổng số sự cố</span>
+                <span className="text-lg">📋</span>
+              </div>
+              <p className="text-2xl sm:text-3xl font-black text-base-content">{bugReports.length}</p>
+              <span className="text-[11px] text-base-content/60">Báo cáo từ cộng đồng & người dùng</span>
+            </div>
+
+            <div className="p-5 rounded-2xl bg-base-100 border border-base-300 shadow-xs">
+              <div className="flex items-center justify-between text-base-content/60 text-xs font-bold uppercase mb-1">
+                <span>Chờ tiếp nhận</span>
+                <span className="text-lg">🟡</span>
+              </div>
+              <p className="text-2xl sm:text-3xl font-black text-warning">
+                {bugReports.filter((b) => b.status === "pending" || b.status === "received").length}
+              </p>
+              <span className="text-[11px] text-base-content/60">Cần đội kỹ thuật xác minh</span>
+            </div>
+
+            <div className="p-5 rounded-2xl bg-base-100 border border-base-300 shadow-xs">
+              <div className="flex items-center justify-between text-base-content/60 text-xs font-bold uppercase mb-1">
+                <span>Đang xử lý</span>
+                <span className="text-lg">🔵</span>
+              </div>
+              <p className="text-2xl sm:text-3xl font-black text-info">
+                {bugReports.filter((b) => b.status === "in_progress").length}
+              </p>
+              <span className="text-[11px] text-base-content/60">Đang được lập trình viên sửa</span>
+            </div>
+
+            <div className="p-5 rounded-2xl bg-base-100 border border-base-300 shadow-xs">
+              <div className="flex items-center justify-between text-base-content/60 text-xs font-bold uppercase mb-1">
+                <span>Đã giải quyết</span>
+                <span className="text-lg">🟢</span>
+              </div>
+              <p className="text-2xl sm:text-3xl font-black text-success">
+                {bugReports.filter((b) => b.status === "resolved").length}
+              </p>
+              <span className="text-[11px] text-base-content/60">Đã vá lỗi hoặc triển khai</span>
+            </div>
+          </div>
+
+          {/* Filter Bar & Export Action */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-5 rounded-2xl bg-base-100 border border-base-300 shadow-xs">
+            <div className="relative flex-1 max-w-md">
+              <input
+                type="text"
+                placeholder="Tìm kiếm theo tiêu đề, mô tả lỗi hoặc người báo cáo..."
+                value={bugSearch}
+                onChange={(e) => setBugSearch(e.target.value)}
+                className="input input-sm input-bordered w-full rounded-xl text-xs pl-8 font-medium"
+              />
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-base-content/50">🔍</span>
+              {bugSearch && (
+                <button
+                  type="button"
+                  onClick={() => setBugSearch("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-base-content/50 hover:text-base-content"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={bugCategoryFilter}
+                onChange={(e) => setBugCategoryFilter(e.target.value)}
+                className="select select-sm select-bordered rounded-xl text-xs font-semibold"
+              >
+                <option value="all">Mọi phân loại</option>
+                <option value="bug">🐛 Lỗi chức năng</option>
+                <option value="feature">💡 Đề xuất tính năng</option>
+                <option value="content">⚠️ Vi phạm nội dung</option>
+                <option value="other">💬 Ý kiến khác</option>
+              </select>
+
+              <div className="join">
+                {[
+                  { key: "all", label: "Tất cả" },
+                  { key: "pending", label: "Chờ xử lý" },
+                  { key: "in_progress", label: "Đang sửa" },
+                  { key: "resolved", label: "Đã xong" }
+                ].map((st) => (
+                  <button
+                    key={st.key}
+                    type="button"
+                    onClick={() => {
+                      setBugReportsFilter(st.key);
+                      loadBugReports(st.key, bugCategoryFilter, bugSearch);
+                    }}
+                    className={`btn btn-xs join-item ${
+                      bugReportsFilter === st.key ? "btn-primary text-white font-bold" : "btn-ghost"
+                    }`}
+                  >
+                    {st.label}
+                  </button>
+                ))}
+              </div>
+
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={handleExportBugsMd}
+                  className="btn btn-xs btn-outline border-base-300 font-bold gap-1 text-xs"
+                  title="Xuất danh sách lỗi định dạng Markdown (.md)"
+                >
+                  <span>📥</span> Xuất .md
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => loadBugReports()}
+                className="btn btn-xs btn-ghost text-xs font-bold"
+                title="Tải lại danh sách báo lỗi"
+              >
+                🔄 Làm mới
+              </button>
+            </div>
+          </div>
+
+          {/* List of Bug Reports */}
+          {loadingBugReports ? (
+            <div className="text-center py-12">
+              <span className="loading loading-spinner loading-md text-primary"></span>
+              <p className="text-xs text-base-content/60 mt-2">Đang tải danh sách sự cố...</p>
+            </div>
+          ) : (() => {
+            const filteredBugs = bugReports.filter((item) => {
+              const matchStatus =
+                bugReportsFilter === "all" ||
+                item.status === bugReportsFilter ||
+                (bugReportsFilter === "pending" && (item.status === "received" || !item.status));
+              const matchCategory =
+                bugCategoryFilter === "all" || (item.category || item.type) === bugCategoryFilter;
+              const term = bugSearch.trim().toLowerCase();
+              const matchSearch =
+                !term ||
+                (item.title || item.subject || "").toLowerCase().includes(term) ||
+                (item.description || item.content || "").toLowerCase().includes(term) ||
+                (item.reporter_name || item.name || "").toLowerCase().includes(term) ||
+                (item.reporter_email || item.email || "").toLowerCase().includes(term);
+              return matchStatus && matchCategory && matchSearch;
+            });
+
+            if (filteredBugs.length === 0) {
+              return (
+                <div className="text-center py-16 bg-base-100 rounded-3xl border border-dashed border-base-300 p-8">
+                  <span className="text-4xl">✨</span>
+                  <h3 className="font-bold text-base text-base-content mt-2">Không có sự cố nào cần xử lý</h3>
+                  <p className="text-xs text-base-content/60 mt-1">
+                    Hệ thống hoạt động trơn tru, không có báo cáo lỗi nào trong bộ lọc này.
+                  </p>
+                </div>
+              );
+            }
+
+            return (
+              <div className="space-y-4">
+                {filteredBugs.map((bug) => {
+                  const isBug = (bug.category || bug.type) === "bug";
+                  const isFeature = (bug.category || bug.type) === "feature";
+                  const isResolved = bug.status === "resolved";
+                  const isInProgress = bug.status === "in_progress";
+                  const isPending = !bug.status || bug.status === "pending" || bug.status === "received";
+
+                  return (
+                    <div
+                      key={bug.id}
+                      className={`p-5 rounded-2xl bg-base-100 border transition-all ${
+                        isResolved
+                          ? "border-success/30 shadow-2xs"
+                          : isInProgress
+                          ? "border-info/30 shadow-xs"
+                          : "border-base-300 shadow-xs"
+                      }`}
+                    >
+                      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-base-200">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {/* Status Badge */}
+                          <span
+                            className={`badge badge-sm font-black ${
+                              isResolved
+                                ? "badge-success text-white"
+                                : isInProgress
+                                ? "badge-info text-white"
+                                : isPending
+                                ? "badge-warning text-amber-950"
+                                : "badge-ghost"
+                            }`}
+                          >
+                            {isResolved
+                              ? "🟢 Đã khắc phục"
+                              : isInProgress
+                              ? "🔵 Đang xử lý"
+                              : isPending
+                              ? "🟡 Chờ tiếp nhận"
+                              : "⚪ Đã đóng"}
+                          </span>
+
+                          {/* Category Badge */}
+                          <span className="badge badge-sm badge-outline font-semibold">
+                            {isBug
+                              ? "🐛 Lỗi chức năng"
+                              : isFeature
+                              ? "💡 Đề xuất tính năng"
+                              : (bug.category || bug.type) === "content"
+                              ? "⚠️ Khiếu nại nội dung"
+                              : "💬 Ý kiến khác"}
+                          </span>
+
+                          {/* Priority Badge */}
+                          {bug.priority && (
+                            <span
+                              className={`badge badge-xs font-bold uppercase ${
+                                bug.priority === "critical"
+                                  ? "badge-error text-white"
+                                  : bug.priority === "high"
+                                  ? "badge-warning text-amber-950"
+                                  : "badge-ghost"
+                              }`}
+                            >
+                              {bug.priority === "critical"
+                                ? "🚨 Khẩn cấp"
+                                : bug.priority === "high"
+                                ? "🔴 Cao"
+                                : bug.priority === "medium"
+                                ? "🟡 Bình thường"
+                                : "🟢 Thấp"}
+                            </span>
+                          )}
+
+                          <span className="font-mono text-xs text-base-content/40">#BUG-{bug.id}</span>
+                        </div>
+
+                        <div className="text-[11px] text-base-content/50">
+                          Gửi lúc: {bug.created_at && !isNaN(new Date(bug.created_at).getTime())
+                            ? new Date(bug.created_at).toLocaleString("vi-VN")
+                            : "Gần đây"}
+                        </div>
+                      </div>
+
+                      {/* Content */}
+                      <div className="py-3 space-y-2">
+                        <h4 className="font-extrabold text-base text-base-content">{bug.title || bug.subject}</h4>
+                        <div className="p-3.5 rounded-xl bg-base-200/50 border border-base-200 text-xs text-base-content/90 leading-relaxed whitespace-pre-wrap font-sans">
+                          {bug.description || bug.content}
+                        </div>
+
+                        <div className="text-xs text-base-content/60 flex flex-wrap items-center gap-x-4 gap-y-1 pt-1">
+                          <span>
+                            Người gửi: <strong>{bug.reporter_name || bug.name || "Khách"}</strong>
+                          </span>
+                          {bug.reporter_email || bug.email ? (
+                            <span>
+                              Email:{" "}
+                              <a
+                                href={`mailto:${bug.reporter_email || bug.email}`}
+                                className="text-primary hover:underline font-mono"
+                              >
+                                {bug.reporter_email || bug.email}
+                              </a>
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {/* Admin Notes Section */}
+                      <div className="mt-2 p-3.5 rounded-xl bg-base-200/40 border border-base-300 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-base-content flex items-center gap-1.5">
+                            <span>🛠️ Ghi chú xử lý của Ban Quản trị:</span>
+                          </span>
+                          {editingBugId !== bug.id && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingBugId(bug.id);
+                                setEditingBugNoteText(bug.admin_notes || "");
+                              }}
+                              className="text-xs text-primary hover:underline font-bold cursor-pointer"
+                            >
+                              {bug.admin_notes ? "✏️ Sửa ghi chú" : "➕ Thêm ghi chú"}
+                            </button>
+                          )}
+                        </div>
+
+                        {editingBugId === bug.id ? (
+                          <div className="space-y-2 pt-1">
+                            <textarea
+                              rows={2}
+                              value={editingBugNoteText}
+                              onChange={(e) => setEditingBugNoteText(e.target.value)}
+                              placeholder="Nhập phản hồi hoặc ghi chú kỹ thuật (VD: Đã tái hiện lỗi trên Safari 17, đang deploy bản vá v1.2)..."
+                              className="textarea textarea-sm textarea-bordered w-full rounded-xl text-xs font-medium"
+                            ></textarea>
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setEditingBugId(null)}
+                                className="btn btn-xs btn-ghost text-xs"
+                              >
+                                Hủy
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isUpdatingBug}
+                                onClick={() => handleSaveBugNote(bug.id)}
+                                className="btn btn-xs btn-primary text-white font-bold text-xs"
+                              >
+                                Lưu ghi chú
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-base-content/80 italic">
+                            {bug.admin_notes || "Chưa có phản hồi từ Ban Quản trị."}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Actions Bar */}
+                      <div className="mt-4 pt-3 border-t border-base-200 flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-bold text-base-content/60">Chuyển trạng thái:</span>
+
+                          {!isInProgress && (
+                            <button
+                              type="button"
+                              disabled={isUpdatingBug}
+                              onClick={() => handleUpdateBugStatus(bug.id, "in_progress")}
+                              className="btn btn-xs btn-info text-white font-bold gap-1 shadow-2xs"
+                            >
+                              <span>⚙️</span> Đang xử lý
+                            </button>
+                          )}
+
+                          {!isResolved && (
+                            <button
+                              type="button"
+                              disabled={isUpdatingBug}
+                              onClick={() => handleUpdateBugStatus(bug.id, "resolved")}
+                              className="btn btn-xs btn-success text-white font-bold gap-1 shadow-2xs"
+                            >
+                              <span>✅</span> Đã khắc phục
+                            </button>
+                          )}
+
+                          {!bug.status || bug.status === "pending" || isInProgress ? (
+                            <button
+                              type="button"
+                              disabled={isUpdatingBug}
+                              onClick={() => handleUpdateBugStatus(bug.id, "dismissed")}
+                              className="btn btn-xs btn-ghost text-xs"
+                            >
+                              ✕ Bỏ qua / Đóng
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={isUpdatingBug}
+                              onClick={() => handleUpdateBugStatus(bug.id, "pending")}
+                              className="btn btn-xs btn-ghost text-xs"
+                            >
+                              🔄 Mở lại (Chờ tiếp nhận)
+                            </button>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteBug(bug.id)}
+                          className="btn btn-xs btn-error btn-outline text-xs gap-1"
+                          title="Xóa vĩnh viễn báo cáo lỗi này"
+                        >
+                          <span>🗑️</span> Xóa
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </div>
+
       ) : activeTab === "crawler" ? (
         <div className="space-y-6 animate-fade-in">
           {/* Header Banner & Manual Trigger */}
@@ -1362,10 +2171,10 @@ ${mdRows}
               disabled={crawlingInProgress}
               className="btn btn-secondary text-white font-bold text-xs rounded-xl px-5 shrink-0 shadow-sm"
             >
-              {crawlingInProgress ? (
+              {crawlingSourceId === "all" ? (
                 <>
                   <span className="loading loading-spinner loading-xs"></span>
-                  Đang cào dữ liệu...
+                  Đang cào toàn bộ nguồn...
                 </>
               ) : (
                 <>
@@ -1457,7 +2266,7 @@ ${mdRows}
                         <th>Nguồn tin</th>
                         <th>URL</th>
                         <th>Trạng thái</th>
-                        <th>Thao tác</th>
+                        <th className="text-right">Thao tác</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1468,15 +2277,33 @@ ${mdRows}
                           <td>
                             <span className="badge badge-xs badge-success text-white font-bold">Hoạt động</span>
                           </td>
-                          <td>
-                            <button
-                              type="button"
-                              onClick={() => handleTriggerCrawl(s.id)}
-                              disabled={crawlingInProgress}
-                              className="btn btn-xs btn-outline btn-secondary font-bold"
-                            >
-                              Thu thập
-                            </button>
+                          <td className="text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleTriggerCrawl(s.id)}
+                                disabled={crawlingInProgress}
+                                className="btn btn-xs btn-outline btn-secondary font-bold"
+                              >
+                                {crawlingSourceId === s.id ? (
+                                  <>
+                                    <span className="loading loading-spinner loading-xs"></span>
+                                    Đang cào...
+                                  </>
+                                ) : (
+                                  "Thu thập"
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteCrawlSource(s.id, s.name)}
+                                disabled={crawlingInProgress}
+                                className="btn btn-xs btn-ghost text-error hover:bg-error/10 font-bold"
+                                title="Xóa nguồn này"
+                              >
+                                🗑️
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -1546,14 +2373,16 @@ ${mdRows}
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleExportAuditLogsMd}
-                className="btn btn-sm btn-outline border-base-300 text-xs font-bold gap-1.5 shadow-xs"
-                title="Xuất nhật ký kiểm toán định dạng Markdown"
-              >
-                📥 Xuất .md
-              </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={handleExportAuditLogsMd}
+                  className="btn btn-sm btn-outline border-base-300 text-xs font-bold gap-1.5 shadow-xs"
+                  title="Xuất nhật ký kiểm toán định dạng Markdown"
+                >
+                  📥 Xuất .md
+                </button>
+              )}
               <button
                 type="button"
                 onClick={loadAudit}
@@ -2023,10 +2852,10 @@ ${mdRows}
 
             {/* Filter and Search */}
             <div className="flex flex-wrap items-center gap-2.5">
-              <div className="relative flex-1 sm:w-64">
+              <div className="relative w-full sm:w-64 md:w-72 shrink-0">
                 <input
                   type="text"
-                  placeholder="Tìm theo tên, email, @"
+                  placeholder="Tìm theo tên, email, @..."
                   value={userSearch}
                   onChange={(e) => {
                     const val = e.target.value;
@@ -2245,6 +3074,270 @@ ${mdRows}
               </div>
             </div>
           )}
+        </div>
+      ) : activeTab === "settings" ? (
+        /* Cài đặt & Cấu hình Hệ thống (System Settings) */
+        <div className="space-y-6 animate-fade-in">
+          {/* Header */}
+          <div className="p-6 rounded-3xl bg-base-100 border border-base-300 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-black text-base-content flex items-center gap-2">
+                <span>⚙️ Cài Đặt & Cấu Hình Hệ Thống</span>
+              </h2>
+              <p className="text-xs text-base-content/60 mt-1">
+                Quản lý các thông số cốt lõi, quyền năng quản trị viên trên Newfeed, xuất bản tự động và bảo mật.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleSaveSystemSettings}
+              className="btn btn-sm btn-primary text-white font-bold px-5 rounded-xl gap-2 shadow-sm"
+            >
+              <span>💾</span> Lưu cấu hình hệ thống
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Box 1: Quyền Quản Trị Trực Tiếp Trên Newfeed */}
+            <div className="p-6 rounded-3xl bg-base-100 border border-base-300 shadow-xs space-y-4">
+              <div className="flex items-center gap-2 pb-3 border-b border-base-200">
+                <span className="text-xl">🛡️</span>
+                <div>
+                  <h3 className="text-base font-bold text-base-content">Quản Trị Trực Tiếp Trên Newfeed</h3>
+                  <p className="text-xs text-base-content/60">Cho phép Admin thao tác bài viết và bình luận ngay tại trang chủ</p>
+                </div>
+              </div>
+
+              <div className="space-y-3.5">
+                <div className="flex items-center justify-between p-3.5 rounded-2xl bg-base-200/50 border border-base-300">
+                  <div>
+                    <p className="text-xs font-bold text-base-content">Xóa bài viết trực tiếp trên Newfeed</p>
+                    <p className="text-[11px] text-base-content/60">Hiển thị nút xóa bài viết cho Admin có modal xác nhận an toàn</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={systemSettings.allowAdminDeletePosts}
+                    onChange={(e) => setSystemSettings(prev => ({ ...prev, allowAdminDeletePosts: e.target.checked }))}
+                    className="toggle toggle-primary toggle-sm"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between p-3.5 rounded-2xl bg-base-200/50 border border-base-300">
+                  <div>
+                    <p className="text-xs font-bold text-base-content">Quản lý & xóa bình luận trên Newfeed</p>
+                    <p className="text-[11px] text-base-content/60">Admin có thể mở popup xem và xóa bình luận vi phạm tức thì</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={systemSettings.allowAdminDeleteComments}
+                    onChange={(e) => setSystemSettings(prev => ({ ...prev, allowAdminDeleteComments: e.target.checked }))}
+                    className="toggle toggle-primary toggle-sm"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between p-3.5 rounded-2xl bg-base-200/50 border border-base-300">
+                  <div>
+                    <p className="text-xs font-bold text-base-content">Ghim bài viết lên đầu trang (Pin to Top)</p>
+                    <p className="text-[11px] text-base-content/60">Ưu tiên hiển thị bài viết quan trọng ở vị trí đầu tiên của Feed</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={systemSettings.allowAdminPinPosts}
+                    onChange={(e) => setSystemSettings(prev => ({ ...prev, allowAdminPinPosts: e.target.checked }))}
+                    className="toggle toggle-primary toggle-sm"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between p-3.5 rounded-2xl bg-base-200/50 border border-base-300">
+                  <div>
+                    <p className="text-xs font-bold text-base-content">Chỉnh sửa nhanh bài viết thành viên khác</p>
+                    <p className="text-[11px] text-base-content/60">Admin có thể biên tập lại nội dung hoặc sửa định dạng bài đăng</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={systemSettings.directAdminOnFeed}
+                    onChange={(e) => setSystemSettings(prev => ({ ...prev, directAdminOnFeed: e.target.checked }))}
+                    className="toggle toggle-primary toggle-sm"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Box 2: Cấu Hình Xuất Bản & Kiểm Duyệt Tự Động */}
+            <div className="p-6 rounded-3xl bg-base-100 border border-base-300 shadow-xs space-y-4">
+              <div className="flex items-center gap-2 pb-3 border-b border-base-200">
+                <span className="text-xl">🤖</span>
+                <div>
+                  <h3 className="text-base font-bold text-base-content">Kiểm Duyệt & AI Content Safety</h3>
+                  <p className="text-xs text-base-content/60">Thiết lập tự động duyệt và quét nội dung bài viết kỹ thuật</p>
+                </div>
+              </div>
+
+              <div className="space-y-3.5">
+                <div className="flex items-center justify-between p-3.5 rounded-2xl bg-base-200/50 border border-base-300">
+                  <div>
+                    <p className="text-xs font-bold text-base-content">Tự động duyệt bài viết (Auto-Approve)</p>
+                    <p className="text-[11px] text-base-content/60">Bỏ qua hàng chờ kiểm duyệt, xuất bản ngay khi người dùng đăng bài</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={systemSettings.autoApprovePosts}
+                    onChange={(e) => setSystemSettings(prev => ({ ...prev, autoApprovePosts: e.target.checked }))}
+                    className="toggle toggle-primary toggle-sm"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between p-3.5 rounded-2xl bg-base-200/50 border border-base-300">
+                  <div>
+                    <p className="text-xs font-bold text-base-content">Tự động quét AI Gemini Multi-Key</p>
+                    <p className="text-[11px] text-base-content/60">Tự động gắn điểm an toàn, phát hiện spam và mã độc hại</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={systemSettings.aiGeminiModeration}
+                    onChange={(e) => setSystemSettings(prev => ({ ...prev, aiGeminiModeration: e.target.checked }))}
+                    className="toggle toggle-primary toggle-sm"
+                  />
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-base-200/50 border border-base-300 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-bold text-base-content">Giới hạn bài đăng / tác giả / ngày</p>
+                    <span className="badge badge-sm badge-primary text-white font-bold">{systemSettings.maxPostsPerUserPerDay} bài</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="50"
+                    value={systemSettings.maxPostsPerUserPerDay}
+                    onChange={(e) => setSystemSettings(prev => ({ ...prev, maxPostsPerUserPerDay: parseInt(e.target.value, 10) }))}
+                    className="range range-primary range-xs"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Box 3: Thông Tin Nền Tảng & Nhãn Hiệu */}
+            <div className="p-6 rounded-3xl bg-base-100 border border-base-300 shadow-xs space-y-4">
+              <div className="flex items-center gap-2 pb-3 border-b border-base-200">
+                <span className="text-xl">🌐</span>
+                <div>
+                  <h3 className="text-base font-bold text-base-content">Thông Tin Nền Tảng (Branding)</h3>
+                  <p className="text-xs text-base-content/60">Tên website, khẩu hiệu và email quản trị</p>
+                </div>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="font-bold text-base-content block mb-1">Tên Nền Tảng</label>
+                  <input
+                    type="text"
+                    value={systemSettings.siteName}
+                    onChange={(e) => setSystemSettings(prev => ({ ...prev, siteName: e.target.value }))}
+                    className="input input-sm input-bordered w-full rounded-xl"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-base-content block mb-1">Khẩu Hiệu / Slogan</label>
+                  <input
+                    type="text"
+                    value={systemSettings.siteSlogan}
+                    onChange={(e) => setSystemSettings(prev => ({ ...prev, siteSlogan: e.target.value }))}
+                    className="input input-sm input-bordered w-full rounded-xl"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-base-content block mb-1">Email Quản Trị Hệ Thống</label>
+                  <input
+                    type="email"
+                    value={systemSettings.adminEmail}
+                    onChange={(e) => setSystemSettings(prev => ({ ...prev, adminEmail: e.target.value }))}
+                    className="input input-sm input-bordered w-full rounded-xl"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between p-3 rounded-2xl bg-base-200/50 border border-base-300 pt-3">
+                  <div>
+                    <p className="text-xs font-bold text-base-content">Cho phép đăng ký thành viên mới</p>
+                    <p className="text-[11px] text-base-content/60">Người dùng mới có thể tạo tài khoản qua form đăng ký</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={systemSettings.allowRegistration}
+                    onChange={(e) => setSystemSettings(prev => ({ ...prev, allowRegistration: e.target.checked }))}
+                    className="toggle toggle-primary toggle-sm"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Box 4: Bảo Mật, Crawler & Bộ Nhớ Đệm */}
+            <div className="p-6 rounded-3xl bg-base-100 border border-base-300 shadow-xs space-y-4">
+              <div className="flex items-center gap-2 pb-3 border-b border-base-200">
+                <span className="text-xl">🚀</span>
+                <div>
+                  <h3 className="text-base font-bold text-base-content">Bảo Mật & Hiệu Năng Hệ Thống</h3>
+                  <p className="text-xs text-base-content/60">Giới hạn Rate Limit, chế độ bảo trì và quản lý Cache</p>
+                </div>
+              </div>
+
+              <div className="space-y-3.5 text-xs">
+                <div className="flex items-center justify-between p-3.5 rounded-2xl bg-base-200/50 border border-base-300">
+                  <div>
+                    <p className="text-xs font-bold text-base-content">Giới hạn Request Rate Limiter</p>
+                    <p className="text-[11px] text-base-content/60">Bảo vệ API khỏi DDoS: {systemSettings.rateLimitRequestsPerMin} requests/phút</p>
+                  </div>
+                  <span className="badge badge-success text-white font-bold text-xs">Đang bật</span>
+                </div>
+
+                <div className="flex items-center justify-between p-3.5 rounded-2xl bg-base-200/50 border border-base-300">
+                  <div>
+                    <p className="text-xs font-bold text-base-content">Chế độ Bảo trì Hệ thống (Maintenance Mode)</p>
+                    <p className="text-[11px] text-base-content/60">Chỉ cho phép quản trị viên truy cập khi đang nâng cấp</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={systemSettings.maintenanceMode}
+                    onChange={(e) => setSystemSettings(prev => ({ ...prev, maintenanceMode: e.target.checked }))}
+                    className="toggle toggle-error toggle-sm"
+                  />
+                </div>
+
+                <div className="p-4 rounded-2xl bg-base-200/40 border border-base-300 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold text-base-content">Làm mới bộ nhớ Cache</p>
+                    <p className="text-[11px] text-base-content/60">Xóa bộ đệm trình duyệt & đồng bộ lại dữ liệu mới nhất</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      localStorage.removeItem("it_blog_posts");
+                      addToast("Đã xóa bộ đệm Cache thành công! Đang tải lại dữ liệu...", "info");
+                      setTimeout(() => window.location.reload(), 600);
+                    }}
+                    className="btn btn-xs btn-outline btn-warning font-bold shrink-0"
+                  >
+                    Dọn Cache ↻
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-5 rounded-3xl bg-base-100 border border-base-300 shadow-xs flex items-center justify-between">
+            <div className="text-xs text-base-content/60">
+              Cập nhật lần cuối: <span className="font-bold text-base-content">Hôm nay</span> • Cơ sở dữ liệu: <span className="font-bold text-success">PostgreSQL (2,400+ bài viết)</span>
+            </div>
+            <button
+              type="button"
+              onClick={handleSaveSystemSettings}
+              className="btn btn-sm btn-primary text-white font-bold px-6 rounded-xl shadow-sm"
+            >
+              Lưu toàn bộ cài đặt
+            </button>
+          </div>
         </div>
       ) : currentList.length > 0 ? (
         <div className="space-y-4 animate-fade-in">

@@ -1,4 +1,4 @@
-from datetime import datetime
+﻿from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict
 
@@ -8,6 +8,7 @@ class CrawlSourceCreate(BaseModel):
     url: str
     source_type: Optional[str] = "rss"
     category_id: Optional[int] = None
+    category: Optional[str] = None
 
 
 class CrawlSourceResponse(BaseModel):
@@ -24,7 +25,8 @@ class CrawlSourceResponse(BaseModel):
 
 class TriggerCrawlRequest(BaseModel):
     source_id: Optional[int] = None
-    auto_publish: Optional[bool] = False
+    auto_publish: Optional[bool] = True
+    limit: Optional[int] = 50
 
 
 class CrawlJobResponse(BaseModel):
@@ -42,3 +44,4 @@ class CrawlJobResponse(BaseModel):
 class CrawlResultResponse(BaseModel):
     job: CrawlJobResponse
     crawled_posts: List[dict] = []
+    message: Optional[str] = None

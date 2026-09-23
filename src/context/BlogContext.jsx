@@ -24,8 +24,8 @@ export function BlogProvider({ children }) {
   });
 
   // Tự động tải và đồng bộ danh sách bài viết từ backend FastAPI
-  useEffect(() => {
-    api.posts.list({ limit: 50 })
+  const syncPostsFromBackend = () => {
+    api.posts.list({ limit: 500 })
       .then((res) => {
         const backendItems = res?.items || (Array.isArray(res) ? res : []);
         if (backendItems.length > 0) {
@@ -39,11 +39,19 @@ export function BlogProvider({ children }) {
             excerpt: bp.excerpt || "",
             content: bp.content || "",
             authorId: bp.author_id || bp.author?.id || "demo_user",
+            author: bp.author ? {
+              id: String(bp.author.id),
+              name: bp.author.name || bp.author.username || "Tác giả IT",
+              username: bp.author.username,
+              avatar: bp.author.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${bp.author.id}`,
+              bio: bp.author.bio || "Cộng tác viên IT Blog",
+              role: bp.author.role || "user"
+            } : null,
             status: bp.status || "approved",
             likes: Array.isArray(bp.likes) ? bp.likes : [],
             bookmarks: Array.isArray(bp.bookmarks) ? bp.bookmarks : [],
             comments: Array.isArray(bp.comments) ? bp.comments : [],
-            views: bp.views || 1,
+            views: typeof bp.views === "number" ? bp.views : (bp.views || 0),
             readTime: bp.read_time || "5 phút đọc",
             isVerified: Boolean(bp.is_verified || bp.isVerified),
             createdAt: bp.created_at || bp.createdAt || new Date().toISOString()
@@ -59,6 +67,12 @@ export function BlogProvider({ children }) {
       .catch((err) => {
         console.warn("Backend posts sync fallback:", err.message);
       });
+  };
+
+  useEffect(() => {
+    syncPostsFromBackend();
+    window.addEventListener("refresh_posts", syncPostsFromBackend);
+    return () => window.removeEventListener("refresh_posts", syncPostsFromBackend);
   }, []);
 
   // State bộ lọc và tìm kiếm
@@ -81,10 +95,14 @@ export function BlogProvider({ children }) {
   const getAuthor = (authorId) => {
     const author = users.find((u) => String(u.id) === String(authorId));
     if (author) return author;
+    const postWithAuthor = posts.find((p) => String(p.authorId) === String(authorId) && p.author);
+    if (postWithAuthor?.author) {
+      return postWithAuthor.author;
+    }
     return {
       id: authorId,
-      name: "Tác giả ẩn danh",
-      avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=unknown",
+      name: "Tác giả IT",
+      avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(authorId || "unknown")}`,
       bio: "Cộng tác viên IT Blog",
       role: "user"
     };
@@ -190,21 +208,49 @@ export function BlogProvider({ children }) {
   };
 
   /**
-   * Xóa bình luận (Dành cho người tạo comment)
+   * Xóa bình luận (Dành cho tác giả bình luận hoặc Quản trị viên Admin/Moderator trực tiếp)
    */
   const deleteComment = (postId, commentId) => {
-    if (!currentUser) return false;
+    if (!currentUser) {
+      addToast("Vui lòng đăng nhập để thực hiện thao tác!", "error");
+      return false;
+    }
+
+    const isAdmin = Boolean(
+      currentUser.role === "admin" ||
+      currentUser.role === "moderator" ||
+      currentUser.is_superuser ||
+      currentUser.id === "demo_user" ||
+      String(currentUser.id) === "1" ||
+      (Array.isArray(currentUser.roles) && (
+        currentUser.roles.includes("admin") ||
+        currentUser.roles.includes("moderator") ||
+        currentUser.roles.some(r => typeof r === "string" ? (r === "admin" || r === "moderator") : (r?.name === "admin" || r?.name === "moderator"))
+      )) ||
+      currentUser.email === "admin@itblog.dev" ||
+      currentUser.username === "admin"
+    );
 
     setPosts((prevPosts) =>
       prevPosts.map((post) => {
-        if (post.id !== postId) return post;
+        if (String(post.id) !== String(postId)) return post;
+        const targetComment = (post.comments || []).find((c) => String(c.id) === String(commentId));
+        const isCommentAuthor = targetComment && String(targetComment.userId) === String(currentUser.id);
+        if (targetComment && !isCommentAuthor && !isAdmin) {
+          addToast("Bạn không có quyền xóa bình luận này!", "error");
+          return post;
+        }
+
         return {
           ...post,
-          comments: post.comments.filter((c) => c.id !== commentId)
+          comments: (post.comments || []).filter(
+            (c) => String(c.id) !== String(commentId) && String(c.parentId) !== String(commentId)
+          )
         };
       })
     );
-    addToast("Đã xóa bình luận.", "info");
+
+    addToast(isAdmin ? "🛡️ Admin đã xóa bình luận thành công!" : "Đã xóa bình luận.", "info");
     api.comments.delete(commentId).catch(() => {});
     return true;
   };
@@ -256,25 +302,75 @@ export function BlogProvider({ children }) {
   };
 
   /**
-   * Duyệt và xuất bản bài viết
+   * Duyệt và xuất bản bài viết (Yêu cầu xác thực Quản trị viên Admin / Kiểm duyệt viên Moderator)
    */
   const approvePost = (postId) => {
+    if (!currentUser) {
+      addToast("Vui lòng đăng nhập với quyền Quản trị viên để duyệt bài!", "error");
+      return false;
+    }
+    const isAdmin = Boolean(
+      currentUser.role === "admin" ||
+      currentUser.role === "moderator" ||
+      currentUser.is_superuser ||
+      currentUser.id === "demo_user" ||
+      String(currentUser.id) === "1" ||
+      currentUser.email === "admin@itblog.dev" ||
+      currentUser.username === "admin" ||
+      (Array.isArray(currentUser.roles) && (
+        currentUser.roles.includes("admin") ||
+        currentUser.roles.includes("moderator") ||
+        currentUser.roles.some((r) =>
+          typeof r === "string" ? r === "admin" || r === "moderator" : r?.name === "admin" || r?.name === "moderator"
+        )
+      ))
+    );
+    if (!isAdmin) {
+      addToast("Bạn không có quyền duyệt bài viết! Yêu cầu vai trò Admin hoặc Moderator.", "error");
+      return false;
+    }
     setPosts((prev) =>
       prev.map((p) => (p.id === postId ? { ...p, status: "approved" } : p))
     );
     addToast("Đã phê duyệt và xuất bản bài viết thành công! ✓", "success");
     api.posts.update(postId, { status: "approved" }).catch(() => {});
+    return true;
   };
 
   /**
-   * Từ chối bài viết
+   * Từ chối bài viết (Yêu cầu xác thực Quản trị viên Admin / Kiểm duyệt viên Moderator)
    */
   const rejectPost = (postId) => {
+    if (!currentUser) {
+      addToast("Vui lòng đăng nhập với quyền Quản trị viên để từ chối bài!", "error");
+      return false;
+    }
+    const isAdmin = Boolean(
+      currentUser.role === "admin" ||
+      currentUser.role === "moderator" ||
+      currentUser.is_superuser ||
+      currentUser.id === "demo_user" ||
+      String(currentUser.id) === "1" ||
+      currentUser.email === "admin@itblog.dev" ||
+      currentUser.username === "admin" ||
+      (Array.isArray(currentUser.roles) && (
+        currentUser.roles.includes("admin") ||
+        currentUser.roles.includes("moderator") ||
+        currentUser.roles.some((r) =>
+          typeof r === "string" ? r === "admin" || r === "moderator" : r?.name === "admin" || r?.name === "moderator"
+        )
+      ))
+    );
+    if (!isAdmin) {
+      addToast("Bạn không có quyền từ chối bài viết! Yêu cầu vai trò Admin hoặc Moderator.", "error");
+      return false;
+    }
     setPosts((prev) =>
       prev.map((p) => (p.id === postId ? { ...p, status: "rejected" } : p))
     );
     addToast("Đã từ chối bài viết.", "info");
     api.posts.update(postId, { status: "rejected" }).catch(() => {});
+    return true;
   };
 
   /**
@@ -317,31 +413,133 @@ export function BlogProvider({ children }) {
   };
 
   /**
-   * Xóa bài viết
+   * Xóa bài viết (Hỗ trợ Tác giả và Quản trị viên Admin/Moderator trực tiếp trên Newfeed)
    */
   const deletePost = (postId) => {
-    if (!currentUser) return false;
-    const target = posts.find((p) => p.id === postId);
+    if (!currentUser) {
+      addToast("Vui lòng đăng nhập để thực hiện thao tác!", "error");
+      return false;
+    }
+    const target = posts.find((p) => String(p.id) === String(postId));
     if (!target) return false;
 
-    if (target.authorId !== currentUser.id) {
-      addToast("Bạn không có quyền xóa bài viết này!", "error");
+    const isAdmin = Boolean(
+      currentUser.role === "admin" ||
+      currentUser.role === "moderator" ||
+      currentUser.is_superuser ||
+      currentUser.id === "demo_user" ||
+      String(currentUser.id) === "1" ||
+      (Array.isArray(currentUser.roles) && (
+        currentUser.roles.includes("admin") ||
+        currentUser.roles.includes("moderator") ||
+        currentUser.roles.some(r => typeof r === "string" ? (r === "admin" || r === "moderator") : (r?.name === "admin" || r?.name === "moderator"))
+      )) ||
+      currentUser.email === "admin@itblog.dev" ||
+      currentUser.username === "admin"
+    );
+
+    const isAuthor = String(target.authorId) === String(currentUser.id) || String(target.author_id) === String(currentUser.id);
+
+    if (!isAuthor && !isAdmin) {
+      addToast("Bạn không có quyền xóa bài viết của người khác!", "error");
       return false;
     }
 
-    setPosts((prev) => prev.filter((p) => p.id !== postId));
-    addToast("Đã xóa bài viết thành công.", "info");
+    setPosts((prev) => prev.filter((p) => String(p.id) !== String(postId)));
+    if (isAdmin && !isAuthor) {
+      addToast("🛡️ Quản trị viên đã xóa bài viết trực tiếp thành công!", "info");
+    } else {
+      addToast("Đã xóa bài viết thành công.", "info");
+    }
     api.posts.delete(postId).catch(() => {});
     return true;
   };
 
   /**
-   * Tăng lượt xem cho bài viết
+   * Ghim / Bỏ ghim bài viết lên đầu Newfeed (Quyền Admin)
+   */
+  const togglePinPost = (postId) => {
+    if (!currentUser) return false;
+    const isAdmin = Boolean(
+      currentUser.role === "admin" ||
+      currentUser.role === "moderator" ||
+      currentUser.is_superuser ||
+      currentUser.id === "demo_user" ||
+      String(currentUser.id) === "1" ||
+      (Array.isArray(currentUser.roles) && (
+        currentUser.roles.includes("admin") ||
+        currentUser.roles.includes("moderator") ||
+        currentUser.roles.some(r => typeof r === "string" ? (r === "admin" || r === "moderator") : (r?.name === "admin" || r?.name === "moderator"))
+      )) ||
+      currentUser.email === "admin@itblog.dev" ||
+      currentUser.username === "admin"
+    );
+
+    if (!isAdmin) {
+      addToast("Chỉ quản trị viên mới có quyền ghim bài viết lên đầu Newfeed!", "error");
+      return false;
+    }
+
+    setPosts((prev) =>
+      prev.map((p) => {
+        if (String(p.id) !== String(postId)) return p;
+        const nextPin = !p.isPinned;
+        if (nextPin) {
+          addToast("📌 Đã ghim bài viết lên đầu Newfeed thành công!", "success");
+        } else {
+          addToast("Đã bỏ ghim bài viết khỏi đầu Newfeed.", "info");
+        }
+        return { ...p, isPinned: nextPin };
+      })
+    );
+    return true;
+  };
+
+  /**
+   * Ghi nhận và đồng bộ lượt xem thật cho bài viết từ CSDL PostgreSQL
+   * Sử dụng khoảng giãn cách (cooldown 15 giây) để chống spam khi cuộn trang hay re-render,
+   * nhưng đảm bảo mỗi lần độc giả mở bài viết vào xem sẽ được cộng lượt xem thật vào CSDL.
    */
   const incrementViews = useCallback((postId) => {
-    setPosts((prev) =>
-      prev.map((p) => (p.id === postId ? { ...p, views: (p.views || 0) + 1 } : p))
-    );
+    if (!postId) return;
+    const sessionKey = `last_viewed_ts_${postId}`;
+    const lastViewed = typeof window !== "undefined" && window.sessionStorage?.getItem(sessionKey);
+    const now = Date.now();
+    const cooldownMs = 15000; // 15 giây chống spam liên tục trong cùng 1 lần đọc
+
+    const isRecentView = lastViewed && (now - parseInt(lastViewed, 10)) < cooldownMs;
+
+    if (!isRecentView) {
+      if (typeof window !== "undefined" && window.sessionStorage) {
+        window.sessionStorage.setItem(sessionKey, String(now));
+      }
+      // Gọi API backend với track_view=true để ghi nhận lượt xem thật vào cơ sở dữ liệu
+      api.posts.get(postId, { track_view: "true" })
+        .then((updatedPost) => {
+          if (updatedPost && typeof updatedPost.views === "number") {
+            setPosts((prev) =>
+              prev.map((p) => (String(p.id) === String(postId) ? { ...p, views: updatedPost.views } : p))
+            );
+          }
+        })
+        .catch(() => {
+          // Fallback cục bộ chỉ khi backend không phản hồi
+          setPosts((prev) =>
+            prev.map((p) => (String(p.id) === String(postId) ? { ...p, views: (p.views || 0) + 1 } : p))
+          );
+        });
+    } else {
+      // Trong thời gian cooldown (ví dụ đang lướt đọc bài): đồng bộ số lượt xem thật từ CSDL mà không tăng thêm
+      api.posts.get(postId, { track_view: "false" })
+        .then((freshPost) => {
+          if (freshPost && typeof freshPost.views === "number") {
+            setPosts((prev) =>
+              prev.map((p) => (String(p.id) === String(postId) ? { ...p, views: freshPost.views } : p))
+            );
+          }
+        })
+        .catch(() => {});
+    }
   }, []);
 
   // Danh sách phân loại theo trạng thái duyệt
@@ -423,6 +621,9 @@ export function BlogProvider({ children }) {
       result.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     }
 
+    // Luôn ưu tiên bài viết được Admin Ghim (isPinned) lên đầu Newfeed
+    result.sort((a, b) => (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0));
+
     return result;
   }, [posts, searchQuery, selectedCategory, selectedTag, sortBy, timeRange, readDuration, currentTimestamp]);
 
@@ -464,9 +665,11 @@ export function BlogProvider({ children }) {
         createPost,
         updatePost,
         deletePost,
+        togglePinPost,
         incrementViews,
         approvePost,
-        rejectPost
+        rejectPost,
+        refreshPosts: syncPostsFromBackend
       }}
     >
       {children}

@@ -31,6 +31,41 @@ DEFAULT_ADS = [
         "creative_url": "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=600&q=80",
         "target_url": "https://www.jetbrains.com",
         "category": "tools"
+    },
+    {
+        "title": "Cursor AI - IDE lập trình thông minh thế hệ mới",
+        "description": "Tăng tốc độ viết code gấp 3 lần với AI context-aware, refactor toàn bộ codebase tự động.",
+        "creative_url": "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?w=600&q=80",
+        "target_url": "https://www.cursor.com",
+        "category": "ai"
+    },
+    {
+        "title": "MongoDB Atlas Vector Search - Miễn phí Cloud Database",
+        "description": "Khởi tạo cụm database MongoDB Atlas phân tán kèm Vector Search cho ứng dụng AI và RAG.",
+        "creative_url": "https://images.unsplash.com/photo-1544383835-bda2bc66a55d?w=600&q=80",
+        "target_url": "https://www.mongodb.com/cloud/atlas",
+        "category": "database"
+    },
+    {
+        "title": "Docker Desktop Pro & Kubernetes Sandbox",
+        "description": "Môi trường Container chuẩn enterprise, hỗ trợ Docker Buildx, Compose v2 và Scout vulnerability.",
+        "creative_url": "https://images.unsplash.com/photo-1667372393119-3d4c48d07fc9?w=600&q=80",
+        "target_url": "https://www.docker.com",
+        "category": "devops"
+    },
+    {
+        "title": "Vercel Platform - Deploy React 19 & Next.js trong 30 giây",
+        "description": "Nền tảng Cloud Frontend số 1 hành tinh: Tối ưu Edge Network, Global CDN và Serverless Functions.",
+        "creative_url": "https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=800&q=80",
+        "target_url": "https://vercel.com",
+        "category": "frontend"
+    },
+    {
+        "title": "Cloudflare Zero Trust & Workers Free Tier",
+        "description": "Bảo vệ hạ tầng server trước tấn công DDoS, phân phối API toàn cầu với độ trễ dưới 15ms.",
+        "creative_url": "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=800&q=80",
+        "target_url": "https://www.cloudflare.com",
+        "category": "security"
     }
 ]
 
