@@ -294,5 +294,3 @@ git commit -m "feat: synchronize 183 platform features, crawler auto-publish, fe
   ```
 
 ---
-
-*Phát triển và hoàn thiện bởi Đội ngũ Kỹ sư Công nghệ Phần mềm - Phiên bản 2026.*
