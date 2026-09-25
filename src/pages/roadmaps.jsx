@@ -55,6 +55,10 @@ const INITIAL_ROADMAPS = [
   }
 ];
 
+function generateUniqueId() {
+  return Date.now();
+}
+
 export default function RoadmapsPage({ onNavigate, params }) {
   const { currentUser, requireAuth, loginDemo, isAdmin } = useAuth();
   const { addToast } = useToast();
@@ -65,7 +69,14 @@ export default function RoadmapsPage({ onNavigate, params }) {
   const [stepFilter, setStepFilter] = useState("all");
 
   // Create Roadmap Modal States
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(isAdmin && params?.action === "create");
+  const [prevRoadmapAction, setPrevRoadmapAction] = useState(params?.action);
+  if (params?.action !== prevRoadmapAction) {
+    setPrevRoadmapAction(params?.action);
+    if (params?.action === "create" && isAdmin) {
+      setShowCreateModal(true);
+    }
+  }
   const [newTitle, setNewTitle] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [newLevel, setNewLevel] = useState("basic");
@@ -92,6 +103,10 @@ export default function RoadmapsPage({ onNavigate, params }) {
 
   const handleCreateRoadmap = async (e) => {
     e.preventDefault();
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền tạo lộ trình học tập mới!", "error");
+      return;
+    }
     if (!newTitle.trim() || !newDesc.trim()) return;
     if (!currentUser) {
       requireAuth(() => handleCreateRoadmap(e), "Vui lòng đăng nhập để lưu lộ trình mới!");
@@ -127,7 +142,7 @@ export default function RoadmapsPage({ onNavigate, params }) {
         completed_steps: 0,
         progress_percentage: 0.0,
         steps: (created.steps || validSteps).map((s, idx) => ({
-          id: s.id || Date.now() + idx,
+          id: s.id || generateUniqueId() + idx,
           order_index: s.order_index || idx + 1,
           title: s.title,
           description: s.description,
@@ -147,7 +162,7 @@ export default function RoadmapsPage({ onNavigate, params }) {
       ]);
     } catch (err) {
       console.warn("Create roadmap error, falling back locally:", err);
-      const fallbackId = Date.now();
+      const fallbackId = generateUniqueId();
       const localRoadmap = {
         id: fallbackId,
         title: newTitle.trim(),
@@ -207,7 +222,7 @@ export default function RoadmapsPage({ onNavigate, params }) {
     requireAuth(() => {
       setRoadmaps((prev) =>
         prev.map((rm) => {
-          if (rm.id !== roadmapId) return rm;
+          if (String(rm.id) !== String(roadmapId)) return rm;
           const updatedSteps = (rm.steps || []).map((s) => ({ ...s, is_completed: false }));
           return {
             ...rm,
@@ -218,7 +233,7 @@ export default function RoadmapsPage({ onNavigate, params }) {
         })
       );
 
-      if (selectedRoadmap && selectedRoadmap.id === roadmapId) {
+      if (selectedRoadmap && String(selectedRoadmap.id) === String(roadmapId)) {
         setSelectedRoadmap((prev) => ({
           ...prev,
           steps: (prev.steps || []).map((s) => ({ ...s, is_completed: false })),
@@ -236,9 +251,9 @@ export default function RoadmapsPage({ onNavigate, params }) {
       let finalPct = 0;
       setRoadmaps((prev) =>
         prev.map((rm) => {
-          if (rm.id !== roadmapId) return rm;
+          if (String(rm.id) !== String(roadmapId)) return rm;
           const updatedSteps = (rm.steps || []).map((s) =>
-            s.id === stepId ? { ...s, is_completed: !s.is_completed } : s
+            String(s.id) === String(stepId) ? { ...s, is_completed: !s.is_completed } : s
           );
           const completedCount = updatedSteps.filter((s) => s.is_completed).length;
           finalPct = Math.round((completedCount / updatedSteps.length) * 100);
@@ -251,10 +266,10 @@ export default function RoadmapsPage({ onNavigate, params }) {
         })
       );
 
-      if (selectedRoadmap && selectedRoadmap.id === roadmapId) {
+      if (selectedRoadmap && String(selectedRoadmap.id) === String(roadmapId)) {
         setSelectedRoadmap((prev) => {
           const updatedSteps = (prev.steps || []).map((s) =>
-            s.id === stepId ? { ...s, is_completed: !s.is_completed } : s
+            String(s.id) === String(stepId) ? { ...s, is_completed: !s.is_completed } : s
           );
           const completedCount = updatedSteps.filter((s) => s.is_completed).length;
           const pct = Math.round((completedCount / updatedSteps.length) * 100);
@@ -747,7 +762,7 @@ export default function RoadmapsPage({ onNavigate, params }) {
       )}
 
       {/* Modal Tạo Lộ Trình Mới */}
-      {showCreateModal && (
+      {isAdmin && showCreateModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in"
           onClick={(e) => { if (!isSubmitting && e.target === e.currentTarget) setShowCreateModal(false); }}

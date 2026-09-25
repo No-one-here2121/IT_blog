@@ -30,7 +30,11 @@ export default function Foot({ onNavigate }) {
 
   const handleOpenFeedback = (e) => {
     e.preventDefault();
-    setShowFeedbackModal(true);
+    if (onNavigate) {
+      onNavigate("policy", { section: "feedback" });
+    } else {
+      setShowFeedbackModal(true);
+    }
   };
 
   const handlePolicyNavigate = (sectionKey) => (e) => {

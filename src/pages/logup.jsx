@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 import ThemeToggle from "../components/ThemeToggle";
 
 export default function Logup_page({ onNavigate }) {
-  const { register, loginDemo } = useAuth();
+  const { currentUser, register, loginDemo, loginWithGoogle, loginWithGithub } = useAuth();
+  const { addToast } = useToast();
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -15,9 +17,42 @@ export default function Logup_page({ onNavigate }) {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Validate errors
+  const [accountExists, setAccountExists] = useState(false);
   const [errors, setErrors] = useState({});
+
+  // Nếu người dùng đã đăng nhập -> Chặn truy cập trang đăng ký và tự động chuyển về trang chủ
+  useEffect(() => {
+    if (currentUser) {
+      addToast(`Bạn đã có tài khoản và đang đăng nhập (${currentUser.name || currentUser.username})!`, "info");
+      if (onNavigate) onNavigate("home");
+    }
+  }, [currentUser, onNavigate, addToast]);
+
+  if (currentUser) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-base-200 p-4">
+        <div className="card bg-base-100 p-8 rounded-3xl shadow-xl text-center max-w-md w-full space-y-4 animate-fade-in border border-base-300">
+          <div className="w-16 h-16 rounded-full bg-success/15 text-success mx-auto flex items-center justify-center text-3xl font-bold">
+            ✓
+          </div>
+          <h2 className="text-xl font-black text-base-content">Bạn đã đăng nhập!</h2>
+          <p className="text-sm text-base-content/70">
+            Tài khoản hiện tại: <strong className="text-primary">{currentUser.name || currentUser.username}</strong>
+          </p>
+          <p className="text-xs text-base-content/50">
+            Trang đăng ký chỉ dành cho khách chưa có tài khoản. Đang tự động chuyển hướng về trang chủ...
+          </p>
+          <button
+            type="button"
+            onClick={() => onNavigate && onNavigate("home")}
+            className="btn btn-primary btn-sm text-white font-bold rounded-xl w-full"
+          >
+            Quay lại trang chủ ngay
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const validate = () => {
     const errs = {};
@@ -59,24 +94,26 @@ export default function Logup_page({ onNavigate }) {
     return Object.keys(errs).length === 0;
   };
 
-  const handleRegister = (e) => {
+  const handleRegister = async (e) => {
     e.preventDefault();
     if (!validate()) return;
 
     setIsSubmitting(true);
-    setTimeout(() => {
-      const success = register({ name, email, username, password });
+    setAccountExists(false);
+    try {
+      const success = await register({ name, email, username, password });
       setIsSubmitting(false);
       if (success && onNavigate) {
         onNavigate("home");
+      } else if (!success) {
+        setAccountExists(true);
       }
-    }, 500);
+    } catch {
+      setIsSubmitting(false);
+      setAccountExists(true);
+    }
   };
 
-  const handleSocialClick = () => {
-    loginDemo();
-    if (onNavigate) onNavigate("home");
-  };
 
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 sm:p-6 bg-base-200/40">
@@ -124,6 +161,14 @@ export default function Logup_page({ onNavigate }) {
         </div>
 
         {/* Biểu mẫu đăng ký */}
+        {accountExists && (
+          <div className="mb-4 alert alert-error text-xs py-2.5 rounded-xl shadow-xs text-white">
+            <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <span>Tài khoản hoặc email này đã tồn tại trong hệ thống. Vui lòng đăng nhập hoặc dùng email khác.</span>
+          </div>
+        )}
         <form onSubmit={handleRegister} className="space-y-4" noValidate>
           {/* Hàng 1: Tên của bạn */}
           <div>
@@ -347,25 +392,14 @@ export default function Logup_page({ onNavigate }) {
           </span>
         </div>
 
-        {/* 3 Nút Đăng nhập Mạng xã hội với icon hài hòa (Facebook, Google, Github) */}
-        <div className="grid grid-cols-3 gap-2">
-          {/* Facebook */}
+        {/* 2 Nút Đăng nhập Mạng xã hội: Google & GitHub */}
+        <div className="grid grid-cols-2 gap-3">
+          {/* Google - Chuyen huong truc tiep toi Google OAuth */}
           <button
             type="button"
-            onClick={() => handleSocialClick("facebook")}
-            className="btn btn-sm btn-outline border-base-300 hover:bg-[#1877F2]/10 hover:border-[#1877F2] hover:text-[#1877F2] normal-case text-[11px] sm:text-xs font-semibold gap-1 px-1 sm:px-3 h-10 rounded-lg transition-colors min-w-0"
-          >
-            <svg className="w-4 h-4 text-[#1877F2] shrink-0" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-            </svg>
-            <span className="truncate">Facebook</span>
-          </button>
-
-          {/* Google */}
-          <button
-            type="button"
-            onClick={() => handleSocialClick("google")}
-            className="btn btn-sm btn-outline border-base-300 hover:bg-base-200 normal-case text-[11px] sm:text-xs font-semibold gap-1 px-1 sm:px-3 h-10 rounded-lg transition-colors min-w-0"
+            onClick={loginWithGoogle}
+            className="btn btn-sm btn-outline border-base-300 hover:bg-base-200 normal-case text-xs font-semibold gap-2 px-3 h-10 rounded-xl transition-all shadow-xs hover:border-primary/50"
+            title="Đăng nhập trực tiếp bằng tài khoản Google"
           >
             <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
               <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
@@ -373,19 +407,20 @@ export default function Logup_page({ onNavigate }) {
               <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
               <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
             </svg>
-            <span className="truncate">Google</span>
+            <span className="font-bold">Google</span>
           </button>
 
-          {/* Github */}
+          {/* Github - Chuyen huong truc tiep toi GitHub OAuth */}
           <button
             type="button"
-            onClick={() => handleSocialClick("github")}
-            className="btn btn-sm btn-outline border-base-300 hover:bg-base-200 normal-case text-[11px] sm:text-xs font-semibold gap-1 px-1 sm:px-3 h-10 rounded-lg transition-colors min-w-0"
+            onClick={loginWithGithub}
+            className="btn btn-sm btn-outline border-base-300 hover:bg-base-200 normal-case text-xs font-semibold gap-2 px-3 h-10 rounded-xl transition-all shadow-xs hover:border-primary/50"
+            title="Đăng nhập trực tiếp bằng tài khoản GitHub"
           >
             <svg className="w-4 h-4 text-base-content shrink-0" fill="currentColor" viewBox="0 0 24 24">
               <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
             </svg>
-            <span className="truncate">Github</span>
+            <span className="font-bold">GitHub</span>
           </button>
         </div>
 

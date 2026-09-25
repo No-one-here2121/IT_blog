@@ -13,6 +13,31 @@ export function BlogProvider({ children }) {
   const { currentUser, users } = useAuth();
   const { addToast } = useToast();
 
+  // Hàm kiểm tra quyền Ban giám sát / Quản trị viên (Admin & Moderator)
+  const checkIsSupervisor = (user) => {
+    if (!user) return false;
+    return Boolean(
+      user.role === "admin" ||
+      user.role === "moderator" ||
+      user.is_superuser ||
+      user.id === "demo_admin" ||
+      user.id === "demo_moderator" ||
+      String(user.id) === "1" ||
+      String(user.id) === "11" ||
+      user.email === "admin@itblog.dev" ||
+      user.email === "mod@itblog.dev" ||
+      user.username === "admin" ||
+      user.username === "mod_dev" ||
+      (Array.isArray(user.roles) && (
+        user.roles.includes("admin") ||
+        user.roles.includes("moderator") ||
+        user.roles.some((r) =>
+          typeof r === "string" ? r === "admin" || r === "moderator" : r?.name === "admin" || r?.name === "moderator"
+        )
+      ))
+    );
+  };
+
   // Khởi tạo danh sách bài viết từ storage hoặc seed data
   const [posts, setPosts] = useState(() => {
     const saved = storage.get(STORAGE_KEYS.POSTS, null);
@@ -38,7 +63,7 @@ export function BlogProvider({ children }) {
             coverImage: bp.cover_image || bp.coverImage || "",
             excerpt: bp.excerpt || "",
             content: bp.content || "",
-            authorId: bp.author_id || bp.author?.id || "demo_user",
+            authorId: bp.author_id || bp.author?.id || "author_unknown",
             author: bp.author ? {
               id: String(bp.author.id),
               name: bp.author.name || bp.author.username || "Tác giả IT",
@@ -48,9 +73,12 @@ export function BlogProvider({ children }) {
               role: bp.author.role || "user"
             } : null,
             status: bp.status || "approved",
+            likes_count: bp.likes_count ?? (Array.isArray(bp.likes) ? bp.likes.length : 0),
             likes: Array.isArray(bp.likes) ? bp.likes : [],
+            bookmarks_count: bp.bookmarks_count ?? (Array.isArray(bp.bookmarks) ? bp.bookmarks.length : 0),
             bookmarks: Array.isArray(bp.bookmarks) ? bp.bookmarks : [],
-            comments: Array.isArray(bp.comments) ? bp.comments : [],
+            comments_count: bp.comments_count ?? (Array.isArray(bp.comments) ? bp.comments.length : 0),
+            comments: Array.isArray(bp.comments) && bp.comments.length > 0 && typeof bp.comments[0] === "object" ? bp.comments : [],
             views: typeof bp.views === "number" ? bp.views : (bp.views || 0),
             readTime: bp.read_time || "5 phút đọc",
             isVerified: Boolean(bp.is_verified || bp.isVerified),
@@ -116,11 +144,11 @@ export function BlogProvider({ children }) {
 
     setPosts((prevPosts) =>
       prevPosts.map((post) => {
-        if (post.id !== postId) return post;
+        if (String(post.id) !== String(postId)) return post;
         const currentLikes = Array.isArray(post.likes) ? post.likes : [];
-        const alreadyLiked = currentLikes.includes(currentUser.id);
+        const alreadyLiked = currentLikes.some((id) => String(id) === String(currentUser.id));
         const updatedLikes = alreadyLiked
-          ? currentLikes.filter((id) => id !== currentUser.id)
+          ? currentLikes.filter((id) => String(id) !== String(currentUser.id))
           : [...currentLikes, currentUser.id];
 
         if (alreadyLiked) {
@@ -148,11 +176,11 @@ export function BlogProvider({ children }) {
 
     setPosts((prevPosts) =>
       prevPosts.map((post) => {
-        if (post.id !== postId) return post;
+        if (String(post.id) !== String(postId)) return post;
         const currentBookmarks = Array.isArray(post.bookmarks) ? post.bookmarks : [];
-        const alreadyBookmarked = currentBookmarks.includes(currentUser.id);
+        const alreadyBookmarked = currentBookmarks.some((id) => String(id) === String(currentUser.id));
         const updatedBookmarks = alreadyBookmarked
-          ? currentBookmarks.filter((id) => id !== currentUser.id)
+          ? currentBookmarks.filter((id) => String(id) !== String(currentUser.id))
           : [...currentBookmarks, currentUser.id];
 
         if (alreadyBookmarked) {
@@ -173,6 +201,44 @@ export function BlogProvider({ children }) {
   };
 
   /**
+   * Đồng bộ danh sách bình luận thực tế từ backend cho một bài viết
+   */
+  const syncPostComments = async (postId) => {
+    if (!postId) return [];
+    try {
+      const res = await api.comments.list(postId);
+      const items = res?.items || (Array.isArray(res) ? res : []);
+      if (Array.isArray(items)) {
+        const formatted = items.map((c) => ({
+          id: String(c.id),
+          userId: c.user_id ? String(c.user_id) : (c.user?.id ? String(c.user.id) : "unknown"),
+          userName: c.user?.name || c.user?.username || "Thành viên IT",
+          userAvatar: c.user?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${c.user_id || "dev"}`,
+          content: c.content || c.text || "",
+          parentId: c.parent_id ? String(c.parent_id) : null,
+          parent_id: c.parent_id ? String(c.parent_id) : null,
+          likes_count: c.likes_count || 0,
+          isPinned: Boolean(c.is_pinned),
+          isAccepted: Boolean(c.is_accepted_answer),
+          createdAt: c.created_at || new Date().toISOString()
+        }));
+
+        setPosts((prev) =>
+          prev.map((p) =>
+            String(p.id) === String(postId) || String(p.slug) === String(postId)
+              ? { ...p, comments: formatted, comments_count: formatted.length }
+              : p
+          )
+        );
+        return formatted;
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  };
+
+  /**
    * Thêm bình luận mới vào bài viết (hỗ trợ trả lời lồng cấp parentId)
    */
   const addComment = (postId, content, parentId = null) => {
@@ -180,8 +246,9 @@ export function BlogProvider({ children }) {
     const trimmed = (content || "").trim();
     if (!trimmed) return false;
 
+    const tempId = generateId("cmt");
     const newComment = {
-      id: generateId("cmt"),
+      id: tempId,
       userId: currentUser.id,
       userName: currentUser.name,
       userAvatar: currentUser.avatar,
@@ -194,16 +261,31 @@ export function BlogProvider({ children }) {
 
     setPosts((prevPosts) =>
       prevPosts.map((post) => {
-        if (post.id !== postId) return post;
+        if (String(post.id) !== String(postId)) return post;
         return {
           ...post,
+          comments_count: (post.comments_count || (post.comments?.length || 0)) + 1,
           comments: [...(post.comments || []), newComment]
         };
       })
     );
 
     addToast(parentId ? "Đã gửi phản hồi bình luận! 💬" : "Đã gửi bình luận thành công! 💬", "success");
-    api.comments.create(postId, { content: trimmed, parent_id: parentId }).catch(() => {});
+    api.comments.create(postId, { content: trimmed, parent_id: parentId })
+      .then((created) => {
+        if (created?.id) {
+          setPosts((prevPosts) =>
+            prevPosts.map((post) => {
+              if (String(post.id) !== String(postId)) return post;
+              return {
+                ...post,
+                comments: (post.comments || []).map((c) => (c.id === tempId ? { ...c, id: created.id } : c))
+              };
+            })
+          );
+        }
+      })
+      .catch(() => {});
     return true;
   };
 
@@ -216,33 +298,23 @@ export function BlogProvider({ children }) {
       return false;
     }
 
-    const isAdmin = Boolean(
-      currentUser.role === "admin" ||
-      currentUser.role === "moderator" ||
-      currentUser.is_superuser ||
-      currentUser.id === "demo_user" ||
-      String(currentUser.id) === "1" ||
-      (Array.isArray(currentUser.roles) && (
-        currentUser.roles.includes("admin") ||
-        currentUser.roles.includes("moderator") ||
-        currentUser.roles.some(r => typeof r === "string" ? (r === "admin" || r === "moderator") : (r?.name === "admin" || r?.name === "moderator"))
-      )) ||
-      currentUser.email === "admin@itblog.dev" ||
-      currentUser.username === "admin"
-    );
+    const isSupervisor = checkIsSupervisor(currentUser);
+    let permitted = false;
 
     setPosts((prevPosts) =>
       prevPosts.map((post) => {
         if (String(post.id) !== String(postId)) return post;
         const targetComment = (post.comments || []).find((c) => String(c.id) === String(commentId));
         const isCommentAuthor = targetComment && String(targetComment.userId) === String(currentUser.id);
-        if (targetComment && !isCommentAuthor && !isAdmin) {
-          addToast("Bạn không có quyền xóa bình luận này!", "error");
+        if (targetComment && !isCommentAuthor && !isSupervisor) {
+          addToast("Bạn không có quyền xóa bình luận này! Chỉ người viết hoặc Ban giám sát mới có quyền xóa.", "error");
           return post;
         }
 
+        permitted = true;
         return {
           ...post,
+          comments_count: Math.max(0, (post.comments_count || (post.comments?.length || 1)) - 1),
           comments: (post.comments || []).filter(
             (c) => String(c.id) !== String(commentId) && String(c.parentId) !== String(commentId)
           )
@@ -250,9 +322,12 @@ export function BlogProvider({ children }) {
       })
     );
 
-    addToast(isAdmin ? "🛡️ Admin đã xóa bình luận thành công!" : "Đã xóa bình luận.", "info");
-    api.comments.delete(commentId).catch(() => {});
-    return true;
+    if (permitted) {
+      addToast(isSupervisor ? "🛡️ Ban giám sát đã xóa bình luận thành công!" : "Đã xóa bình luận.", "info");
+      api.comments.delete(commentId).catch(() => {});
+      return true;
+    }
+    return false;
   };
 
   /**
@@ -261,13 +336,15 @@ export function BlogProvider({ children }) {
   const createPost = (postData) => {
     if (!currentUser) return null;
 
-    const isPending = postData.status === "pending";
+    const isSupervisor = checkIsSupervisor(currentUser);
+    const resolvedStatus = isSupervisor ? (postData.status || "approved") : "pending";
+    const isPending = resolvedStatus === "pending";
 
     const newPost = {
       ...postData,
       id: generateId("post"),
       authorId: currentUser.id,
-      status: postData.status || "approved", // 'approved' | 'pending' | 'rejected'
+      status: resolvedStatus, // 'approved' | 'pending' | 'rejected'
       likes: [],
       bookmarks: [],
       comments: [],
@@ -295,7 +372,7 @@ export function BlogProvider({ children }) {
       scheduled_at: postData.scheduledAt,
       is_deprecated: Boolean(postData.isDeprecated),
       deprecated_warning: postData.deprecatedWarning,
-      status: postData.status || "approved"
+      status: resolvedStatus
     }).catch(() => {});
 
     return newPost;
@@ -306,31 +383,15 @@ export function BlogProvider({ children }) {
    */
   const approvePost = (postId) => {
     if (!currentUser) {
-      addToast("Vui lòng đăng nhập với quyền Quản trị viên để duyệt bài!", "error");
+      addToast("Vui lòng đăng nhập với quyền Ban giám sát để duyệt bài!", "error");
       return false;
     }
-    const isAdmin = Boolean(
-      currentUser.role === "admin" ||
-      currentUser.role === "moderator" ||
-      currentUser.is_superuser ||
-      currentUser.id === "demo_user" ||
-      String(currentUser.id) === "1" ||
-      currentUser.email === "admin@itblog.dev" ||
-      currentUser.username === "admin" ||
-      (Array.isArray(currentUser.roles) && (
-        currentUser.roles.includes("admin") ||
-        currentUser.roles.includes("moderator") ||
-        currentUser.roles.some((r) =>
-          typeof r === "string" ? r === "admin" || r === "moderator" : r?.name === "admin" || r?.name === "moderator"
-        )
-      ))
-    );
-    if (!isAdmin) {
+    if (!checkIsSupervisor(currentUser)) {
       addToast("Bạn không có quyền duyệt bài viết! Yêu cầu vai trò Admin hoặc Moderator.", "error");
       return false;
     }
     setPosts((prev) =>
-      prev.map((p) => (p.id === postId ? { ...p, status: "approved" } : p))
+      prev.map((p) => (String(p.id) === String(postId) ? { ...p, status: "approved" } : p))
     );
     addToast("Đã phê duyệt và xuất bản bài viết thành công! ✓", "success");
     api.posts.update(postId, { status: "approved" }).catch(() => {});
@@ -342,31 +403,15 @@ export function BlogProvider({ children }) {
    */
   const rejectPost = (postId) => {
     if (!currentUser) {
-      addToast("Vui lòng đăng nhập với quyền Quản trị viên để từ chối bài!", "error");
+      addToast("Vui lòng đăng nhập với quyền Ban giám sát để từ chối bài!", "error");
       return false;
     }
-    const isAdmin = Boolean(
-      currentUser.role === "admin" ||
-      currentUser.role === "moderator" ||
-      currentUser.is_superuser ||
-      currentUser.id === "demo_user" ||
-      String(currentUser.id) === "1" ||
-      currentUser.email === "admin@itblog.dev" ||
-      currentUser.username === "admin" ||
-      (Array.isArray(currentUser.roles) && (
-        currentUser.roles.includes("admin") ||
-        currentUser.roles.includes("moderator") ||
-        currentUser.roles.some((r) =>
-          typeof r === "string" ? r === "admin" || r === "moderator" : r?.name === "admin" || r?.name === "moderator"
-        )
-      ))
-    );
-    if (!isAdmin) {
+    if (!checkIsSupervisor(currentUser)) {
       addToast("Bạn không có quyền từ chối bài viết! Yêu cầu vai trò Admin hoặc Moderator.", "error");
       return false;
     }
     setPosts((prev) =>
-      prev.map((p) => (p.id === postId ? { ...p, status: "rejected" } : p))
+      prev.map((p) => (String(p.id) === String(postId) ? { ...p, status: "rejected" } : p))
     );
     addToast("Đã từ chối bài viết.", "info");
     api.posts.update(postId, { status: "rejected" }).catch(() => {});
@@ -379,11 +424,14 @@ export function BlogProvider({ children }) {
   const updatePost = (postId, updatedData) => {
     if (!currentUser) return false;
 
+    const isSupervisor = checkIsSupervisor(currentUser);
+
     setPosts((prevPosts) =>
       prevPosts.map((post) => {
-        if (post.id !== postId) return post;
-        // Kiểm tra quyền: chỉ tác giả
-        if (post.authorId !== currentUser.id) {
+        if (String(post.id) !== String(postId)) return post;
+        const isAuthor = String(post.authorId || post.author_id || post.author?.id) === String(currentUser.id) ||
+          (currentUser.username && (currentUser.username === post.author?.username || currentUser.username === post.authorUsername));
+        if (!isAuthor && !isSupervisor) {
           addToast("Bạn không có quyền chỉnh sửa bài viết này!", "error");
           return post;
         }
@@ -423,34 +471,21 @@ export function BlogProvider({ children }) {
     const target = posts.find((p) => String(p.id) === String(postId));
     if (!target) return false;
 
-    const isAdmin = Boolean(
-      currentUser.role === "admin" ||
-      currentUser.role === "moderator" ||
-      currentUser.is_superuser ||
-      currentUser.id === "demo_user" ||
-      String(currentUser.id) === "1" ||
-      (Array.isArray(currentUser.roles) && (
-        currentUser.roles.includes("admin") ||
-        currentUser.roles.includes("moderator") ||
-        currentUser.roles.some(r => typeof r === "string" ? (r === "admin" || r === "moderator") : (r?.name === "admin" || r?.name === "moderator"))
-      )) ||
-      currentUser.email === "admin@itblog.dev" ||
-      currentUser.username === "admin"
+    const isSupervisor = checkIsSupervisor(currentUser);
+    const isAuthor = Boolean(
+      currentUser && (
+        String(currentUser.id) === String(target.authorId || target.author_id || target.author?.id) ||
+        (currentUser.username && (currentUser.username === target.author?.username || currentUser.username === target.authorUsername))
+      )
     );
 
-    const isAuthor = String(target.authorId) === String(currentUser.id) || String(target.author_id) === String(currentUser.id);
-
-    if (!isAuthor && !isAdmin) {
-      addToast("Bạn không có quyền xóa bài viết của người khác!", "error");
+    if (!isSupervisor && !isAuthor) {
+      addToast("Bạn không có quyền xóa bài viết này! Thao tác chỉ dành cho tác giả hoặc Ban quản trị.", "error");
       return false;
     }
 
     setPosts((prev) => prev.filter((p) => String(p.id) !== String(postId)));
-    if (isAdmin && !isAuthor) {
-      addToast("🛡️ Quản trị viên đã xóa bài viết trực tiếp thành công!", "info");
-    } else {
-      addToast("Đã xóa bài viết thành công.", "info");
-    }
+    addToast(isSupervisor && !isAuthor ? "🛡️ Ban giám sát đã xóa bài viết trực tiếp thành công!" : "Đã xóa bài viết thành công! 🗑️", "info");
     api.posts.delete(postId).catch(() => {});
     return true;
   };
@@ -460,23 +495,8 @@ export function BlogProvider({ children }) {
    */
   const togglePinPost = (postId) => {
     if (!currentUser) return false;
-    const isAdmin = Boolean(
-      currentUser.role === "admin" ||
-      currentUser.role === "moderator" ||
-      currentUser.is_superuser ||
-      currentUser.id === "demo_user" ||
-      String(currentUser.id) === "1" ||
-      (Array.isArray(currentUser.roles) && (
-        currentUser.roles.includes("admin") ||
-        currentUser.roles.includes("moderator") ||
-        currentUser.roles.some(r => typeof r === "string" ? (r === "admin" || r === "moderator") : (r?.name === "admin" || r?.name === "moderator"))
-      )) ||
-      currentUser.email === "admin@itblog.dev" ||
-      currentUser.username === "admin"
-    );
-
-    if (!isAdmin) {
-      addToast("Chỉ quản trị viên mới có quyền ghim bài viết lên đầu Newfeed!", "error");
+    if (!checkIsSupervisor(currentUser)) {
+      addToast("Chỉ Ban giám sát / Quản trị viên mới có quyền ghim bài viết lên đầu Newfeed!", "error");
       return false;
     }
 
@@ -611,14 +631,26 @@ export function BlogProvider({ children }) {
 
     // 6. Sắp xếp (Sort)
     if (sortBy === "likes") {
-      result.sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
+      result.sort((a, b) => {
+        const countA = a.likes_count ?? (Array.isArray(a.likes) ? a.likes.length : 0);
+        const countB = b.likes_count ?? (Array.isArray(b.likes) ? b.likes.length : 0);
+        return countB - countA;
+      });
     } else if (sortBy === "comments") {
-      result.sort((a, b) => (b.comments?.length || 0) - (a.comments?.length || 0));
+      result.sort((a, b) => {
+        const countA = a.comments_count ?? (Array.isArray(a.comments) ? a.comments.length : 0);
+        const countB = b.comments_count ?? (Array.isArray(b.comments) ? b.comments.length : 0);
+        return countB - countA;
+      });
     } else if (sortBy === "views") {
       result.sort((a, b) => (b.views || 0) - (a.views || 0));
     } else {
       // Mặc định: Mới nhất
-      result.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      result.sort((a, b) => {
+        const dateA = new Date(a.createdAt || a.created_at || a.date || 0);
+        const dateB = new Date(b.createdAt || b.created_at || b.date || 0);
+        return dateB - dateA;
+      });
     }
 
     // Luôn ưu tiên bài viết được Admin Ghim (isPinned) lên đầu Newfeed
@@ -662,6 +694,7 @@ export function BlogProvider({ children }) {
         toggleBookmark,
         addComment,
         deleteComment,
+        syncPostComments,
         createPost,
         updatePost,
         deletePost,

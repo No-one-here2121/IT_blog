@@ -142,13 +142,20 @@ def create_comment(
         )
 
     parent_comment = None
-    if comment_in.parent_id:
-        parent_comment = db.query(Comment).filter(Comment.id == comment_in.parent_id).first()
-        if not parent_comment or parent_comment.post_id != post_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Bình luận cha không hợp lệ hoặc không thuộc bài viết này."
-            )
+    parent_id_val = None
+    if comment_in.parent_id is not None:
+        try:
+            pid = int(comment_in.parent_id)
+            parent_comment = db.query(Comment).filter(Comment.id == pid).first()
+            if parent_comment and parent_comment.post_id == post_id:
+                parent_id_val = pid
+            elif parent_comment and parent_comment.post_id != post_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Bình luận cha không hợp lệ hoặc không thuộc bài viết này."
+                )
+        except (ValueError, TypeError):
+            parent_comment = None
 
     content = comment_in.content.strip()
     if not content:
@@ -160,7 +167,7 @@ def create_comment(
     new_comment = Comment(
         post_id=post_id,
         author_id=current_user.id,
-        parent_id=comment_in.parent_id,
+        parent_id=parent_id_val,
         content=content
     )
     db.add(new_comment)
@@ -242,7 +249,8 @@ def update_comment(
             detail="Không tìm thấy bình luận."
         )
 
-    if comment.author_id != current_user.id and not current_user.is_superuser:
+    is_privileged = current_user.is_superuser or any(r.name in ["admin", "moderator"] for r in current_user.roles)
+    if comment.author_id != current_user.id and not is_privileged:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Bạn không có quyền chỉnh sửa bình luận này."

@@ -9,7 +9,7 @@
 [![Gemini AI](https://img.shields.io/badge/Google%20Gemini-1.5%20Flash-4285F4.svg?style=flat&logo=google&logoColor=white)](https://ai.google.dev)
 [![Tests](https://img.shields.io/badge/Pytest-100%25%20Passed-brightgreen.svg?style=flat&logo=pytest&logoColor=white)](https://docs.pytest.org)
 
-> **IT Blog** là nền tảng mạng xã hội tri thức công nghệ thông tin toàn diện và hiện đại nhất dành cho kỹ sư phần mềm, lập trình viên và sinh viên ngành CNTT. Hệ thống tích hợp đầy đủ các phân hệ chia sẻ bài viết kỹ thuật chuẩn Markdown, hệ thống bình luận lồng cấp đa tầng, lộ trình nghề nghiệp (Career Roadmaps), khóa học chuyên sâu, trắc nghiệm công nghệ tạo đề bằng AI, bảng tin việc làm IT, sự kiện hội thảo, trung tâm kiểm duyệt Admin 12 phân hệ và bộ động cơ cào tin tức kỹ thuật tự động lưu trữ hơn **2.450 bài viết thực tế**.
+> **IT Blog** là nền tảng mạng xã hội tri thức công nghệ thông tin toàn diện và hiện đại nhất dành cho kỹ sư phần mềm, lập trình viên và sinh viên ngành CNTT. Hệ thống tích hợp đầy đủ các phân hệ chia sẻ bài viết kỹ thuật chuẩn Markdown, hệ thống bình luận lồng cấp đa tầng, lộ trình nghề nghiệp (Career Roadmaps), khóa học chuyên sâu, trắc nghiệm công nghệ tạo đề bằng AI, bảng tin việc làm IT, sự kiện hội thảo, trung tâm kiểm duyệt Admin 12 phân hệ và bộ động cơ cào tin tức kỹ thuật tự động lưu trữ hơn **2.620+ bài viết thực tế**.
 
 ---
 
@@ -40,7 +40,18 @@
 - **Bảo mật & Phân quyền**: Xác thực chuẩn **OAuth2 JWT Access & Refresh Token**, bảo vệ mật khẩu bằng **Passlib (Bcrypt)**, phân quyền vai trò dựa trên vai trò (**RBAC**: Admin, Moderator, User).
 - **Rate Limiting Middleware**: Kiểm soát tần suất truy cập API ngăn chặn tấn công DDoS và brute-force.
 
-### 3. Tích hợp Trí Tuệ Nhân Tạo (Gemini AI Multi-Key Pool)
+### 3. Thuật toán Đề xuất Cá nhân hóa Đa tín hiệu (TikTok & Facebook Inspired)
+- **Thu thập tín hiệu ngầm thời gian thực (Realtime Telemetry)**: Đo lường chính xác thời gian dừng lại đọc (**Dwell Time** 15s, 30s, 60s đọc sâu) và độ sâu cuộn trang (**Scroll Depth** >= 75%) để nhận diện sở thích kỹ thuật ngay cả khi người dùng không bấm Like.
+- **Mô hình Chấm điểm Đa nhân tố (Multi-Factor Scoring)**:
+  - Điểm tương thích chuyên mục & thẻ tag (Category & Tag Affinity Vector).
+  - Điểm quan hệ tác giả (Author Affinity & Following).
+  - Tín hiệu tương tác cộng đồng (Lượt xem, thích, bình luận, lưu bài, chia sẻ liên kết).
+  - Đà tăng trưởng nóng trong 72h (**Viral Momentum Boost**).
+  - Trọng số suy giảm theo thời gian (**Hacker News Gravity Decay**): `Score / (hours_old + 2.0)^1.12`.
+- **Cơ chế Khám phá Độc lập (Serendipity & Exploration)**: Tự động chèn 10-15% bài viết chất lượng cao từ các công nghệ mới nhằm mở rộng kiến thức và phá vỡ bẫy lặp thông tin (**Filter Bubble**).
+- **Tái xếp hạng Đa dạng hóa (MMR Diversity Re-ranking)**: Chống nhàm chán bằng cách tự động giãn cách các bài viết cùng tác giả hoặc cùng chuyên mục, đồng thời hạ điểm bài viết đã đọc kỹ để Newfeed luôn mang lại trải nghiệm mới lạ.
+
+### 4. Tích hợp Trí Tuệ Nhân Tạo (Gemini AI Multi-Key Pool)
 - Tích hợp mô hình **Google Gemini 1.5 Flash** với cơ chế xoay vòng Multi-Key Pool tự động chuyển đổi khóa API khi chạm giới hạn hạn mức (Rate-limit fallback).
 - Ứng dụng AI:
   - Tự động kiểm duyệt nội dung độc hại, spam và phát hiện vi phạm bản quyền.
@@ -51,7 +62,7 @@
 - Tự động cào và cập nhật tin tức từ các nguồn uy tín toàn cầu và Việt Nam: **Dev.to**, **FreeCodeCamp**, **GitHub Engineering Blog**, **Hacker News**, **AWS Architecture Blog**, **VnExpress Số Hóa**.
 - Cơ chế lọc bài viết trùng lặp (Duplicate hashing), tự động phân loại chuyên mục và gán thẻ tag theo từ khóa thông minh.
 - Chế độ tự động xuất bản (**Auto-publish**) đưa bài viết mới cào trực tiếp lên Newfeed mà không cần phê duyệt thủ công.
-- Hiện lưu trữ và lập chỉ mục hơn **2.450 bài viết kỹ thuật thực tế**.
+- Hiện lưu trữ và lập chỉ mục hơn **2.620+ bài viết kỹ thuật thực tế**.
 
 ---
 
@@ -194,15 +205,36 @@ Hệ thống được thiết kế theo kiến trúc module hóa với 15 phân 
 
 ---
 
-## 🔑 Tài Khoản Thử Nghiệm & Phân Quyền
+## 🔑 Phân Quyền Vai Trò & Tài Khoản Thử Nghiệm (RBAC Matrix)
 
-Hệ thống được cấu hình sẵn tài khoản Quản trị viên tối cao (Superuser) và các tài khoản mẫu:
+Hệ thống IT Blog áp dụng mô hình phân quyền bảo mật 4 cấp độ chặt chẽ (**Role-Based Access Control**), hỗ trợ bộ chuyển đổi đăng nhập nhanh 1-chạm (**Demo Role Switcher**) tại Modal đăng nhập và trang Login:
 
-| Tài Khoản / Vai Trò | Email Đăng Nhập | Mật Khẩu | Quyền Hạn |
+| Vai Trò | Tài Khoản / Demo | Mật Khẩu | Quyền Hạn Chi Tiết & Giới Hạn Nghiệp Vụ |
 |:---|:---|:---|:---|
-| **Quản trị viên Tối cao (Admin)** | `admin@itblog.dev` | `AdminPassword123!` | Toàn quyền quản trị, xóa bài/cmt trên feed, cấu hình hệ thống |
-| **Đăng nhập Nhanh 1-Chạm** | Nút `Dùng thử Demo` trên Modal | Tự động xác thực | Trải nghiệm toàn bộ tính năng với quyền Admin Demo |
-| **Thành viên Kỹ sư (User)** | `hoang.dev@itblog.vn` | `UserPassword123!` | Đăng bài, thích, bình luận, làm trắc nghiệm, ứng tuyển việc làm |
+| **👑 Quản trị viên Tối cao (Admin)** | `admin@itblog.dev`<br>*(Hoặc bấm nút Demo "Admin")* | `AdminPassword123!` | • Toàn quyền truy cập tab **⚙️ Cài đặt hệ thống**.<br>• Xóa bài viết & xóa mọi bình luận trực tiếp trên Newfeed.<br>• Ghim bài viết lên đầu trang chủ Newfeed.<br>• **Độc quyền xuất dữ liệu Markdown (.md)** trên toàn hệ thống.<br>• Cấu hình cụm Gemini AI Multi-Key Pool, kích hoạt cào tin tự động.<br>• Quản lý phân quyền thành viên (Thăng/Hạ cấp Mod, Khóa tài khoản). |
+| **🛡️ Kiểm duyệt viên (Moderator)** | `nam.le@techvn.io`<br>*(Hoặc bấm nút Demo "Moderator")* | `ModPassword123!` | • Truy cập phân hệ kiểm duyệt nội dung trong **⚙️ Cài đặt hệ thống**.<br>• Phê duyệt / Từ chối bài viết chờ duyệt, xử lý báo cáo vi phạm.<br>• Xóa bài viết & bình luận vi phạm trực tiếp trên Newfeed.<br>• ❌ **Không có quyền** xuất tệp Markdown (.md) (nút bị ẩn & khóa).<br>• ❌ **Không có quyền** thay đổi tham số cấu hình hệ thống toàn cục. |
+| **💻 Thành viên Cộng đồng (User)** | `hoang.dev@itblog.vn`<br>*(Hoặc bấm nút Demo "User")* | `UserPassword123!` | • Đọc bài, viết bài kỹ thuật mới, chỉnh sửa/xóa bài của chính mình.<br>• Bình luận, phản hồi thảo luận đa cấp, xóa bình luận của chính mình.<br>• Tham gia học khóa học, đánh dấu lộ trình, làm bài thi trắc nghiệm.<br>• Ứng tuyển việc làm IT, đăng ký vé tham gia sự kiện công nghệ.<br>• ❌ **Bị chặn (403 Forbidden)** khi truy cập vào tab **Cài đặt hệ thống**.<br>• ❌ **Không thể** xóa bài viết hoặc bình luận của người khác.<br>• ❌ **Không có quyền** xuất dữ liệu Markdown (.md). |
+| **🌐 Khách Vãng Lai (Guest)** | *Chưa đăng nhập* | *Không cần* | • **Xem công khai:** Danh sách bài viết, Khóa học, Lộ trình, Chủ đề trắc nghiệm, Việc làm, Sự kiện và Top 10 Bảng xếp hạng.<br>• **Tác vụ yêu cầu đăng nhập:** Bắt đầu làm bài trắc nghiệm, nộp hồ sơ xin việc, đăng ký vé sự kiện, bấm Like/Bookmark/Bình luận, Viết bài mới. |
+
+### 📊 Bảng Đối Chiếu Ma Trận Quyền Truy Cập Nghiệp Vụ
+
+| Phân Hệ / Thao Tác | Khách (Guest) | Thành viên (User) | Kiểm duyệt viên (Mod) | Quản trị viên (Admin) |
+|:---|:---:|:---:|:---:|:---:|
+| **Xem bảng tin Newfeed, bài viết chi tiết, danh mục** | ✅ Công khai | ✅ Toàn quyền | ✅ Toàn quyền | ✅ Toàn quyền |
+| **Viết bài mới & Chỉnh sửa bài của mình** | 🔒 Yêu cầu Auth | ✅ Toàn quyền | ✅ Toàn quyền | ✅ Toàn quyền |
+| **Xóa bài viết trực tiếp trên Newfeed** | ❌ Chặn | ❌ Chặn | ✅ Quyền Giám sát | ✅ Toàn quyền |
+| **Ghim bài viết lên đầu trang chủ** | ❌ Chặn | ❌ Chặn | ✅ Quyền Giám sát | ✅ Toàn quyền |
+| **Bình luận & Like bài viết** | 🔒 Yêu cầu Auth | ✅ Toàn quyền | ✅ Toàn quyền | ✅ Toàn quyền |
+| **Xóa bình luận vi phạm của người khác** | ❌ Chặn | ❌ Chặn | ✅ Quyền Giám sát | ✅ Toàn quyền |
+| **Xem danh sách Khóa học & Lộ trình** | ✅ Công khai | ✅ Toàn quyền | ✅ Toàn quyền | ✅ Toàn quyền |
+| **Lưu tiến độ học & Đánh dấu hoàn thành bước** | 🔒 Yêu cầu Auth | ✅ Toàn quyền | ✅ Toàn quyền | ✅ Toàn quyền |
+| **Bắt đầu làm bài Trắc nghiệm & Lưu điểm** | 🔒 Yêu cầu Auth | ✅ Toàn quyền | ✅ Toàn quyền | ✅ Toàn quyền |
+| **Nộp CV Ứng tuyển & Lưu tin việc làm** | 🔒 Yêu cầu Auth | ✅ Toàn quyền | ✅ Toàn quyền | ✅ Toàn quyền |
+| **Đăng ký vé Sự kiện / RSVP** | 🔒 Yêu cầu Auth | ✅ Toàn quyền | ✅ Toàn quyền | ✅ Toàn quyền |
+| **Xem Top 10 Bảng xếp hạng uy tín** | ✅ Công khai | ✅ Toàn quyền | ✅ Toàn quyền | ✅ Toàn quyền |
+| **Xem thứ hạng cá nhân (My Rank)** | 🔒 Yêu cầu Auth | ✅ Toàn quyền | ✅ Toàn quyền | ✅ Toàn quyền |
+| **Truy cập tab ⚙️ Cài đặt hệ thống** | ⛔ Chặn 403 | ⛔ Chặn 403 | ✅ Quyền Kiểm duyệt | ✅ Toàn quyền Quản trị |
+| **Xuất tài liệu định dạng Markdown (.md)** | ❌ Ẩn nút | ❌ Ẩn nút | ❌ Ẩn nút | 👑 Độc quyền Admin |
 
 ---
 

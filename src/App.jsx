@@ -21,6 +21,7 @@ import QuizPage from "./pages/quiz";
 import PolicyPage from "./pages/policy";
 
 import AuthModal from "./components/AuthModal";
+import OAuthModal from "./components/OAuthModal";
 import Navbar from "./components/navigator";
 import Foot from "./components/footer";
 
@@ -30,10 +31,12 @@ import { useAuth } from "./context/AuthContext";
 export function getRouteUrl(page, params = null) {
   switch (page) {
     case "home":
+    case "main_menu":
       return "/";
     case "post_detail": {
       const id = params?.postId || "post_001";
-      return `/posts/${encodeURIComponent(id)}`;
+      const qs = params?.scroll ? `?scroll=${encodeURIComponent(params.scroll)}` : "";
+      return `/posts/${encodeURIComponent(id)}${qs}`;
     }
     case "roadmaps":
       return "/roadmaps";
@@ -136,10 +139,18 @@ export function parseRouteFromLocation() {
 }
 
 function AppContent() {
-  const { loginDemo, requireAuth, currentUser } = useAuth();
+  const { loginDemo, requireAuth, currentUser, oauthModalOpen, oauthProvider, closeOAuthModal } = useAuth();
 
   const initialRoute = parseRouteFromLocation();
-  const [currentPage, setCurrentPage] = useState(initialRoute.page);
+  const [currentPage, setCurrentPage] = useState(() => {
+    if (currentUser && (initialRoute.page === "login" || initialRoute.page === "logup")) {
+      if (typeof window !== "undefined" && (window.location.pathname === "/login" || window.location.pathname === "/logup" || window.location.pathname === "/register")) {
+        window.history.replaceState({ page: "home" }, "", "/");
+      }
+      return "home";
+    }
+    return initialRoute.page;
+  });
   const [selectedPostId, setSelectedPostId] = useState(initialRoute.postId);
   const [editPostData, setEditPostData] = useState(null);
   const [quizParams, setQuizParams] = useState({});
@@ -148,10 +159,49 @@ function AppContent() {
   const [profileTab, setProfileTab] = useState(initialRoute.tab || "my_posts");
   const [policySection, setPolicySection] = useState(initialRoute.section || "terms");
 
+  const navigateTo = useCallback((page, params = null) => {
+    if (page === "main_menu") page = "home";
+    // Chặn người dùng đã đăng nhập truy cập vào trang login hoặc logup
+    if (currentUser && (page === "login" || page === "logup")) {
+      page = "home";
+      params = null;
+    }
+    const nextUrl = getRouteUrl(page, params);
+    const currentFullUrl = window.location.pathname + window.location.search;
+
+    setPageParams(params || {});
+    if (currentFullUrl !== nextUrl) {
+      window.history.pushState({ page, params }, "", nextUrl);
+    }
+
+    if (params?.postId) setSelectedPostId(params.postId);
+    if (params?.postData) setEditPostData(params.postData);
+    if (params?.quizParams) setQuizParams(params.quizParams);
+    if (params?.tab) setProfileTab(params.tab);
+    else if (page === "profile" && !params?.tab) setProfileTab("my_posts");
+    if (params?.section) setPolicySection(params.section);
+    if (params?.authorId !== undefined) {
+      setSelectedAuthorId(params.authorId);
+    } else if (page === "profile" && !params?.authorId) {
+      setSelectedAuthorId(null);
+    }
+    setCurrentPage(page);
+    if (params?.scroll !== "comments" && params?.scroll !== "comment") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [currentUser]);
+
   // Đồng bộ URL với nút Back/Forward của trình duyệt (HTML5 History API)
   useEffect(() => {
     const handlePopState = () => {
       const route = parseRouteFromLocation();
+      if (currentUser && (route.page === "login" || route.page === "logup")) {
+        if (typeof window !== "undefined") {
+          window.history.replaceState({ page: "home" }, "", "/");
+        }
+        setCurrentPage("home");
+        return;
+      }
       setCurrentPage(route.page);
       if (route.postId) setSelectedPostId(route.postId);
       if (route.authorId !== undefined) setSelectedAuthorId(route.authorId);
@@ -162,7 +212,15 @@ function AppContent() {
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
+  }, [currentUser]);
+
+  // Chặn người dùng đã đăng nhập truy cập vào trang login / logup
+  useEffect(() => {
+    if (currentUser && (currentPage === "login" || currentPage === "logup")) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      navigateTo("home");
+    }
+  }, [currentUser, currentPage, navigateTo]);
 
   // Xử lý các query param đặc biệt như demoLogin hoặc modal
   useEffect(() => {
@@ -187,41 +245,20 @@ function AppContent() {
     }
   }, [currentUser, loginDemo, requireAuth]);
 
-  const navigateTo = useCallback((page, params = null) => {
-    const nextUrl = getRouteUrl(page, params);
-    const currentFullUrl = window.location.pathname + window.location.search;
 
-    setPageParams(params || {});
-    if (currentFullUrl !== nextUrl) {
-      window.history.pushState({ page, params }, "", nextUrl);
-    }
-
-    if (params?.postId) setSelectedPostId(params.postId);
-    if (params?.postData) setEditPostData(params.postData);
-    if (params?.quizParams) setQuizParams(params.quizParams);
-    if (params?.tab) setProfileTab(params.tab);
-    else if (page === "profile" && !params?.tab) setProfileTab("my_posts");
-    if (params?.section) setPolicySection(params.section);
-    if (params?.authorId !== undefined) {
-      setSelectedAuthorId(params.authorId);
-    } else if (page === "profile" && !params?.authorId) {
-      setSelectedAuthorId(null);
-    }
-    setCurrentPage(page);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, []);
 
   const handleSelectPost = useCallback((id) => {
     setSelectedPostId(id);
     navigateTo("post_detail", { postId: id });
   }, [navigateTo]);
 
-  const isAuthPage = currentPage === "login" || currentPage === "logup";
+  const isAuthPage = !currentUser && (currentPage === "login" || currentPage === "logup");
 
   return (
     <div className="min-h-screen bg-base-100 text-base-content flex flex-col font-sans">
       {/* Auth Modal toàn cục sẵn sàng chặn và xử lý mọi hành động cần xác thực */}
       <AuthModal />
+      <OAuthModal isOpen={oauthModalOpen} onClose={closeOAuthModal} provider={oauthProvider} />
 
       {!isAuthPage && <Navbar onNavigate={navigateTo} currentPage={currentPage} />}
 
@@ -239,7 +276,9 @@ function AppContent() {
 
         {currentPage === "post_detail" && (
           <PostDetailPage
+            key={`${selectedPostId}-${pageParams?.scroll || "default"}`}
             postId={selectedPostId}
+            params={pageParams}
             onNavigate={navigateTo}
             onEditPost={(post) => setEditPostData(post)}
           />
@@ -262,6 +301,7 @@ function AppContent() {
 
         {currentPage === "profile" && (
           <ProfilePage
+            key={`${selectedAuthorId || "me"}-${profileTab}`}
             authorId={selectedAuthorId}
             initialTab={profileTab}
             onNavigate={navigateTo}
@@ -301,16 +341,40 @@ function AppContent() {
           <QuizPage onNavigate={navigateTo} params={{ ...quizParams, ...pageParams }} />
         )}
 
-        {currentPage === "login" && (
-          <Login_page onNavigate={navigateTo} />
-        )}
-
-        {currentPage === "logup" && (
-          <Logup_page onNavigate={navigateTo} />
+        {(currentPage === "login" || currentPage === "logup") && (
+          currentUser ? (
+            <Menu_main
+              onNavigate={navigateTo}
+              onSelectPost={handleSelectPost}
+              onEditPost={(post) => {
+                setEditPostData(post);
+                navigateTo("edit_post");
+              }}
+            />
+          ) : currentPage === "login" ? (
+            <Login_page onNavigate={navigateTo} />
+          ) : (
+            <Logup_page onNavigate={navigateTo} />
+          )
         )}
 
         {currentPage === "policy" && (
           <PolicyPage key={policySection} onNavigate={navigateTo} initialSection={policySection} />
+        )}
+
+        {!["home", "post_detail", "create_post", "edit_post", "profile", "moderation", "roadmaps", "courses", "jobs", "events", "leaderboard", "quiz", "login", "logup", "policy"].includes(currentPage) && (
+          <div className="w-full max-w-xl mx-auto px-4 py-20 text-center space-y-4 animate-fade-in">
+            <div className="text-6xl select-none">🔍</div>
+            <h2 className="text-2xl font-black text-base-content">Không tìm thấy trang (404)</h2>
+            <p className="text-sm text-base-content/60">Trang bạn đang truy cập không tồn tại hoặc đã được di dời sang địa chỉ khác.</p>
+            <button
+              type="button"
+              onClick={() => navigateTo("home")}
+              className="btn btn-primary rounded-xl text-white font-bold shadow-md hover:scale-105 transition-all"
+            >
+              Quay lại Trang chủ
+            </button>
+          </div>
         )}
       </div>
 

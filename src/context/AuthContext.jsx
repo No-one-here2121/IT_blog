@@ -1,17 +1,39 @@
-/* eslint-disable react-refresh/only-export-components */
+﻿/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState, useEffect } from "react";
 import { storage, STORAGE_KEYS } from "../utils/storage";
 import { SEED_USERS } from "../data/seedData";
-import { generateId } from "../utils/id";
 import { useToast } from "./ToastContext";
 import { api } from "../services/api";
 
 const AuthContext = createContext();
 
+// Chuan hoa du lieu user dong bo giua Backend FastAPI va Frontend React
+export const normalizeUser = (u) => {
+  if (!u) return null;
+  const roleName = u.roles?.[0]?.name || (u.is_superuser ? "admin" : (u.role || "user"));
+  const roleList = Array.isArray(u.roles)
+    ? u.roles.map((r) => (typeof r === "object" ? r.name : r))
+    : [roleName];
+
+  return {
+    ...u,
+    id: String(u.id),
+    name: u.name || u.username || "Thành viên IT Blog",
+    username: u.username || `user_${u.id}`,
+    email: u.email || "",
+    role: roleName,
+    roles: roleList,
+    avatar: u.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(u.username || u.name || "dev")}`,
+    bio: u.bio || "Thành viên cộng đồng IT Blog",
+    following: Array.isArray(u.following) ? u.following : [],
+    createdAt: u.created_at || u.createdAt || new Date().toISOString()
+  };
+};
+
 export function AuthProvider({ children }) {
   const { addToast } = useToast();
 
-  // Khởi tạo danh sách người dùng từ storage hoặc seed data (tự động cập nhật nếu là dữ liệu cũ)
+  // Khoi tao danh sach nguoi dung tu storage hoac seed data
   const [users, setUsers] = useState(() => {
     const saved = storage.get(STORAGE_KEYS.USERS, null);
     if (!saved || !saved.some((u) => u.id === "demo_user")) {
@@ -21,11 +43,19 @@ export function AuthProvider({ children }) {
     return saved;
   });
 
-  // Người dùng hiện tại (null nếu là khách - Guest, tự dọn dẹp tài khoản demo cũ)
+  // Nguoi dung hien tai
   const [currentUser, setCurrentUser] = useState(() => {
     try {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get("demoLogin") === "true") {
+      const urlParams = new URLSearchParams(window.location.search);
+      const authToken = urlParams.get("auth_token") || urlParams.get("token") || urlParams.get("access_token");
+      const refreshToken = urlParams.get("refresh_token");
+      if (authToken) {
+        localStorage.setItem("it_blog_token", authToken);
+        if (refreshToken) {
+          localStorage.setItem("it_blog_refresh_token", refreshToken);
+        }
+      }
+      if (urlParams.get("demoLogin") === "true") {
         const demoUser = SEED_USERS.find((u) => u.id === "demo_user") || SEED_USERS[0];
         storage.set(STORAGE_KEYS.USER, demoUser);
         return demoUser;
@@ -34,40 +64,84 @@ export function AuthProvider({ children }) {
       // ignore
     }
     const saved = storage.get(STORAGE_KEYS.USER, null);
-    if (saved && (saved.id === "demo_teacher" || saved.id === "demo_student")) {
-      storage.remove(STORAGE_KEYS.USER);
-      return null;
-    }
-    return saved;
+    return saved ? normalizeUser(saved) : null;
   });
 
-  // State điều khiển AuthModal và Pending Action
+  // State dieu khien AuthModal va Pending Action
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [modalMessage, setModalMessage] = useState("");
-  const [pendingAction, setPendingAction] = useState(null); // { callback, message }
+  const [pendingAction, setPendingAction] = useState(null);
 
-  // Khôi phục phiên đăng nhập từ backend qua JWT token nếu có
+  // State OAuth Modal (Google, GitHub, Facebook)
+  const [oauthModalOpen, setOauthModalOpen] = useState(false);
+  const [oauthProvider, setOauthProvider] = useState("google");
+
+  const openOAuthModal = (provider = "google") => {
+    setOauthProvider(provider);
+    setOauthModalOpen(true);
+  };
+
+  const closeOAuthModal = () => {
+    setOauthModalOpen(false);
+  };
+
+  // Khoi phuc phien dang nhap that tu backend qua JWT token khi tai trang
   useEffect(() => {
-    const token = localStorage.getItem("it_blog_token");
+    let token = localStorage.getItem("it_blog_token");
+    let justLoggedInViaOAuth = false;
+
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const authToken = urlParams.get("auth_token") || urlParams.get("token") || urlParams.get("access_token");
+      const refreshToken = urlParams.get("refresh_token");
+      if (authToken) {
+        token = authToken;
+        justLoggedInViaOAuth = true;
+        localStorage.setItem("it_blog_token", authToken);
+        if (refreshToken) {
+          localStorage.setItem("it_blog_refresh_token", refreshToken);
+        }
+        urlParams.delete("auth_token");
+        urlParams.delete("token");
+        urlParams.delete("access_token");
+        urlParams.delete("refresh_token");
+        urlParams.delete("oauth_success");
+        const remainingQuery = urlParams.toString();
+        const cleanUrl = window.location.pathname + (remainingQuery ? `?${remainingQuery}` : "");
+        window.history.replaceState({}, document.title, cleanUrl);
+      }
+    } catch {
+      // ignore
+    }
+
     if (token) {
       api.auth.getMe()
-        .then((user) => {
-          if (user) {
-            setCurrentUser(user);
+        .then((fetchedUser) => {
+          if (fetchedUser && fetchedUser.id) {
+            const normalized = normalizeUser(fetchedUser);
+            setCurrentUser(normalized);
+            storage.set(STORAGE_KEYS.USER, normalized);
+            if (justLoggedInViaOAuth) {
+              addToast(`Đăng nhập Google thành công! Chào mừng ${normalized.name}. 🎉`, "success");
+            }
           }
         })
         .catch(() => {
-          // Token expired or backend unreachable
+          localStorage.removeItem("it_blog_token");
+          localStorage.removeItem("it_blog_refresh_token");
+          storage.remove(STORAGE_KEYS.USER);
+          setCurrentUser(null);
         });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Lưu danh sách users vào storage mỗi khi thay đổi
+  // Luu danh sach users vao storage moi khi thay doi
   useEffect(() => {
     storage.set(STORAGE_KEYS.USERS, users);
   }, [users]);
 
-  // Lưu phiên đăng nhập vào storage mỗi khi thay đổi
+  // Luu phien dang nhap vao storage moi khi thay doi
   useEffect(() => {
     if (currentUser) {
       storage.set(STORAGE_KEYS.USER, currentUser);
@@ -77,14 +151,14 @@ export function AuthProvider({ children }) {
   }, [currentUser]);
 
   /**
-   * Chạy pending action sau khi đăng nhập thành công
+   * Chay pending action sau khi dang nhap thanh cong
    */
   const executePendingAction = () => {
     if (pendingAction && typeof pendingAction.callback === "function") {
       try {
         pendingAction.callback();
       } catch (err) {
-        console.error("Lỗi khi thực thi pending action:", err);
+        console.error("Loi khi thuc thi pending action:", err);
       } finally {
         setPendingAction(null);
       }
@@ -92,10 +166,7 @@ export function AuthProvider({ children }) {
   };
 
   /**
-   * Cổng chặn hành động cần quyền xác thực (Protected Action Interceptor)
-   * @param {Function} callback - Hàm thực thi nếu đã đăng nhập
-   * @param {string} message - Lời nhắn giải thích lý do cần đăng nhập
-   * @returns {boolean}
+   * Cong chan hanh dong can quyen xac thuc (Protected Action Interceptor)
    */
   const requireAuth = (callback, message = "Vui lòng đăng nhập để tiếp tục") => {
     if (currentUser) {
@@ -114,9 +185,6 @@ export function AuthProvider({ children }) {
     return false;
   };
 
-  /**
-   * Đóng Auth Modal và dọn dẹp pending action
-   */
   const closeAuthModal = () => {
     setAuthModalOpen(false);
     setPendingAction(null);
@@ -124,10 +192,14 @@ export function AuthProvider({ children }) {
   };
 
   /**
-   * Đăng nhập thông thường bằng Email hoặc Username
+   * Dang nhap that bang Email hoac Username + Password vao Backend CSDL
    */
   const login = async (identifier, password) => {
     const trimmedId = (identifier || "").trim();
+    if (!trimmedId) {
+      addToast("Vui lòng nhập tên đăng nhập hoặc email!", "warning");
+      return false;
+    }
     if (!password) {
       addToast("Vui lòng nhập mật khẩu!", "warning");
       return false;
@@ -136,45 +208,155 @@ export function AuthProvider({ children }) {
     try {
       const data = await api.auth.login(trimmedId, password);
       if (data?.user) {
-        setCurrentUser(data.user);
+        const normalized = normalizeUser(data.user);
+        setCurrentUser(normalized);
         setAuthModalOpen(false);
-        addToast(`Chào mừng ${data.user.name} trở lại!`, "success");
+        addToast(`Chào mừng ${normalized.name} trở lại! 🎉`, "success");
         setTimeout(() => executePendingAction(), 100);
         return true;
       }
-    } catch {
-      // Backend failed or network offline -> fallback to local demo user
-    }
-
-    const lowerId = trimmedId.toLowerCase();
-    const user = users.find(
-      (u) =>
-        u.email.toLowerCase() === lowerId ||
-        (u.username && u.username.toLowerCase() === lowerId) ||
-        (u.name && u.name.toLowerCase() === lowerId)
-    );
-
-    if (!user) {
-      addToast("Tên người dùng hoặc Email không tồn tại trong hệ thống!", "error");
+    } catch (err) {
+      // Neu loi tra ve tu Backend (sai pass, tk ko ton tai) -> bao loi that
+      const msg = err.message || "Tên đăng nhập hoặc mật khẩu không chính xác.";
+      addToast(msg, "error");
       return false;
     }
-
-    // Với môi trường demo/local: chấp nhận đăng nhập
-    setCurrentUser(user);
-    setAuthModalOpen(false);
-    addToast(`Chào mừng ${user.name} trở lại!`, "success");
-
-    // Tự động chạy hành động đang chờ
-    setTimeout(() => {
-      executePendingAction();
-    }, 100);
-
-    return true;
   };
 
   /**
-   * Đăng nhập nhanh 1-chạm tài khoản Demo dùng thử
+   * Dang ky tai khoan moi that tren Backend CSDL
    */
+  const register = async ({ name, email, username, password }) => {
+    const trimmedEmail = (email || "").trim().toLowerCase();
+    const trimmedUsername = (username || "").trim().toLowerCase();
+    const trimmedName = (name || "").trim();
+
+    if (!trimmedEmail) {
+      addToast("Email không được để trống!", "warning");
+      return false;
+    }
+    if (!trimmedName) {
+      addToast("Họ và tên không được để trống!", "warning");
+      return false;
+    }
+
+    try {
+      const data = await api.auth.register({
+        email: trimmedEmail,
+        username: trimmedUsername || trimmedEmail.split("@")[0],
+        name: trimmedName,
+        password: password || "Password123!"
+      });
+
+      if (data?.user) {
+        const normalized = normalizeUser(data.user);
+        setCurrentUser(normalized);
+        setUsers((prev) => [normalized, ...prev.filter((u) => String(u.id) !== String(normalized.id))]);
+        setAuthModalOpen(false);
+        addToast(`Đăng ký tài khoản thành công! Chào mừng ${normalized.name}. 🎉`, "success");
+        setTimeout(() => executePendingAction(), 100);
+        return true;
+      }
+    } catch (err) {
+      const msg = err.message || "";
+      if (msg.includes("Email này đã được đăng ký") || msg.toLowerCase().includes("tồn tại") || msg.toLowerCase().includes("email")) {
+        addToast("Tài khoản này đã được đăng ký trong hệ thống! Vui lòng chuyển sang Đăng nhập. 🔐", "info");
+      } else {
+        addToast(msg || "Đăng ký không thành công. Vui lòng kiểm tra lại thông tin.", "error");
+      }
+      return false;
+    }
+  };
+
+  /**
+   * Dang nhap / Dang ky that qua OAuth 2.0 (Google, GitHub, Facebook)
+   */
+  const loginOAuth = async (provider, oauthData) => {
+    try {
+      const data = await api.auth.oauth(provider, oauthData);
+      if (data?.user) {
+        const normalized = normalizeUser(data.user);
+        setCurrentUser(normalized);
+        setUsers((prev) => [normalized, ...prev.filter((u) => String(u.id) !== String(normalized.id))]);
+        setAuthModalOpen(false);
+        setOauthModalOpen(false);
+        addToast(`Đăng nhập thành công qua ${provider.toUpperCase()}! Chào mừng ${normalized.name}. 🎉`, "success");
+        setTimeout(() => executePendingAction(), 100);
+        return true;
+      }
+    } catch (err) {
+      addToast(err.message || `Đăng nhập qua ${provider} thất bại.`, "error");
+      return false;
+    }
+  };
+
+  /**
+   * Dang nhap nhanh 1-cham tai khoan Demo danh cho muc dich xem thu
+   */
+  /**
+   * Thiet lap phien dang nhap tu OAuth callback hoac Token
+   */
+  /**
+   * Chuyen huong truc tiep toi trang dang nhap Google Account chinh thuc
+   */
+  const loginWithGoogle = async () => {
+    try {
+      const state = window.location.origin;
+      const res = await api.auth.getOAuthAuthorizeUrl("google", undefined, state);
+      if (res?.authorize_url) {
+        window.location.href = res.authorize_url;
+        return;
+      }
+    } catch (err) {
+      console.warn("Could not get google auth url via API, fallback direct:", err);
+    }
+
+    const clientId = "1001936616569-q7g5t7hnjqmkl63p89uankkgtl531p8b.apps.googleusercontent.com";
+    const redirectUri = "http://localhost:8000/auth/google/callback";
+    const state = encodeURIComponent(window.location.origin);
+    const googleUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=openid%20email%20profile&access_type=offline&prompt=select_account&state=${state}`;
+    window.location.href = googleUrl;
+  };
+
+  /**
+   * Chuyen huong truc tiep toi trang dang nhap GitHub chinh thuc
+   */
+  const loginWithGithub = async () => {
+    try {
+      const state = window.location.origin;
+      const res = await api.auth.getOAuthAuthorizeUrl("github", undefined, state);
+      if (res?.authorize_url) {
+        window.location.href = res.authorize_url;
+        return;
+      }
+    } catch {
+      // fallback
+    }
+    const clientId = "Iv1.b507a6f87d4efb63";
+    window.location.href = `https://github.com/login/oauth/authorize?client_id=${clientId}&scope=user:email`;
+  };
+
+  const setAuthenticatedSession = (accessToken, refreshToken, rawUser) => {
+    if (accessToken) {
+      localStorage.setItem("it_blog_token", accessToken);
+    }
+    if (refreshToken) {
+      localStorage.setItem("it_blog_refresh_token", refreshToken);
+    }
+    if (rawUser) {
+      const normalized = normalizeUser(rawUser);
+      setCurrentUser(normalized);
+      setUsers((prev) => [normalized, ...prev.filter((u) => String(u.id) !== String(normalized.id))]);
+      storage.set(STORAGE_KEYS.USER, normalized);
+      setAuthModalOpen(false);
+      setOauthModalOpen(false);
+      addToast(`Đăng nhập thành công! Chào mừng ${normalized.name}. 🎉`, "success");
+      setTimeout(() => executePendingAction(), 100);
+      return normalized;
+    }
+    return null;
+  };
+
   const loginDemo = async (role = "admin") => {
     let email = "admin@itblog.dev";
     let password = "AdminPassword123!";
@@ -196,104 +378,33 @@ export function AuthProvider({ children }) {
     try {
       const data = await api.auth.login(email, password);
       if (data?.user) {
-        setCurrentUser(data.user);
+        const normalized = normalizeUser(data.user);
+        setCurrentUser(normalized);
         setAuthModalOpen(false);
         addToast(`Đã đăng nhập thành công vai trò: ${roleLabel}`, "success");
-        setTimeout(() => {
-          executePendingAction();
-        }, 100);
+        setTimeout(() => executePendingAction(), 100);
         return true;
       }
     } catch {
-      // Backend failed or offline -> fallback to local demo user
+      // Backend offline fallback
     }
 
     let targetUser = SEED_USERS.find((u) => u.id === fallbackId || u.role === role);
-    if (!targetUser) {
-      targetUser = SEED_USERS[0];
-    }
+    if (!targetUser) targetUser = SEED_USERS[0];
 
     if (targetUser) {
-      setCurrentUser(targetUser);
+      const normalized = normalizeUser(targetUser);
+      setCurrentUser(normalized);
       setAuthModalOpen(false);
-      addToast(`Đã đăng nhập tài khoản trải nghiệm: ${targetUser.name} (${roleLabel})`, "success");
-
-      setTimeout(() => {
-        executePendingAction();
-      }, 100);
+      addToast(`Đã đăng nhập tài khoản trải nghiệm: ${normalized.name} (${roleLabel})`, "success");
+      setTimeout(() => executePendingAction(), 100);
       return true;
     }
     return false;
   };
 
   /**
-   * Đăng ký tài khoản mới
-   */
-  const register = async ({ name, email, username, password }) => {
-    const trimmedEmail = (email || "").trim().toLowerCase();
-    const trimmedUsername = (username || "").trim().toLowerCase();
-    const trimmedName = (name || "").trim();
-
-    try {
-      const data = await api.auth.register({
-        email: trimmedEmail,
-        username: trimmedUsername || trimmedEmail.split("@")[0],
-        name: trimmedName,
-        password: password || "DemoPassword123!"
-      });
-      if (data?.user) {
-        setCurrentUser(data.user);
-        setUsers((prev) => [data.user, ...prev]);
-        setAuthModalOpen(false);
-        addToast(`Đăng ký thành công! Chào mừng ${data.user.name}.`, "success");
-        setTimeout(() => executePendingAction(), 100);
-        return true;
-      }
-    } catch {
-      // Backend failed or network offline -> fallback to local demo
-    }
-
-    const existingEmail = users.find((u) => u.email.toLowerCase() === trimmedEmail);
-    if (existingEmail) {
-      addToast("Email này đã được sử dụng!", "error");
-      return false;
-    }
-
-    if (trimmedUsername) {
-      const existingUser = users.find(
-        (u) => u.username && u.username.toLowerCase() === trimmedUsername
-      );
-      if (existingUser) {
-        addToast("Tên tài khoản này đã được sử dụng!", "error");
-        return false;
-      }
-    }
-
-    const newUser = {
-      id: generateId("user"),
-      name: trimmedName,
-      username: trimmedUsername || trimmedEmail.split("@")[0],
-      email: trimmedEmail,
-      avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(trimmedName)}`,
-      bio: "Thành viên mới của cộng đồng IT Blog",
-      following: [],
-      createdAt: new Date().toISOString()
-    };
-
-    setUsers((prev) => [newUser, ...prev]);
-    setCurrentUser(newUser);
-    setAuthModalOpen(false);
-    addToast(`Đăng ký thành công! Chào mừng ${newUser.name}.`, "success");
-
-    setTimeout(() => {
-      executePendingAction();
-    }, 100);
-
-    return true;
-  };
-
-  /**
-   * Đăng xuất
+   * Dang xuat tai khoan
    */
   const logout = () => {
     try {
@@ -301,13 +412,16 @@ export function AuthProvider({ children }) {
     } catch {
       // ignore
     }
+    localStorage.removeItem("it_blog_token");
+    localStorage.removeItem("it_blog_refresh_token");
+    storage.remove(STORAGE_KEYS.USER);
     setCurrentUser(null);
     setPendingAction(null);
-    addToast("Bạn đã đăng xuất tài khoản.", "info");
+    addToast("Bạn đã đăng xuất tài khoản thành công.", "info");
   };
 
   /**
-   * Cập nhật thông tin cá nhân
+   * Cap nhat thong tin ca nhan
    */
   const updateProfile = async ({ name, bio, avatar }) => {
     if (!currentUser) return false;
@@ -326,17 +440,17 @@ export function AuthProvider({ children }) {
     }
 
     setCurrentUser(updatedUser);
-    setUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+    setUsers((prev) => prev.map((u) => (String(u.id) === String(updatedUser.id) ? updatedUser : u)));
     addToast("Cập nhật thông tin hồ sơ thành công!", "success");
     return true;
   };
 
   /**
-   * Theo dõi / Bỏ theo dõi tác giả (Lưu trong currentUser.following)
+   * Theo doi / Bo theo doi tac gia
    */
   const toggleFollow = async (authorId) => {
     if (!currentUser) return false;
-    if (currentUser.id === authorId) {
+    if (String(currentUser.id) === String(authorId)) {
       addToast("Bạn không thể tự theo dõi chính mình!", "warning");
       return false;
     }
@@ -365,7 +479,7 @@ export function AuthProvider({ children }) {
     };
 
     setCurrentUser(updatedUser);
-    setUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+    setUsers((prev) => prev.map((u) => (String(u.id) === String(updatedUser.id) ? updatedUser : u)));
     return true;
   };
 
@@ -419,6 +533,14 @@ export function AuthProvider({ children }) {
         login,
         loginDemo,
         register,
+        loginOAuth,
+        loginWithGoogle,
+        loginWithGithub,
+        setAuthenticatedSession,
+        oauthModalOpen,
+        oauthProvider,
+        openOAuthModal,
+        closeOAuthModal,
         logout,
         updateProfile,
         toggleFollow

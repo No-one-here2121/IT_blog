@@ -24,7 +24,7 @@ export default function Log_table({ log_what, onNavigate }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (validate() && onNavigate) {
-      onNavigate("main_menu");
+      onNavigate("home");
     }
   };
 

@@ -74,47 +74,86 @@ def get_recommended_feed(
     current_user: Optional[User] = Depends(get_current_user_optional)
 ):
     """
-    Personalized 'For You' feed combining interaction signals, category weights, and recency.
+    Intelligent Hybrid Recommendation Algorithm:
+    - User Category & Tag Affinity (weighted by bookmarks, likes, reads, views)
+    - Social proof & engagement (views, likes, comments, bookmarks)
+    - Pinned priority bonus
+    - Time-decay gravity curve (Hacker News ranking formula)
     """
     now = datetime.now(timezone.utc)
-    if current_user:
-        # Find top categories user interacted with
-        top_cats = (
-            db.query(UserBehaviorEvent.category_id, func.count(UserBehaviorEvent.id).label("cnt"))
-            .filter(UserBehaviorEvent.user_id == current_user.id, UserBehaviorEvent.category_id != None)
-            .group_by(UserBehaviorEvent.category_id)
-            .order_by(desc("cnt"))
-            .limit(3)
-            .all()
-        )
-        cat_ids = [c[0] for c in top_cats if c[0] is not None]
-        if cat_ids:
-            posts = (
-                db.query(Post)
-                .filter(
-                    Post.status == PostStatus.APPROVED.value,
-                    Post.category_id.in_(cat_ids),
-                    or_(Post.scheduled_at == None, Post.scheduled_at <= now)
-                )
-                .order_by(Post.views.desc(), Post.created_at.desc())
-                .limit(limit)
-                .all()
-            )
-            if len(posts) >= 3:
-                return [PostListItem.model_validate(p) for p in posts]
-
-    # Fallback to general popular & recent approved posts
-    fallback_posts = (
+    pool_query = (
         db.query(Post)
         .filter(
             Post.status == PostStatus.APPROVED.value,
             or_(Post.scheduled_at == None, Post.scheduled_at <= now)
         )
-        .order_by(Post.views.desc(), Post.created_at.desc())
-        .limit(limit)
-        .all()
     )
-    return [PostListItem.model_validate(p) for p in fallback_posts]
+
+    candidate_posts = pool_query.order_by(Post.created_at.desc()).limit(150).all()
+    if not candidate_posts:
+        return []
+
+    cat_weights = {}
+    user_tag_ids = set()
+    if current_user:
+        events = (
+            db.query(UserBehaviorEvent)
+            .filter(UserBehaviorEvent.user_id == current_user.id)
+            .order_by(UserBehaviorEvent.created_at.desc())
+            .limit(60)
+            .all()
+        )
+        event_weight_map = {
+            "bookmark": 5.0,
+            "like": 4.0,
+            "read_30s": 3.0,
+            "comment": 3.5,
+            "view": 1.0,
+            "click_tag": 2.0
+        }
+        for ev in events:
+            w = event_weight_map.get(ev.event_type, 1.0)
+            if ev.category_id:
+                cat_weights[ev.category_id] = cat_weights.get(ev.category_id, 0.0) + w
+            if ev.tag_id:
+                user_tag_ids.add(ev.tag_id)
+
+    scored_posts = []
+    for post in candidate_posts:
+        views = post.views or 0
+        likes_count = len(post.likes) if hasattr(post, "likes") and post.likes is not None else 0
+        bookmarks_count = len(post.bookmarks) if hasattr(post, "bookmarks") and post.bookmarks is not None else 0
+        comments_count = len(post.comments) if hasattr(post, "comments") and post.comments is not None else 0
+
+        engagement = (views * 0.1) + (likes_count * 2.0) + (bookmarks_count * 3.0) + (comments_count * 2.5)
+
+        cat_bonus = 0.0
+        if post.category_id and post.category_id in cat_weights:
+            cat_bonus = cat_weights[post.category_id] * 5.0
+
+        tag_bonus = 0.0
+        if user_tag_ids and hasattr(post, "post_tags") and post.post_tags:
+            post_tag_ids = {t.tag_id for t in post.post_tags if getattr(t, "tag_id", None)}
+            matching = len(post_tag_ids.intersection(user_tag_ids))
+            tag_bonus = matching * 4.0
+
+        pin_bonus = 50.0 if getattr(post, "is_pinned", False) else 0.0
+
+        p_date = post.created_at
+        if p_date.tzinfo is None:
+            p_date = p_date.replace(tzinfo=timezone.utc)
+        hours_old = max(0.1, (now - p_date).total_seconds() / 3600.0)
+        decay = math.pow(hours_old + 2.0, 1.15)
+
+        base_score = 10.0 + engagement + cat_bonus + tag_bonus + pin_bonus
+        final_score = base_score / decay
+
+        scored_posts.append((final_score, post))
+
+    scored_posts.sort(key=lambda x: x[0], reverse=True)
+    top_posts = [p[1] for p in scored_posts[:limit]]
+
+    return [PostListItem.model_validate(p) for p in top_posts]
 
 
 @router.get("/recommendations/authors", response_model=List[RecommendedAuthorResponse])

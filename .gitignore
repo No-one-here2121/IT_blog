@@ -40,3 +40,14 @@ backend/app.db
 backend/uploads/*
 !backend/uploads/.gitkeep
 
+
+# OAuth client secrets
+client_secret*.json
+# Credentials and secrets
+backend/credentials/
+*client_secret*.json
+*.env
+*.env.*
+!.env.example
+
+*.db

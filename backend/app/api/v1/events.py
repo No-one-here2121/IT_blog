@@ -223,6 +223,22 @@ def get_event_registrations(
     if not event:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sự kiện không tồn tại.")
 
+    is_admin = current_user.is_superuser or any(r.name in ["admin", "moderator"] for r in current_user.roles)
+    is_organizer = (
+        not event.organizer or
+        event.organizer.lower() in [current_user.name.lower(), current_user.username.lower(), current_user.email.lower()]
+    )
+    is_registered = db.query(EventRegistration).filter(
+        EventRegistration.event_id == id,
+        EventRegistration.user_id == current_user.id
+    ).first() is not None
+
+    if not is_admin and not is_organizer and not is_registered:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chỉ Ban tổ chức, Ban quản trị hoặc người tham gia đã đăng ký mới có quyền xem danh sách người tham gia sự kiện này."
+        )
+
     regs = db.query(EventRegistration).filter(EventRegistration.event_id == id).order_by(EventRegistration.created_at.desc()).all()
     results = []
     for r in regs:

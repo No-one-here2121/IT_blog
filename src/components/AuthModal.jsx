@@ -1,31 +1,38 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
+import { BrandIcon } from "./icons";
 
 export default function AuthModal() {
-  const { authModalOpen, modalMessage, closeAuthModal, login, loginDemo, register } = useAuth();
+  const { authModalOpen, modalMessage, closeAuthModal, login, loginDemo, register, loginWithGoogle, loginWithGithub } = useAuth();
   const [tab, setTab] = useState("login"); // 'login' | 'register'
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
-  // Reset tab to login whenever modal opens
-  useEffect(() => {
+  const [prevAuthModalOpen, setPrevAuthModalOpen] = useState(authModalOpen);
+  if (authModalOpen !== prevAuthModalOpen) {
+    setPrevAuthModalOpen(authModalOpen);
     if (authModalOpen) {
       setTab("login");
       setShowPassword(false);
     }
-  }, [authModalOpen]);
+  }
 
   if (!authModalOpen) return null;
+
+  const handleTabSwitch = (newTab) => {
+    setTab(newTab);
+    setPassword("");
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
     if (tab === "login") {
-      if (!email.trim()) return;
+      if (!email.trim() || !password) return;
       login(email, password);
     } else {
-      if (!name.trim() || !email.trim()) return;
+      if (!name.trim() || !email.trim() || !password) return;
       register({ name, email, password });
     }
   };
@@ -66,6 +73,39 @@ export default function AuthModal() {
               {modalMessage}
             </p>
           )}
+        </div>
+
+                {/* Nút Đăng nhập mạng xã hội: Google & GitHub */}
+        <div className="mb-3 space-y-1.5">
+          <p className="text-[11px] font-bold text-base-content/60 flex items-center gap-1">
+            <span>🌐</span>
+            <span>Đăng nhập / Đăng ký trực tiếp qua:</span>
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={loginWithGoogle}
+              className="btn btn-xs btn-outline border-base-300 hover:bg-base-200 font-semibold py-1.5 h-auto flex items-center justify-center gap-1.5 cursor-pointer rounded-lg"
+              title="Chuyển đến trang đăng nhập chính thức của Google"
+            >
+              <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
+                <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"/>
+                <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
+                <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+              </svg>
+              <span className="text-[11px] font-bold">Google</span>
+            </button>
+            <button
+              type="button"
+              onClick={loginWithGithub}
+              className="btn btn-xs btn-outline border-base-300 hover:bg-base-200 font-semibold py-1.5 h-auto flex items-center justify-center gap-1.5 cursor-pointer rounded-lg"
+              title="Chuyển đến trang đăng nhập chính thức của GitHub"
+            >
+              <BrandIcon name="github" size={15} colored={false} className="text-base-content" />
+              <span className="text-[11px] font-bold">GitHub</span>
+            </button>
+          </div>
         </div>
 
         {/* Nút Đăng nhập Nhanh Demo theo từng vai trò */}
@@ -110,13 +150,13 @@ export default function AuthModal() {
         {/* Tab Đăng nhập / Đăng ký */}
         <div className="tabs tabs-boxed mb-4 p-1 bg-base-200">
           <button
-            onClick={() => setTab("login")}
+            onClick={() => handleTabSwitch("login")}
             className={`tab flex-1 font-medium transition-all ${tab === "login" ? "tab-active bg-primary text-white font-bold" : ""}`}
           >
             Đăng nhập
           </button>
           <button
-            onClick={() => setTab("register")}
+            onClick={() => handleTabSwitch("register")}
             className={`tab flex-1 font-medium transition-all ${tab === "register" ? "tab-active bg-primary text-white font-bold" : ""}`}
           >
             Đăng ký mới
@@ -176,6 +216,8 @@ export default function AuthModal() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Mật khẩu"
+                required
+                minLength={tab === "register" ? 6 : undefined}
                 className="w-full text-xs h-9 focus:outline-none px-3 pr-8 bg-transparent text-base-content placeholder:text-base-content/40"
               />
               <button

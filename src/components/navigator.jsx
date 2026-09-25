@@ -4,15 +4,79 @@ import { useBlog } from "../context/BlogContext";
 import { useToast } from "../context/ToastContext";
 import ThemeToggle from "./ThemeToggle";
 import { api } from "../services/api";
+import {
+  Bell, Heart, MessageSquare, BadgeCheck,
+  Clock, Keyboard, Home, UserCheck
+} from "./icons";
+import { EmptyNotificationsIllustration } from "./illustrations";
 
 const SEARCH_HISTORY_KEY = "it_blog_recent_searches";
 const POPULAR_SEARCH_TAGS = [
   "React 19", "FastAPI", "Docker", "DevOps", "Python", "Microservices", "AI", "PostgreSQL"
 ];
 
+const getLocalReadIds = () => {
+  try {
+    const raw = localStorage.getItem("it_blog_read_notifs");
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
+  } catch {
+    return new Set();
+  }
+};
+
+const markIdLocallyRead = (id) => {
+  try {
+    const current = getLocalReadIds();
+    current.add(String(id));
+    localStorage.setItem("it_blog_read_notifs", JSON.stringify(Array.from(current)));
+  } catch (e) {
+    console.error(e);
+  }
+};
+
+const getNotificationVisual = (type) => {
+  switch (String(type || "").toLowerCase()) {
+    case "comment":
+    case "reply":
+      return {
+        bg: "bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30",
+        icon: <MessageSquare size={16} className="text-blue-500 shrink-0" />,
+        defaultTitle: "Bình luận mới"
+      };
+    case "like":
+      return {
+        bg: "bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30",
+        icon: <Heart size={16} className="text-rose-500 fill-rose-500 shrink-0" />,
+        defaultTitle: "Lượt thích mới"
+      };
+    case "follow":
+      return {
+        bg: "bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30",
+        icon: <UserCheck size={16} className="text-purple-500 shrink-0" />,
+        defaultTitle: "Người theo dõi mới"
+      };
+    case "post":
+    case "approved":
+    case "system":
+      return {
+        bg: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30",
+        icon: <BadgeCheck size={16} className="text-emerald-500 shrink-0" />,
+        defaultTitle: "Duyệt bài viết"
+      };
+    default:
+      return {
+        bg: "bg-primary/15 text-primary border border-primary/30",
+        icon: <Bell size={16} className="text-primary shrink-0" />,
+        defaultTitle: "Thông báo"
+      };
+  }
+};
+
 export default function Navbar({ onNavigate, currentPage = "home" }) {
-  const { currentUser, logout, requireAuth, isAdmin } = useAuth();
-  const { searchQuery, setSearchQuery, pendingPosts } = useBlog();
+  const { currentUser, logout, requireAuth, isAdmin, loginDemo } = useAuth();
+  const { searchQuery, setSearchQuery, pendingPosts, posts } = useBlog();
 
   const canAccessModeration = Boolean(
     currentUser && (
@@ -221,73 +285,188 @@ export default function Navbar({ onNavigate, currentPage = "home" }) {
   // Load unread notifications count & subscribe to realtime WebSocket
   useEffect(() => {
     if (!currentUser) return;
+    const token = localStorage.getItem("it_blog_token");
 
     const fetchNotifs = () => {
-      api.notifications.unreadCount()
-        .then((res) => {
-          if (res?.unread_count !== undefined) {
-            setUnreadCount(res.unread_count);
-          }
-        })
-        .catch(() => {});
+      const localReadSet = getLocalReadIds();
+      if (token) {
+        api.notifications.unreadCount()
+          .then((res) => {
+            if (res?.unread_count !== undefined) {
+              setUnreadCount(res.unread_count);
+            }
+          })
+          .catch(() => {
+            const unreadSample = [1, 2].filter((id) => !localReadSet.has(String(id))).length;
+            setUnreadCount(unreadSample);
+          });
+      } else {
+        const unreadSample = [1, 2].filter((id) => !localReadSet.has(String(id))).length;
+        setUnreadCount(unreadSample);
+      }
     };
 
     fetchNotifs();
-    const timer = setInterval(fetchNotifs, 30000); // 30s poll fallback
+    const timer = setInterval(fetchNotifs, 20000);
 
-    // Realtime WebSocket notification feed
     let ws = null;
-    try {
-      ws = api.notifications.createWebSocket((msg) => {
-        if (msg) {
-          setUnreadCount((prev) => prev + 1);
-          setNotifications((prev) => [msg, ...prev]);
-        }
-      });
-    } catch (e) {
-      console.warn("WebSocket init fallback:", e);
+    if (token) {
+      try {
+        ws = api.notifications.createWebSocket((msg) => {
+          if (msg) {
+            setUnreadCount((prev) => prev + 1);
+            setNotifications((prev) => [msg, ...prev]);
+            addToast(msg.message || msg.content || "Bạn có thông báo mới!", "info");
+          }
+        });
+      } catch (err) {
+        console.warn("WebSocket notification error:", err);
+      }
     }
 
     return () => {
       clearInterval(timer);
       if (ws) {
-        try {
-          ws.close();
-        } catch {
-          // ignore cleanup error
-        }
+        try { ws.close(); } catch { /* ignore */ }
       }
     };
-  }, [currentUser]);
+  }, [currentUser, addToast]);
 
   const loadNotificationsList = () => {
     if (!currentUser) return;
     setNotifsOpen((prev) => !prev);
-    api.notifications.list({ limit: 6 })
+    const localReadSet = getLocalReadIds();
+    const token = localStorage.getItem("it_blog_token");
+
+    const buildFallbackSample = () => {
+      const fallbackPostId = (posts && posts.length > 0) ? posts[0].id : 2631;
+      const fallbackSecondId = (posts && posts.length > 1) ? posts[1].id : fallbackPostId;
+      return [
+        {
+          id: 1,
+          type: "comment",
+          title: "Bình luận mới",
+          message: "Nguyễn Văn Hoàng đã bình luận bài viết của bạn.",
+          post_id: fallbackPostId,
+          entity_id: fallbackPostId,
+          entity_type: "post",
+          is_read: localReadSet.has("1"),
+          created_at: new Date(Date.now() - 5 * 60000).toISOString()
+        },
+        {
+          id: 2,
+          type: "like",
+          title: "Lượt thích mới",
+          message: "12 lập trình viên đã thích bài viết của bạn.",
+          post_id: fallbackSecondId,
+          entity_id: fallbackSecondId,
+          entity_type: "post",
+          is_read: localReadSet.has("2"),
+          created_at: new Date(Date.now() - 35 * 60000).toISOString()
+        },
+        {
+          id: 3,
+          type: "system",
+          title: "Duyệt bài viết",
+          message: "Bài viết của bạn đã được duyệt và xuất bản trên hệ thống.",
+          post_id: fallbackPostId,
+          entity_id: fallbackPostId,
+          entity_type: "post",
+          is_read: true,
+          created_at: new Date(Date.now() - 120 * 60000).toISOString()
+        }
+      ];
+    };
+
+    if (!token) {
+      const sample = buildFallbackSample();
+      setNotifications(sample);
+      setUnreadCount(sample.filter((n) => !n.is_read).length);
+      return;
+    }
+
+    api.notifications.list({ limit: 10 })
       .then((res) => {
         const items = res?.items || (Array.isArray(res) ? res : []);
         if (items.length > 0) {
-          setNotifications(items);
+          const reconciled = items.map((it) => ({
+            ...it,
+            is_read: Boolean(it.is_read || localReadSet.has(String(it.id)))
+          }));
+          setNotifications(reconciled);
+          setUnreadCount(reconciled.filter((n) => !n.is_read).length);
         } else {
-          // Fallback sample notifications
-          setNotifications([
-            { id: 1, type: "comment", title: "Bình luận mới", message: "Nguyễn Văn Hoàng đã bình luận bài viết của bạn.", is_read: false, created_at: new Date().toISOString() },
-            { id: 2, type: "like", title: "Lượt thích mới", message: "12 lập trình viên đã thích bài viết của bạn.", is_read: false, created_at: new Date().toISOString() },
-            { id: 3, type: "system", title: "Duyệt bài viết", message: "Bài viết của bạn đã được duyệt và xuất bản.", is_read: true, created_at: new Date().toISOString() }
-          ]);
+          const sample = buildFallbackSample();
+          setNotifications(sample);
+          setUnreadCount(sample.filter((n) => !n.is_read).length);
         }
       })
       .catch(() => {
-        setNotifications([
-          { id: 1, type: "comment", title: "Bình luận mới", message: "Nguyễn Văn Hoàng đã bình luận bài viết của bạn.", is_read: false, created_at: new Date().toISOString() },
-          { id: 2, type: "like", title: "Lượt thích mới", message: "12 lập trình viên đã thích bài viết của bạn.", is_read: false, created_at: new Date().toISOString() }
-        ]);
+        const sample = buildFallbackSample();
+        setNotifications(sample);
+        setUnreadCount(sample.filter((n) => !n.is_read).length);
       });
+  };
+
+  const handleNotificationClick = (notif) => {
+    // 1. Đánh dấu đã đọc ngay lập tức và đồng bộ bộ nhớ local
+    markIdLocallyRead(notif.id);
+    setNotifications((prev) =>
+      prev.map((n) => (String(n.id) === String(notif.id) ? { ...n, is_read: true } : n))
+    );
+    if (!notif.is_read) {
+      setUnreadCount((prev) => Math.max(0, prev - 1));
+      api.notifications.markRead(notif.id).catch(() => {});
+    }
+
+    // 2. Đóng popover thông báo
+    setNotifsOpen(false);
+
+    // 3. Điều hướng chính xác tới bài viết, bình luận hoặc tác giả
+    const targetPostId = notif.post_id || (notif.entity_type === "post" ? notif.entity_id : null) || notif.reference_id || (posts && posts.length > 0 ? posts[0].id : 2631);
+
+    if (notif.type === "follow" || notif.entity_type === "user") {
+      const targetUserId = notif.sender?.id || notif.sender_id || notif.entity_id;
+      if (onNavigate && targetUserId) {
+        onNavigate("profile", { authorId: targetUserId });
+      }
+    } else {
+      if (onNavigate) {
+        const isComment = notif.type === "comment" || notif.type === "reply";
+        onNavigate("post_detail", {
+          postId: targetPostId,
+          scroll: isComment ? "comments" : "top"
+        });
+
+        // Nếu người dùng đang ở sẵn trang post_detail, thực hiện cuộn trực tiếp
+        if (currentPage === "post_detail") {
+          setTimeout(() => {
+            if (isComment) {
+              const el = document.getElementById("comments-section");
+              if (el) {
+                el.scrollIntoView({ behavior: "smooth", block: "start" });
+                el.classList.add("ring-4", "ring-primary/40");
+                setTimeout(() => el.classList.remove("ring-4", "ring-primary/40"), 2500);
+              }
+            } else {
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }
+          }, 100);
+        }
+      }
+    }
   };
 
   const handleMarkAllRead = async () => {
     try {
       await api.notifications.markAllRead();
+    } catch {
+      // ignore
+    }
+    const current = getLocalReadIds();
+    notifications.forEach((n) => current.add(String(n.id)));
+    try {
+      localStorage.setItem("it_blog_read_notifs", JSON.stringify(Array.from(current)));
     } catch {
       // ignore
     }
@@ -557,13 +736,14 @@ ${rows}
           <div className="hidden lg:flex items-center gap-0.5 xl:gap-1">
             <button
               onClick={() => onNavigate && onNavigate("home")}
-              className={`btn btn-sm text-xs font-semibold rounded-lg transition-all px-2 sm:px-2.5 ${
+              className={`btn btn-sm text-xs font-semibold rounded-lg transition-all gap-1.5 px-2 sm:px-2.5 ${
                 currentPage === "home"
                   ? "bg-primary/10 text-primary font-bold shadow-2xs"
                   : "btn-ghost text-base-content/80 hover:text-base-content"
               }`}
             >
-              Trang chủ
+              <Home size={14} className="text-sky-500 shrink-0" />
+              <span>Trang chủ</span>
             </button>
             <button
               onClick={() => onNavigate && onNavigate("roadmaps")}
@@ -762,7 +942,7 @@ ${rows}
               {searchHistory.length > 0 && (
                 <div>
                   <div className="flex items-center justify-between text-[11px] font-bold text-base-content/60 mb-2 px-1">
-                    <span>🕒 Lịch sử tìm kiếm</span>
+                    <span className="flex items-center gap-1.5"><Clock size={12} className="text-base-content/60" /> Lịch sử tìm kiếm</span>
                     <button
                       type="button"
                       onClick={clearAllSearchHistory}
@@ -967,7 +1147,7 @@ ${rows}
             aria-label="Phím tắt hệ thống"
             title="Phím tắt hệ thống (Nhấn ? hoặc Ctrl+K)"
           >
-            <span className="text-sm">⌨️</span>
+            <Keyboard size={16} className="text-base-content/75 hover:text-primary transition-colors" />
           </button>
 
           {/* Theme Toggle Sáng / Tối */}
@@ -985,9 +1165,7 @@ ${rows}
                   aria-label="Thông báo"
                   title="Thông báo"
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-                  </svg>
+                  <Bell size={18} />
                   {unreadCount > 0 && (
                     <span className="absolute top-1 right-1 w-4 h-4 bg-error text-white text-[10px] font-extrabold rounded-full flex items-center justify-center leading-none">
                       {unreadCount > 9 ? "9+" : unreadCount}
@@ -1043,47 +1221,65 @@ ${rows}
 
                     <div className="max-h-72 overflow-y-auto space-y-1.5 scrollbar-thin">
                       {notifications.length === 0 ? (
-                        <div className="text-center py-6 text-xs text-base-content/50">
-                          Bạn chưa có thông báo nào mới
+                        <div className="text-center py-6 text-xs text-base-content/60">
+                          <EmptyNotificationsIllustration size={80} className="mb-2" />
+                          <p className="font-bold text-base-content">Bạn chưa có thông báo nào mới</p>
+                          <p className="text-[11px] text-base-content/50 mt-0.5">Tương tác và theo dõi để nhận tin tức mới.</p>
                         </div>
                       ) : notifFilter === "unread" && notifications.filter((n) => !n.is_read).length === 0 ? (
-                        <div className="text-center py-6 text-xs text-base-content/50">
-                          Không có thông báo chưa đọc nào 🎉
+                        <div className="text-center py-6 text-xs text-base-content/60">
+                          <EmptyNotificationsIllustration size={80} className="mb-2" />
+                          <p className="font-bold text-success">Bạn đã đọc hết mọi thông báo 🎉</p>
+                          <p className="text-[11px] text-base-content/50 mt-0.5">Không còn thông báo nào chưa đọc.</p>
                         </div>
                       ) : (
-                        (notifFilter === "unread" ? notifications.filter((n) => !n.is_read) : notifications).map((notif) => (
-                          <div
-                            key={notif.id}
-                            onClick={() => {
-                              setNotifsOpen(false);
-                              if (!notif.is_read) {
-                                api.notifications.markRead(notif.id).catch(() => {});
-                                setNotifications((prev) => prev.map((n) => (n.id === notif.id ? { ...n, is_read: true } : n)));
-                                setUnreadCount((prev) => Math.max(0, prev - 1));
-                              }
-                              if (notif.post_id || notif.reference_id) {
-                                if (onNavigate) onNavigate("post_detail", { postId: notif.post_id || notif.reference_id });
-                              }
-                            }}
-                            className={`p-2.5 rounded-xl text-xs cursor-pointer transition-colors border ${
-                              notif.is_read
-                                ? "bg-base-200/40 border-transparent hover:bg-base-200/70 text-base-content/70"
-                                : "bg-primary/5 border-primary/20 hover:bg-primary/10 text-base-content font-medium"
-                            }`}
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <span className="font-bold text-[11px] text-primary">
-                                {notif.title || (notif.type === "comment" ? "Bình luận" : notif.type === "like" ? "Tương tác" : "Thông báo")}
-                              </span>
-                              <span className="text-[10px] text-base-content/40 shrink-0">
-                                {notif.created_at && !isNaN(new Date(notif.created_at).getTime()) ? new Date(notif.created_at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }) : "Vừa xong"}
-                              </span>
+                        (notifFilter === "unread" ? notifications.filter((n) => !n.is_read) : notifications).map((notif) => {
+                          const meta = getNotificationVisual(notif.type);
+                          const timeStr = notif.created_at && !isNaN(new Date(notif.created_at).getTime())
+                            ? new Date(notif.created_at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })
+                            : "Vừa xong";
+
+                          return (
+                            <div
+                              key={notif.id}
+                              onClick={() => handleNotificationClick(notif)}
+                              className={`p-3 rounded-2xl text-xs cursor-pointer transition-all duration-200 border group flex items-start gap-3 ${
+                                notif.is_read
+                                  ? "bg-base-200/40 border-transparent hover:bg-base-200/80 text-base-content/75"
+                                  : "bg-primary/5 border-primary/25 hover:bg-primary/10 text-base-content shadow-xs font-medium"
+                              }`}
+                            >
+                              {/* Icon huy hieu mau sac sinh dong */}
+                              <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-2xs mt-0.5 transition-transform group-hover:scale-110 ${meta.bg}`}>
+                                {meta.icon}
+                              </div>
+
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between gap-1.5 mb-1">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="font-bold text-xs truncate text-base-content group-hover:text-primary transition-colors">
+                                      {notif.title || meta.defaultTitle}
+                                    </span>
+                                    {!notif.is_read && (
+                                      <span className="w-2 h-2 rounded-full bg-primary ring-2 ring-primary/30 shrink-0 inline-block animate-pulse"></span>
+                                    )}
+                                  </div>
+                                  <span className="text-[10px] text-base-content/50 shrink-0 font-medium">
+                                    {timeStr}
+                                  </span>
+                                </div>
+
+                                <p className="text-xs text-base-content/75 line-clamp-2 leading-relaxed">
+                                  {notif.message || notif.content}
+                                </p>
+
+                                <div className="flex items-center justify-between mt-2 pt-1 border-t border-base-200/60 text-[10px] text-primary font-bold opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <span>Xem chi tiết bài viết →</span>
+                                </div>
+                              </div>
                             </div>
-                            <p className="text-xs text-base-content/80 mt-0.5 line-clamp-2">
-                              {notif.message || notif.content}
-                            </p>
-                          </div>
-                        ))
+                          );
+                        })
                       )}
                     </div>
 
@@ -1228,7 +1424,50 @@ ${rows}
           </div>
           ) : (
             /* Chưa đăng nhập: Nút Đăng nhập & Đăng ký */
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 sm:gap-2">
+              <div className="dropdown dropdown-end">
+                <button
+                  tabIndex={0}
+                  type="button"
+                  className="btn btn-xs sm:btn-sm btn-outline btn-warning font-bold flex items-center gap-1 rounded-xl"
+                  title="Trải nghiệm nhanh các vai trò Demo"
+                >
+                  <span>⚡ Demo</span>
+                </button>
+                <div tabIndex={0} className="dropdown-content z-50 menu p-2 shadow-2xl bg-base-100 rounded-2xl border border-base-300 w-56 text-xs space-y-1 mt-1">
+                  <p className="font-bold text-[11px] text-base-content/60 px-2 py-1">Chọn vai trò trải nghiệm:</p>
+                  <button
+                    type="button"
+                    onClick={() => loginDemo("admin")}
+                    className="flex items-center justify-between p-2 rounded-xl hover:bg-primary/10 hover:text-primary transition-colors text-left w-full cursor-pointer"
+                  >
+                    <div>
+                      <span className="font-bold block text-primary">👑 Quản trị viên (Admin)</span>
+                      <span className="text-[10px] text-base-content/60">Toàn quyền, xóa feed, xuất md</span>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => loginDemo("moderator")}
+                    className="flex items-center justify-between p-2 rounded-xl hover:bg-secondary/10 hover:text-secondary transition-colors text-left w-full cursor-pointer"
+                  >
+                    <div>
+                      <span className="font-bold block text-secondary">🛡️ Kiểm duyệt viên (Mod)</span>
+                      <span className="text-[10px] text-base-content/60">Duyệt bài, xóa feed, không xuất md</span>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => loginDemo("user")}
+                    className="flex items-center justify-between p-2 rounded-xl hover:bg-base-200 transition-colors text-left w-full cursor-pointer"
+                  >
+                    <div>
+                      <span className="font-bold block text-base-content">👤 Thành viên (User)</span>
+                      <span className="text-[10px] text-base-content/60">Đọc, viết bài, like & lưu</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
               <button
                 onClick={() => onNavigate && onNavigate("login")}
                 className="btn btn-sm btn-ghost font-semibold text-base-content text-xs sm:text-sm px-2 sm:px-3"
@@ -1282,7 +1521,7 @@ ${rows}
             {searchHistory.length > 0 && (
               <div>
                 <div className="flex items-center justify-between text-[11px] font-bold text-base-content/60 mb-1 px-0.5">
-                  <span>🕒 Lịch sử tìm kiếm</span>
+                  <span className="flex items-center gap-1.5"><Clock size={12} className="text-base-content/60" /> Lịch sử tìm kiếm</span>
                   <button
                     type="button"
                     onClick={clearAllSearchHistory}

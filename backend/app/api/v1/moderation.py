@@ -74,25 +74,61 @@ def create_report(
             detail="Loại đối tượng báo cáo không hợp lệ (chỉ chấp nhận: post, comment, user)."
         )
 
+    resolved_target_id = None
+    target_raw = str(report_in.target_id).strip()
+    if target_raw.isdigit():
+        resolved_target_id = int(target_raw)
+    elif clean_target_type == "post" and target_raw.startswith("post_"):
+        num_part = target_raw.split("post_")[-1]
+        if num_part.isdigit():
+            resolved_target_id = int(num_part)
+        else:
+            post_alias = db.query(Post.id).filter(Post.slug == target_raw).first()
+            if post_alias:
+                resolved_target_id = post_alias[0]
+    elif clean_target_type == "user":
+        if target_raw in ["demo_admin", "admin"]:
+            u = db.query(User).filter((User.username == "admin") | (User.is_superuser == True)).first()
+            if u:
+                resolved_target_id = u.id
+        elif target_raw in ["demo_moderator", "mod", "moderator"]:
+            u = db.query(User).filter((User.username == "mod_dev") | (User.email == "mod@itblog.dev")).first()
+            if u:
+                resolved_target_id = u.id
+        elif target_raw in ["demo_user", "hoang.dev"]:
+            u = db.query(User).filter((User.username == "hoang_dev") | (User.email == "hoang.dev@itblog.vn")).first()
+            if u:
+                resolved_target_id = u.id
+        else:
+            u = db.query(User).filter(User.username == target_raw.lower()).first()
+            if u:
+                resolved_target_id = u.id
+
+    if resolved_target_id is None:
+        try:
+            resolved_target_id = int(target_raw)
+        except (ValueError, TypeError):
+            resolved_target_id = -1
+
     if clean_target_type == "post":
-        if not db.query(Post.id).filter(Post.id == report_in.target_id).first():
+        if not db.query(Post.id).filter(Post.id == resolved_target_id).first():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Bài viết bị báo cáo không tồn tại."
             )
     elif clean_target_type == "comment":
-        if not db.query(Comment.id).filter(Comment.id == report_in.target_id).first():
+        if not db.query(Comment.id).filter(Comment.id == resolved_target_id).first():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Bình luận bị báo cáo không tồn tại."
             )
     elif clean_target_type == "user":
-        if report_in.target_id == current_user.id:
+        if resolved_target_id == current_user.id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Bạn không thể tự báo cáo chính mình."
             )
-        if not db.query(User.id).filter(User.id == report_in.target_id).first():
+        if not db.query(User.id).filter(User.id == resolved_target_id).first():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Người dùng bị báo cáo không tồn tại."
@@ -101,7 +137,7 @@ def create_report(
     new_report = Report(
         reporter_id=current_user.id,
         target_type=clean_target_type,
-        target_id=report_in.target_id,
+        target_id=resolved_target_id,
         reason=clean_reason,
         details=report_in.details.strip() if report_in.details else None
     )
@@ -113,7 +149,7 @@ def create_report(
         user_id=current_user.id,
         action="submit_report",
         target_type=clean_target_type,
-        target_id=report_in.target_id,
+        target_id=resolved_target_id,
         details=f"Lý do: {clean_reason}",
         ip_address=request.client.host if request.client else None
     )

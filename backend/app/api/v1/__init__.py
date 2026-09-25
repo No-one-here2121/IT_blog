@@ -50,3 +50,14 @@ api_router.include_router(analytics_router)
 api_router.include_router(seo_router)
 api_router.include_router(uploads_router)
 api_router.include_router(quiz_router, prefix="/quiz")
+
+from app.api.v1.gamification import get_leaderboard
+from app.schemas.gamification import LeaderboardUserResponse
+from typing import List
+from fastapi import Depends, Query
+from sqlalchemy.orm import Session
+from app.core.database import get_db
+
+@api_router.get('/leaderboard', response_model=List[LeaderboardUserResponse], tags=['Gamification'])
+def get_leaderboard_direct(limit: int = Query(default=10, ge=1, le=50), db: Session = Depends(get_db)):
+    return get_leaderboard(limit=limit, db=db)

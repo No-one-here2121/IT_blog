@@ -56,7 +56,7 @@ const getGoogleCalendarUrl = (evt) => {
 };
 
 export default function EventsPage({ onNavigate, params }) {
-  const { requireAuth, currentUser, loginDemo, isAdmin } = useAuth();
+  const { requireAuth, currentUser, isAdmin } = useAuth();
   const { addToast } = useToast();
   const [events, setEvents] = useState(INITIAL_EVENTS);
   const [typeFilter, setTypeFilter] = useState("all");
@@ -68,13 +68,14 @@ export default function EventsPage({ onNavigate, params }) {
   const [selectedTicketForModal, setSelectedTicketForModal] = useState(null);
 
   // Host Event Modal State
-  const [showCreateEventModal, setShowCreateEventModal] = useState(false);
-
-  useEffect(() => {
-    if (params?.action === "create") {
+  const [showCreateEventModal, setShowCreateEventModal] = useState(isAdmin && params?.action === "create");
+  const [prevEventAction, setPrevEventAction] = useState(params?.action);
+  if (params?.action !== prevEventAction) {
+    setPrevEventAction(params?.action);
+    if (params?.action === "create" && isAdmin) {
       setShowCreateEventModal(true);
     }
-  }, [params]);
+  }
   const [eventTitle, setEventTitle] = useState("");
   const [eventType, setEventType] = useState("workshop");
   const [eventOrganizer, setEventOrganizer] = useState("");
@@ -126,6 +127,10 @@ export default function EventsPage({ onNavigate, params }) {
 
   const handleCreateEvent = async (e) => {
     e.preventDefault();
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền tạo và tổ chức sự kiện!", "error");
+      return;
+    }
     if (!eventTitle.trim() || !eventOrganizer.trim()) return;
     setIsCreatingEvent(true);
     try {
@@ -185,7 +190,7 @@ export default function EventsPage({ onNavigate, params }) {
           notes: "Vé mời trực tuyến đã được kích hoạt",
           created_at: new Date().toISOString()
         };
-        setMyTickets((prev) => [newTicket, ...prev.filter((t) => t.event_id !== event.id)]);
+        setMyTickets((prev) => [newTicket, ...prev.filter((t) => String(t.event_id) !== String(event.id))]);
 
         addToast(`Đăng ký thành công tham gia sự kiện "${event.title}"! Chúng tôi đã ghi nhận vé tham dự của bạn 🎟️`, "success");
       } catch (err) {
@@ -198,10 +203,10 @@ export default function EventsPage({ onNavigate, params }) {
     if (!window.confirm(`Bạn có chắc chắn muốn hủy đăng ký vé tham gia "${eventTitle}"?`)) return;
     try {
       await api.events.cancelRegistration(eventId);
-      setMyTickets((prev) => prev.filter((t) => t.event_id !== eventId));
+      setMyTickets((prev) => prev.filter((t) => String(t.event_id) !== String(eventId)));
       addToast(`Đã hủy vé tham gia "${eventTitle}".`, "info");
     } catch {
-      setMyTickets((prev) => prev.filter((t) => t.event_id !== eventId));
+      setMyTickets((prev) => prev.filter((t) => String(t.event_id) !== String(eventId)));
       addToast(`Đã hủy vé tham gia "${eventTitle}".`, "info");
     }
   };
@@ -698,7 +703,7 @@ ${rows}
       )}
 
       {/* Modal Tổ chức Sự kiện Mới */}
-      {showCreateEventModal && (
+      {isAdmin && showCreateEventModal && (
         <div
           className="modal modal-open bg-black/50 backdrop-blur-xs z-50"
           onClick={(e) => { if (e.target === e.currentTarget) setShowCreateEventModal(false); }}

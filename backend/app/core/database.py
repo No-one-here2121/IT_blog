@@ -1,4 +1,5 @@
-﻿from typing import Generator
+import os
+from typing import Generator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from app.core.config import settings
@@ -23,7 +24,7 @@ def _create_database_engine():
     except Exception as exc:
         print(f"Warning: PostgreSQL connection failed ({exc}). Falling back to SQLite database.")
         return create_engine(
-            "sqlite:///./it_blog.db",
+            f"sqlite:///{os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'it_blog.db')}",
             connect_args={"check_same_thread": False}
         )
 

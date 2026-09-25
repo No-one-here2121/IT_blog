@@ -31,16 +31,63 @@ async function request(endpoint, options = {}) {
       return null;
     }
 
+    if (response.status === 401 && !options._isRetry && !endpoint.includes("/auth/login") && !endpoint.includes("/auth/refresh")) {
+      const refreshToken = localStorage.getItem("it_blog_refresh_token");
+      if (refreshToken) {
+        try {
+          const refreshRes = await fetch(`${API_BASE_URL}/auth/refresh`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ refresh_token: refreshToken }),
+          });
+          if (refreshRes.ok) {
+            const refreshData = await refreshRes.json();
+            if (refreshData?.access_token) {
+              localStorage.setItem("it_blog_token", refreshData.access_token);
+              if (refreshData.refresh_token) {
+                localStorage.setItem("it_blog_refresh_token", refreshData.refresh_token);
+              }
+              return request(endpoint, { ...options, _isRetry: true });
+            }
+          }
+        } catch {
+          // ignore refresh error
+        }
+      }
+      localStorage.removeItem("it_blog_token");
+      localStorage.removeItem("it_blog_refresh_token");
+    }
+
     const data = await response.json().catch(() => null);
 
     if (!response.ok) {
-      const errorMessage = data?.detail || `Lỗi máy chủ (${response.status})`;
+      let errorMessage = `Lỗi máy chủ (${response.status})`;
+      if (typeof data?.detail === "string") {
+        errorMessage = data.detail;
+      } else if (Array.isArray(data?.detail)) {
+        errorMessage = data.detail
+          .map((item) => {
+            if (typeof item === "string") return item;
+            if (item && typeof item === "object") {
+              const field = Array.isArray(item.loc) ? item.loc.filter((k) => k !== "body").join(".") : "";
+              return field ? `${field}: ${item.msg || "dữ liệu không hợp lệ"}` : (item.msg || JSON.stringify(item));
+            }
+            return String(item);
+          })
+          .join("; ");
+      } else if (data?.detail && typeof data.detail === "object") {
+        errorMessage = data.detail.msg || data.detail.message || JSON.stringify(data.detail);
+      } else if (typeof data?.message === "string") {
+        errorMessage = data.message;
+      }
       throw new Error(errorMessage);
     }
 
     return data;
   } catch (error) {
-    console.error(`API Error on [${options.method || "GET"} ${endpoint}]:`, error);
+    if (!endpoint.includes("/auth/me") && !endpoint.includes("/behavior")) {
+      console.warn(`API Error on [${options.method || "GET"} ${endpoint}]:`, error.message);
+    }
     throw error;
   }
 }
@@ -92,6 +139,27 @@ export const api = {
         body: JSON.stringify({ token, new_password: newPassword }),
       }),
 
+
+    oauth: async (provider, data) => {
+      const res = await request(`/auth/oauth/${provider}`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+      if (res?.access_token) {
+        localStorage.setItem("it_blog_token", res.access_token);
+        localStorage.setItem("it_blog_refresh_token", res.refresh_token);
+      }
+      return res;
+    },
+
+    getOAuthAuthorizeUrl: (provider, redirectUri, state) => {
+      const params = new URLSearchParams();
+      if (redirectUri) params.append("redirect_uri", redirectUri);
+      if (state) params.append("state", state);
+      const query = params.toString() ? `?${params.toString()}` : "";
+      return request(`/auth/oauth/${provider}/authorize${query}`);
+    },
+
     logout: () => {
       localStorage.removeItem("it_blog_token");
       localStorage.removeItem("it_blog_refresh_token");
@@ -107,6 +175,7 @@ export const api = {
         body: JSON.stringify(profileData),
       }),
     getProfile: (identifier) => request(`/users/${identifier}`),
+    getActivity: (identifier) => request(`/users/${identifier}/activity`),
   },
 
   // Posts CRUD & Verification
@@ -322,6 +391,11 @@ export const api = {
   // Moderation, Reports & Admin
   moderation: {
     createReport: (reportData) =>
+      request("/reports", {
+        method: "POST",
+        body: JSON.stringify(reportData),
+      }),
+    report: (reportData) =>
       request("/reports", {
         method: "POST",
         body: JSON.stringify(reportData),
@@ -596,6 +670,14 @@ export const api = {
       request("/crawler/trigger", {
         method: "POST",
         body: JSON.stringify(data),
+      }),
+    enrichPost: (id) =>
+      request(`/crawler/enrich/${id}`, {
+        method: "POST",
+      }),
+    enrichAll: (limit = 50) =>
+      request(`/crawler/enrich-all?limit=${limit}`, {
+        method: "POST",
       }),
   },
 

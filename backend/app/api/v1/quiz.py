@@ -143,17 +143,17 @@ def get_quiz_topics(db: Session = Depends(get_db)):
 
 @router.get("/questions", response_model=Dict[str, List[QuizQuestionResponse]])
 def get_quiz_questions(
-    course_id: Optional[int] = Query(None, description="L?c theo ID kh?a h?c"),
-    post_id: Optional[int] = Query(None, description="L?c theo ID b?i vi?t"),
-    language: Optional[str] = Query(None, description="L?c theo ng?n ng? l?p tr?nh / c?ng ngh?"),
-    difficulty: Optional[str] = Query(None, description="L?c theo ?? kh? (easy, medium, hard)"),
-    limit: int = Query(50, ge=1, le=500, description="Gi?i h?n s? l??ng c?u h?i"),
-    randomize: bool = Query(False, description="X?o tr?n th? t? c?u h?i ng?u nhi?n"),
+    course_id: Optional[int] = Query(None, description="Lọc theo ID khóa học"),
+    post_id: Optional[int] = Query(None, description="Lọc theo ID bài viết"),
+    language: Optional[str] = Query(None, description="Lọc theo ngôn ngữ lập trình / công nghệ"),
+    difficulty: Optional[str] = Query(None, description="Lọc theo độ khó (easy, medium, hard)"),
+    limit: int = Query(50, ge=1, le=500, description="Giới hạn số lượng câu hỏi"),
+    randomize: bool = Query(False, description="Xáo trộn thứ tự câu hỏi ngẫu nhiên"),
     db: Session = Depends(get_db)
 ):
     """
-    L?y danh s?ch c?u h?i tr?c nghi?m t? ng?n h?ng ?? thi.
-    H? tr? l?c theo Kh?a h?c, B?i vi?t li?n quan, Ng?n ng?, ho?c ?? kh?, k?m t?nh n?ng l?y ng?u nhi?n v? ch?n s? l??ng c?u h?i.
+    Lấy danh sách câu hỏi trắc nghiệm từ ngân hàng đề thi.
+    Hỗ trợ lọc theo Khóa học, Bài viết liên quan, Ngôn ngữ, hoặc Độ khó, kèm tính năng lấy ngẫu nhiên và chọn số lượng câu hỏi.
     """
     query = db.query(QuizQuestion)
 
@@ -163,7 +163,7 @@ def get_quiz_questions(
     elif course_id is not None:
         query = query.filter(QuizQuestion.course_id == course_id)
 
-    if language and language.strip().lower() not in ["all", "t?t c?", "tat ca"]:
+    if language and language.strip().lower() not in ["all", "tất cả", "tat ca", ""]:
         query = query.filter(QuizQuestion.language.ilike(f"%{language.strip()}%"))
 
     if difficulty and difficulty != "mixed":

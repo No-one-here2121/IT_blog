@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useBlog } from "../context/BlogContext";
 import { useToast } from "../context/ToastContext";
+import { BrandIcon, Heart, MessageSquare, Eye, Bookmark, Pin, Trash2, Edit3, Clock, BadgeCheck } from "./icons";
 
 // Thumbnail mặc định theo từng chủ đề
 const CATEGORY_THUMBNAILS = {
@@ -18,7 +19,7 @@ const CATEGORY_THUMBNAILS = {
 };
 
 export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDelete }) {
-  const { currentUser, requireAuth } = useAuth();
+  const { currentUser, requireAuth, isAdmin: authIsAdmin, isModerator } = useAuth();
   const { getAuthor, toggleLike, toggleBookmark, deletePost, togglePinPost, deleteComment, addComment } = useBlog();
   const { addToast } = useToast();
 
@@ -57,7 +58,9 @@ export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDel
     )
   );
 
-  const canModerate = isAdmin || isAuthor;
+  const isSupervisor = Boolean(isAdmin || authIsAdmin || isModerator);
+  const canEdit = isSupervisor || isAuthor;
+  const canDeleteDirect = isSupervisor || isAuthor;
 
   const thumbnailUrl =
     post.coverImage ||
@@ -180,20 +183,18 @@ export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDel
                 <button
                   type="button"
                   onClick={handleTogglePin}
-                  className={`btn btn-circle btn-xs ${post.isPinned ? "bg-amber-400 text-amber-950" : "bg-transparent text-white/90 hover:bg-white/20"} border-none`}
+                  className={`btn btn-circle btn-xs ${post.isPinned ? "bg-amber-400 text-amber-950" : "bg-transparent text-white/90 hover:bg-white/20"} border-none flex items-center justify-center`}
                   title={post.isPinned ? "Bỏ ghim bài viết" : "Ghim bài viết lên đầu Newfeed"}
                 >
-                  <span className="text-xs">📌</span>
+                  <Pin size={12} className={post.isPinned ? "fill-amber-950 text-amber-950" : "text-white"} />
                 </button>
                 <button
                   type="button"
                   onClick={handleDirectDelete}
-                  className="btn btn-circle btn-xs bg-error/80 hover:bg-error text-white border-none"
+                  className="btn btn-circle btn-xs bg-error/80 hover:bg-error text-white border-none flex items-center justify-center"
                   title="Admin: Xóa bài viết trực tiếp"
                 >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
+                  <Trash2 size={12} className="text-white" />
                 </button>
               </div>
             )}
@@ -202,22 +203,14 @@ export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDel
             <button
               onClick={handleBookmark}
               type="button"
-              className={`btn btn-circle btn-xs backdrop-blur-md transition-all shadow-md ${
+              className={`btn btn-circle btn-xs backdrop-blur-md transition-all shadow-md flex items-center justify-center ${
                 isBookmarked
                   ? "bg-amber-400 text-amber-950 border-amber-300 hover:bg-amber-500"
                   : "bg-black/40 text-white/90 hover:bg-black/70 border-white/20"
               }`}
               title={isBookmarked ? "Đã lưu bài viết" : "Lưu bài viết"}
             >
-              <svg
-                className={`w-3.5 h-3.5 ${isBookmarked ? "fill-current" : ""}`}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-              </svg>
+              <Bookmark size={13} className={isBookmarked ? "fill-amber-950 text-amber-950" : "text-white"} />
             </button>
           </div>
         </div>
@@ -246,15 +239,19 @@ export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDel
                     {author?.name || "Tác giả IT"}
                   </p>
                   {post.isVerified && (
-                    <span className="badge badge-success badge-xs text-white text-[9px] font-bold" title="Bài viết đã được kiểm duyệt chuyên môn bởi chuyên gia công nghệ">
-                      ✓ Chuẩn IT
+                    <span className="badge badge-success badge-xs text-white text-[9px] font-bold flex items-center gap-0.5" title="Bài viết đã được kiểm duyệt chuyên môn bởi chuyên gia công nghệ">
+                      <BadgeCheck size={11} className="shrink-0" />
+                      <span>Chuẩn IT</span>
                     </span>
                   )}
                 </div>
                 <div className="flex items-center gap-1.5 text-[11px] text-base-content/60">
                   <span>{formattedDate}</span>
                   <span>•</span>
-                  <span>{post.readTime || "5 phút đọc"}</span>
+                  <span className="flex items-center gap-1">
+                    <Clock size={11} className="shrink-0 text-base-content/40" />
+                    <span>{post.readTime || "5 phút đọc"}</span>
+                  </span>
                 </div>
               </div>
             </div>
@@ -278,9 +275,10 @@ export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDel
             {post.tags?.slice(0, 3).map((tag) => (
               <span
                 key={tag}
-                className="badge badge-xs bg-base-200 text-base-content/70 hover:bg-base-300 transition-colors"
+                className="badge badge-xs bg-base-200 text-base-content/70 hover:bg-base-300 transition-colors flex items-center gap-1"
               >
-                #{tag}
+                <BrandIcon name={tag} size={11} colored={true} />
+                <span>#{tag}</span>
               </span>
             ))}
             {post.tags && post.tags.length > 3 && (
@@ -298,97 +296,81 @@ export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDel
             <button
               onClick={handleLike}
               type="button"
-              className={`flex items-center gap-1.5 hover:text-error transition-colors ${
-                isLiked ? "text-error font-bold" : ""
+              className={`flex items-center gap-1.5 transition-colors group cursor-pointer ${
+                isLiked ? "text-rose-500 font-bold" : "hover:text-rose-500 text-base-content/70"
               }`}
               title={isLiked ? "Bỏ thích" : "Thích bài viết"}
             >
-              <svg
-                className={`w-4 h-4 ${isLiked ? "fill-current" : ""}`}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
-                />
-              </svg>
-              <span>{Array.isArray(post.likes) ? post.likes.length : (typeof post.likes === "number" ? post.likes : 0)}</span>
+              <Heart
+                size={15}
+                className={isLiked ? "fill-rose-500 text-rose-500" : "text-base-content/60 group-hover:text-rose-500 group-hover:scale-110 transition-transform"}
+              />
+              <span>{typeof post.likes_count === "number" ? post.likes_count : (Array.isArray(post.likes) ? post.likes.length : (typeof post.likes === "number" ? post.likes : 0))}</span>
             </button>
 
             {/* Nút Bình luận & Quản lý bình luận trên Newfeed */}
             <button
               onClick={handleOpenCommentsModal}
               type="button"
-              className="flex items-center gap-1.5 hover:text-primary transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 text-base-content/70 hover:text-blue-500 transition-colors cursor-pointer group"
               title="Xem và quản lý bình luận trên Newfeed"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                />
-              </svg>
-              <span>{Array.isArray(post.comments) ? post.comments.length : (typeof post.comments === "number" ? post.comments : 0)}</span>
-              {isAdmin && (post.comments?.length > 0) && (
+              <MessageSquare size={15} className="text-blue-500/80 group-hover:text-blue-500 group-hover:scale-110 transition-transform" />
+              <span>{typeof post.comments_count === "number" ? post.comments_count : (Array.isArray(post.comments) ? post.comments.length : (typeof post.comments === "number" ? post.comments : 0))}</span>
+              {isSupervisor && (post.comments?.length > 0) && (
                 <span className="badge badge-xs bg-primary/10 text-primary font-bold text-[10px]">Cmt</span>
               )}
             </button>
 
             {/* Lượt xem */}
-            <div className="flex items-center gap-1 text-base-content/50">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-              </svg>
+            <div className="flex items-center gap-1 text-base-content/60" title={`${post.views || 0} lượt xem`}>
+              <Eye size={14} className="text-indigo-500/80" />
               <span>{post.views || 0}</span>
             </div>
           </div>
 
           {/* Nút Thao tác & Quản lý bài viết trực tiếp */}
           <div className="flex items-center gap-1.5">
-            {canModerate && (
-              <>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (onEdit) onEdit(post);
-                    else if (onNavigate) onNavigate("edit_post", { post });
-                  }}
-                  className="btn btn-xs btn-ghost text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 gap-1 font-semibold"
-                  title="Chỉnh sửa bài viết"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                  </svg>
-                  <span>Sửa</span>
-                </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onEdit) onEdit(post);
+                  else if (onNavigate) onNavigate("edit_post", { post });
+                }}
+                className="btn btn-xs btn-ghost text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 gap-1 font-semibold"
+                title="Chỉnh sửa bài viết"
+              >
+                <Edit3 size={13} className="text-amber-500" />
+                <span>Sửa</span>
+              </button>
+            )}
 
-                <button
-                  type="button"
-                  onClick={handleDirectDelete}
-                  className="btn btn-xs btn-ghost text-error hover:bg-error/10 p-1 font-semibold gap-0.5"
-                  title="Xóa bài viết trực tiếp trên Newfeed"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                  <span>Xóa</span>
-                </button>
-              </>
+            {canDeleteDirect && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowDeleteModal(true);
+                }}
+                className="btn btn-xs btn-ghost text-error hover:bg-error/10 gap-1 font-semibold"
+                title="Xóa bài viết"
+              >
+                <Trash2 size={13} className="text-error" />
+                <span>Xóa</span>
+              </button>
             )}
 
             <button
-              type="button"
-              onClick={handleOpenDetail}
-              className="btn btn-xs btn-primary btn-outline font-semibold"
+              onClick={() => {
+                if (onSelectPost) onSelectPost(post.id);
+                else if (onNavigate) onNavigate("post_detail", { postId: post.id });
+              }}
+              className="btn btn-primary btn-xs text-white rounded-lg shadow-2xs font-semibold gap-1"
             >
-              Đọc bài
+              <span>Đọc tiếp</span>
+              <span>→</span>
             </button>
           </div>
         </div>
@@ -472,7 +454,14 @@ export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDel
                 </div>
               ) : (
                 post.comments.map((cmt) => {
-                  const isCommentOwner = currentUser && String(currentUser.id) === String(cmt.userId);
+                  const commentAuthorId = cmt.userId ?? cmt.user_id ?? cmt.user?.id;
+                  const commentAuthorUsername = cmt.userName ?? cmt.username ?? cmt.user?.username;
+                  const isCommentOwner = Boolean(
+                    currentUser && (
+                      (currentUser.id != null && commentAuthorId != null && String(currentUser.id) === String(commentAuthorId)) ||
+                      (currentUser.username && commentAuthorUsername && currentUser.username.toLowerCase() === String(commentAuthorUsername).toLowerCase())
+                    )
+                  );
                   const canDeleteCmt = isAdmin || isCommentOwner;
                   return (
                     <div

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useBlog } from "../context/BlogContext";
 import { useToast } from "../context/ToastContext";
@@ -6,10 +6,12 @@ import { api } from "../services/api";
 import MarkdownRenderer from "../components/MarkdownRenderer";
 import TableOfContents from "../components/TableOfContents";
 import DeveloperAdCard from "../components/DeveloperAdCard";
+import { BrandIcon } from "../components/icons";
+import { Compass, HelpCircle, Share2, ArrowUp, Sparkles, Clock, Eye } from "../components/icons";
 
-export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
-  const { currentUser, requireAuth, toggleFollow } = useAuth();
-  const { posts, getAuthor, toggleLike, toggleBookmark, addComment, deleteComment, deletePost, incrementViews } = useBlog();
+export default function PostDetailPage({ postId, params = {}, onNavigate, onEditPost }) {
+  const { currentUser, requireAuth, toggleFollow, isAdmin, isModerator } = useAuth();
+  const { posts, getAuthor, toggleLike, toggleBookmark, addComment, deleteComment, deletePost, incrementViews, syncPostComments } = useBlog();
   const { addToast } = useToast();
 
   const [commentText, setCommentText] = useState("");
@@ -17,11 +19,53 @@ export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
 
   const postInContext = posts.find((p) => String(p.id) === String(postId) || String(p.slug) === String(postId));
   const [directPost, setDirectPost] = useState(null);
-  const [loadingDirectPost, setLoadingDirectPost] = useState(false);
-  const post = postInContext || directPost;
+  const [loadingDirectPost, setLoadingDirectPost] = useState(!postInContext);
+  const post = useMemo(() => {
+    const base = directPost || postInContext;
+    if (!base) return null;
+    return {
+      ...base,
+      content: directPost?.content || postInContext?.content || base.content,
+      comments: (postInContext?.comments && postInContext.comments.length > 0) ? postInContext.comments : (directPost?.comments || []),
+      comments_count: postInContext?.comments_count ?? directPost?.comments_count ?? (postInContext?.comments?.length || directPost?.comments?.length || 0),
+      likes: postInContext?.likes ?? directPost?.likes ?? [],
+      likes_count: postInContext?.likes_count ?? directPost?.likes_count ?? 0,
+      bookmarks: postInContext?.bookmarks ?? directPost?.bookmarks ?? []
+    };
+  }, [directPost, postInContext]);
 
   const [isVerifiedState, setIsVerifiedState] = useState(Boolean(post?.isVerified || post?.is_verified));
   const [pinnedComments, setPinnedComments] = useState({});
+
+  // Tu dong cuon toi khu vuc binh luan neu duoc dieu huong tu thong bao (retry loop ben bi)
+  useEffect(() => {
+    const isCommentsTarget =
+      params?.scroll === "comments" ||
+      params?.scroll === "comment" ||
+      (typeof window !== "undefined" && window.location.search.includes("scroll=comments"));
+
+    if (isCommentsTarget) {
+      let attempts = 0;
+      const interval = setInterval(() => {
+        attempts++;
+        const el = document.getElementById("comments-section");
+        if (el) {
+          clearInterval(interval);
+          el.scrollIntoView({ behavior: "smooth", block: "start" });
+          el.classList.add("ring-4", "ring-primary/40");
+          setTimeout(() => {
+            el.classList.remove("ring-4", "ring-primary/40");
+          }, 2500);
+        } else if (attempts >= 25) {
+          clearInterval(interval);
+        }
+      }, 100);
+
+      return () => clearInterval(interval);
+    }
+  }, [postId, params?.scroll, post]);
+
+
   const [acceptedComments, setAcceptedComments] = useState({});
   const [commentLikes, setCommentLikes] = useState({});
   const [replyingToId, setReplyingToId] = useState(null);
@@ -51,6 +95,32 @@ export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
 
   // Reading Experience & Accessibility Suite
   const [readingProgress, setReadingProgress] = useState(0);
+  const [isEnrichingCurrent, setIsEnrichingCurrent] = useState(false);
+
+  const handleEnrichCurrentPost = async () => {
+    if (!post?.id) return;
+    setIsEnrichingCurrent(true);
+    try {
+      const res = await api.crawler.enrichPost(post.id);
+      if (res?.success) {
+        addToast("Đã tải toàn bộ nội dung bài viết từ trang gốc thành công! 📖", "success");
+        const refreshed = await api.posts.get(post.id, { track_view: "false" });
+        if (refreshed) {
+          setDirectPost({
+            ...refreshed,
+            id: String(refreshed.id),
+            coverImage: refreshed.cover_image || refreshed.coverImage,
+            authorId: refreshed.author_id,
+          });
+        }
+        window.dispatchEvent(new CustomEvent("refresh_posts"));
+      }
+    } catch (err) {
+      addToast(`Không thể tải toàn bài: ${err.message}`, "error");
+    } finally {
+      setIsEnrichingCurrent(false);
+    }
+  };
   const [fontSizeLevel, setFontSizeLevel] = useState("base"); // 'sm' | 'base' | 'lg' | 'xl'
   const [speechState, setSpeechState] = useState("idle"); // 'idle' | 'playing' | 'paused'
   const [isZenMode, setIsZenMode] = useState(false);
@@ -169,9 +239,12 @@ export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
 
     // Ghi nhận lượt xem thật qua session và CSDL backend
     incrementViews(postId);
+    if (syncPostComments) {
+      syncPostComments(postId);
+    }
 
     // Nếu chưa có bài viết trong bộ nhớ (độc giả mở đường link trực tiếp /posts/:id)
-    if (!postInContext && !directPost) {
+    if (!directPost || String(directPost.id) !== String(postId) || !directPost.content) {
       setTimeout(() => setLoadingDirectPost(true), 0);
       api.posts.get(postId, { track_view: "false" })
         .then((fetched) => {
@@ -243,12 +316,22 @@ export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
       });
 
     // Ghi nhận tín hiệu tương tác: Xem bài viết (view)
-    api.behavior.track({ event_type: "view", post_id: postId }).catch(() => {});
+    api.behavior.track({ event_type: "view", post_id: Number(postId) || undefined }).catch(() => {});
+
+    // Ghi nhận đọc nhanh 15 giây (read_15s)
+    const timer15 = setTimeout(() => {
+      api.behavior.track({ event_type: "read_15s", post_id: Number(postId) || undefined }).catch(() => {});
+    }, 15000);
 
     // Ghi nhận đọc sâu sau 30 giây (read_30s)
     timer = setTimeout(() => {
-      api.behavior.track({ event_type: "read_30s", post_id: postId }).catch(() => {});
+      api.behavior.track({ event_type: "read_30s", post_id: Number(postId) || undefined }).catch(() => {});
     }, 30000);
+
+    // Ghi nhận đọc toàn diện sau 60 giây (read_deep)
+    const timer60 = setTimeout(() => {
+      api.behavior.track({ event_type: "read_deep", post_id: Number(postId) || undefined }).catch(() => {});
+    }, 60000);
 
     try {
       const params = new URLSearchParams(window.location.search);
@@ -262,8 +345,35 @@ export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
 
     return () => {
       if (timer) clearTimeout(timer);
+      if (typeof timer15 !== 'undefined') clearTimeout(timer15);
+      if (typeof timer60 !== 'undefined') clearTimeout(timer60);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [postId]);
+
+  // Ghi nhan lich su doc bai viet thuc te cho nguoi dung
+  useEffect(() => {
+    if (!post || !post.id) return;
+    try {
+      const userKey = currentUser?.id ? ("it_blog_reading_history_" + currentUser.id) : "it_blog_reading_history_guest";
+      const raw = localStorage.getItem(userKey);
+      const existing = raw ? JSON.parse(raw) : [];
+      const filtered = Array.isArray(existing) ? existing.filter((item) => String(item.id) !== String(post.id)) : [];
+      const newEntry = {
+        id: post.id,
+        title: post.title || "Bài viết",
+        category: post.category || "Công nghệ",
+        coverImage: post.coverImage || post.cover_image || "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=600&auto=format&fit=crop&q=80",
+        readTime: post.readTime || "5 phút đọc",
+        readAt: new Date().toISOString()
+      };
+      const updated = [newEntry, ...filtered].slice(0, 50);
+      localStorage.setItem(userKey, JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent("reading_history_updated"));
+    } catch {
+      // Ignore storage errors
+    }
+  }, [post, currentUser?.id]);
 
   if (!post && loadingDirectPost) {
     return (
@@ -275,13 +385,24 @@ export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
   }
 
   if (!post) {
+    const fallbackPost = posts && posts.length > 0 ? posts[0] : null;
     return (
       <div className="max-w-4xl mx-auto px-4 py-16 text-center">
         <h2 className="text-2xl font-bold text-base-content mb-4">Không tìm thấy bài viết</h2>
-        <p className="text-base-content/60 mb-6">Bài viết có thể đã bị xóa hoặc không tồn tại.</p>
-        <button onClick={() => onNavigate("home")} className="btn btn-primary">
-          Quay về Trang chủ
-        </button>
+        <p className="text-base-content/60 mb-6">Bài viết có thể đã bị xóa hoặc không tồn tại trên hệ thống.</p>
+        <div className="flex justify-center gap-3">
+          <button onClick={() => onNavigate("home")} className="btn btn-outline btn-sm">
+            Quay về Trang chủ
+          </button>
+          {fallbackPost && (
+            <button
+              onClick={() => onNavigate("post_detail", { postId: fallbackPost.id })}
+              className="btn btn-primary btn-sm text-white font-semibold"
+            >
+              Xem bài viết mới nhất →
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -293,31 +414,27 @@ export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
     bio: "Tác giả chia sẻ bài viết kỹ thuật trên IT Blog",
     followers: []
   };
-  const isLiked = currentUser && Array.isArray(post.likes) && post.likes.includes(currentUser.id);
-  const isBookmarked = currentUser && Array.isArray(post.bookmarks) && post.bookmarks.includes(currentUser.id);
-  const isFollowingAuthor = currentUser?.following && Array.isArray(currentUser.following) && currentUser.following.includes(author?.id);
-    const isAdmin = Boolean(
+  const isLiked = Boolean(currentUser && Array.isArray(post.likes) && post.likes.some((id) => String(id) === String(currentUser.id)));
+  const isBookmarked = Boolean(currentUser && Array.isArray(post.bookmarks) && post.bookmarks.some((id) => String(id) === String(currentUser.id)));
+  const isFollowingAuthor = Boolean(currentUser?.following && Array.isArray(currentUser.following) && currentUser.following.some((id) => String(id) === String(author?.id)));
+    // Quyền Ban giám sát / Quản trị viên (Admin & Moderator)
+  const isSupervisor = Boolean(isAdmin || isModerator);
+  const isAuthor = Boolean(
     currentUser && (
-      currentUser.role === "admin" ||
-      currentUser.role === "moderator" ||
-      currentUser.is_superuser ||
-      (Array.isArray(currentUser.roles) && (
-        currentUser.roles.includes("admin") ||
-        currentUser.roles.includes("moderator") ||
-        currentUser.roles.some((r) =>
-          typeof r === "string" ? r === "admin" || r === "moderator" : r?.name === "admin" || r?.name === "moderator"
-        )
-      )) ||
-      currentUser.email === "admin@itblog.dev" ||
-      currentUser.username === "admin"
+      String(currentUser.id) === String(post.authorId || post.author_id || post.author?.id) ||
+      (currentUser.username && (currentUser.username === post.author?.username || currentUser.username === post.authorUsername))
     )
   );
-  const canModifyPost = Boolean(currentUser && (currentUser.id === post.authorId || currentUser.id === post.author_id || isAdmin));
+  const canEditPost = isAuthor || isSupervisor;
+  const canDeletePost = isAuthor || isSupervisor;
 
   // Xử lý Thích bài viết
   const handleLike = () => {
     requireAuth(
-      () => toggleLike(post.id),
+      () => {
+        toggleLike(post.id);
+        api.behavior.track({ event_type: "like", post_id: Number(post.id) || undefined }).catch(() => {});
+      },
       "Vui lòng đăng nhập để thích bài viết này!"
     );
   };
@@ -325,7 +442,10 @@ export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
   // Xử lý Lưu bài viết
   const handleBookmark = () => {
     requireAuth(
-      () => toggleBookmark(post.id),
+      () => {
+        toggleBookmark(post.id);
+        api.behavior.track({ event_type: "bookmark", post_id: Number(post.id) || undefined }).catch(() => {});
+      },
       "Vui lòng đăng nhập để lưu bài viết vào mục yêu thích!"
     );
   };
@@ -436,17 +556,31 @@ export default function PostDetailPage({ postId, onNavigate, onEditPost }) {
   };
 
   // Xử lý Chia sẻ liên kết (Section 4)
-  const handleShare = async () => {
+  const handleShare = async (platform = "copy") => {
+    const url = window.location.href;
+    const title = post?.title || "IT Blog";
+    if (platform === "facebook") {
+      window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`, "_blank", "width=600,height=400");
+    } else if (platform === "twitter") {
+      window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(title)}&url=${encodeURIComponent(url)}`, "_blank", "width=600,height=400");
+    } else if (platform === "linkedin") {
+      window.open(`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`, "_blank", "width=600,height=400");
+    } else {
+      try {
+        await navigator.clipboard?.writeText(url);
+        addToast("Đã sao chép liên kết bài viết vào bộ nhớ tạm! 📋", "info");
+      } catch {
+        addToast("Đã sao chép liên kết bài viết! 📋", "info");
+      }
+    }
     try {
-      navigator.clipboard?.writeText(window.location.href);
       const res = await api.posts.share(post.id);
+      api.behavior.track({ event_type: "share", post_id: Number(post.id) || undefined }).catch(() => {});
       if (res?.shares_count !== undefined) {
         setSharesCount(res.shares_count);
       }
-      addToast("Đã sao chép liên kết bài viết vào bộ nhớ tạm! 📋", "info");
     } catch {
-      navigator.clipboard?.writeText(window.location.href);
-      addToast("Đã sao chép liên kết bài viết vào bộ nhớ tạm! 📋", "info");
+      // ignore
     }
   };
 
@@ -530,6 +664,10 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
   const handleAiAsk = async (e) => {
     if (e) e.preventDefault();
     if (!aiQuestion.trim()) return;
+    if (!currentUser) {
+      requireAuth(() => handleAiAsk(e), "Vui lòng đăng nhập để hỏi đáp chuyên sâu với Trợ lý AI!");
+      return;
+    }
     setAiLoading(true);
     try {
       const res = await api.ai.askArticle({
@@ -549,6 +687,10 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
   const handleAiExplainCode = async (e) => {
     if (e) e.preventDefault();
     if (!aiCodeInput.trim()) return;
+    if (!currentUser) {
+      requireAuth(() => handleAiExplainCode(e), "Vui lòng đăng nhập để sử dụng tính năng giải thích mã bằng AI!");
+      return;
+    }
     setAiLoading(true);
     try {
       const res = await api.ai.explainCode({
@@ -574,7 +716,7 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
     }
     const currentStatus = pinnedComments[commentId] !== undefined
       ? pinnedComments[commentId]
-      : Boolean(post?.comments?.find((c) => c.id === commentId)?.is_pinned);
+      : Boolean(post?.comments?.find((c) => String(c.id) === String(commentId))?.is_pinned);
     setPinnedComments((prev) => ({
       ...prev,
       [commentId]: !currentStatus
@@ -591,7 +733,7 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
     }
     const currentStatus = acceptedComments[commentId] !== undefined
       ? acceptedComments[commentId]
-      : Boolean(post?.comments?.find((c) => c.id === commentId)?.is_accepted_answer);
+      : Boolean(post?.comments?.find((c) => String(c.id) === String(commentId))?.is_accepted_answer);
     setAcceptedComments((prev) => ({
       ...prev,
       [commentId]: !currentStatus
@@ -603,7 +745,7 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
   const handleToggleCommentLike = (commentId) => {
     requireAuth(async () => {
       const current = commentLikes[commentId] || {
-        count: post.comments?.find((c) => c.id === commentId)?.likes_count || 0,
+        count: post.comments?.find((c) => String(c.id) === String(commentId))?.likes_count || 0,
         isLiked: false
       };
       const nextLiked = !current.isLiked;
@@ -639,6 +781,10 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
 
   // Kích hoạt Bot tương tác (Engagement Bot)
   const handleTriggerBotComment = async () => {
+    if (!currentUser) {
+      requireAuth(() => handleTriggerBotComment(), "Vui lòng đăng nhập để nhờ AI TechBot phân tích bài viết!");
+      return;
+    }
     setBotLoading(true);
     try {
       const res = await api.posts.triggerBotComment(post.id);
@@ -789,7 +935,7 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
                 ? "text-xl"
                 : "text-base"
             }`}>
-              <MarkdownRenderer content={post.content} headingIdPrefix={"zen-" + post.id + "-"} />
+              <MarkdownRenderer content={post.content || post.excerpt || "Đang tải nội dung bài viết..."} headingIdPrefix={"zen-" + post.id + "-"} />
             </div>
 
             <div className="pt-12 pb-8 border-t border-base-200 mt-12 text-center">
@@ -843,29 +989,35 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
           Quay lại danh sách
         </button>
 
-        {canModifyPost && (
+        {(canEditPost || canDeletePost) && (
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                if (onEditPost) onEditPost(post);
-                onNavigate("edit_post");
-              }}
-              className="btn btn-sm btn-outline btn-warning gap-1"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
-              Chỉnh sửa
-            </button>
-            <button
-              onClick={handleDeletePost}
-              className="btn btn-sm btn-outline btn-error gap-1"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-              Xóa bài
-            </button>
+            {canEditPost && (
+              <button
+                onClick={() => {
+                  if (onEditPost) onEditPost(post);
+                  onNavigate("edit_post");
+                }}
+                className="btn btn-sm btn-outline btn-warning gap-1"
+                title="Chỉnh sửa bài viết"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                Chỉnh sửa
+              </button>
+            )}
+            {canDeletePost && (
+              <button
+                onClick={handleDeletePost}
+                className="btn btn-sm btn-outline btn-error gap-1"
+                title="Quyền Ban giám sát: Xóa bài viết khỏi hệ thống"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                Xóa bài
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1188,6 +1340,35 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
           </div>
         </div>
 
+        {/* Banner lấy toàn văn bài viết từ nguồn gốc nếu bài cào đang chỉ có tóm tắt ngắn */}
+        {Boolean(post?.content && (post.content.includes("http") || post.content.includes("*Nguồn tin gốc:")) && post.content.length < 800) && (
+          <div className="my-3 p-4 rounded-2xl bg-secondary/10 border border-secondary/20 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs animate-fade-in">
+            <div className="space-y-0.5 text-center sm:text-left">
+              <p className="font-bold text-base-content flex items-center gap-1.5 justify-center sm:justify-start">
+                <span>🌐</span> Bài viết tự động từ nguồn tin công nghệ
+              </p>
+              <p className="text-base-content/70 text-[11px]">
+                Nội dung hiện tại đang là bản tóm tắt nhanh. Bạn có thể bấm nút bên cạnh để cào và đọc toàn bộ bài viết chi tiết từ trang gốc.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleEnrichCurrentPost}
+              disabled={isEnrichingCurrent}
+              className="btn btn-xs btn-secondary text-white font-bold rounded-lg shrink-0 shadow-xs"
+            >
+              {isEnrichingCurrent ? (
+                <>
+                  <span className="loading loading-spinner loading-xs"></span>
+                  Đang tải toàn bài...
+                </>
+              ) : (
+                "📖 Lấy toàn bộ nội dung bài viết"
+              )}
+            </button>
+          </div>
+        )}
+
         {/* Nội dung bài viết */}
         <div className={`py-4 transition-all ${
           fontSizeLevel === "sm"
@@ -1198,7 +1379,7 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
             ? "text-xl"
             : "text-base"
         }`}>
-          <MarkdownRenderer content={post.content} headingIdPrefix={"post-" + post.id + "-"} />
+          <MarkdownRenderer content={post.content || post.excerpt || "Đang tải nội dung bài viết..."} headingIdPrefix={"post-" + post.id + "-"} />
         </div>
 
         {/* Khung thông tin tác giả ở cuối bài */}
@@ -1461,11 +1642,11 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
       )}
 
       {/* Khu vực Bình luận */}
-      <section className="mt-10 bg-base-100 rounded-2xl border border-base-300 p-6 sm:p-8 shadow-sm">
+      <section id="comments-section" className="mt-10 bg-base-100 rounded-2xl border border-base-300 p-6 sm:p-8 shadow-sm transition-all duration-300">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
           <h3 className="text-xl font-bold text-base-content flex items-center gap-2">
             <span>Thảo luận & Bình luận</span>
-            <span className="badge badge-neutral">{post.comments?.length || 0}</span>
+            <span className="badge badge-neutral">{post.comments_count ?? post.comments?.length ?? 0}</span>
           </h3>
 
           <button
@@ -1513,7 +1694,7 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 mb-2 border-b border-base-200">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-base font-bold text-base-content">
-              💬 Thảo luận cộng đồng ({post.comments?.length || 0})
+              💬 Thảo luận cộng đồng ({post.comments_count ?? post.comments?.length ?? 0})
             </span>
             {commentSearch && (
               <span className="badge badge-sm badge-primary text-white font-semibold">
@@ -1612,9 +1793,16 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
                 return new Date(b.createdAt || b.created_at || 0) - new Date(a.createdAt || a.created_at || 0);
               })
               .map((comment) => {
-                const canDeleteComment = Boolean(currentUser && (currentUser.id === comment.userId || isAdmin));
+                const commentAuthorId = comment.userId ?? comment.user_id ?? comment.user?.id;
+                const isCommentOwner = Boolean(
+                  currentUser &&
+                  currentUser.id != null &&
+                  commentAuthorId != null &&
+                  String(currentUser.id) === String(commentAuthorId)
+                );
+                const canDeleteComment = Boolean(isSupervisor || isCommentOwner);
                 const canManageComment =
-                  currentUser && (currentUser.id === post.authorId || currentUser.role === "admin");
+                  currentUser && (isAuthor || isSupervisor);
 
                 const replies = (post.comments || []).filter(
                   (r) => String(r.parentId) === String(comment.id) || String(r.parent_id) === String(comment.id)
@@ -1791,7 +1979,14 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
                     {replies.length > 0 && (
                       <div className="pl-3 sm:pl-8 border-l-2 border-primary/20 space-y-2.5 mt-2 pt-2">
                         {replies.map((reply) => {
-                          const canDeleteReply = Boolean(currentUser && (currentUser.id === reply.userId || isAdmin));
+                          const replyAuthorId = reply.userId ?? reply.user_id ?? reply.user?.id;
+                          const isReplyOwner = Boolean(
+                            currentUser &&
+                            currentUser.id != null &&
+                            replyAuthorId != null &&
+                            String(currentUser.id) === String(replyAuthorId)
+                          );
+                          const canDeleteReply = Boolean(isSupervisor || isReplyOwner);
                           const replyLike = commentLikes[reply.id] || {
                             count: reply.likes_count ?? (Array.isArray(reply.likes) ? reply.likes.length : 0),
                             isLiked: Boolean(reply.is_liked)
@@ -1874,13 +2069,31 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
       </section>
         </div>
 
-        {/* Cột phải: MỤC LỤC & TIỆN ÍCH BÀI VIẾT (Sticky ngoài thẻ bài viết) */}
-        <aside className="order-2 lg:order-2 lg:sticky lg:top-20 space-y-4">
+        {/* Cột phải: MỤC LỤC & TIỆN ÍCH BÀI VIẾT (Sticky ngoài thẻ bài viết, không bao giờ để khoảng trống) */}
+        <aside className="order-2 lg:order-2 lg:sticky lg:top-24 self-start max-h-[calc(100vh-6.5rem)] overflow-y-auto scrollbar-none space-y-4">
+          {/* Widget 1: Tiến độ bài đọc */}
+          <div className="rounded-2xl border border-base-300 bg-base-100 p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold text-base-content flex items-center gap-1.5">
+                <Compass size={14} className="text-sky-500" /> Tiến độ bài đọc
+              </span>
+              <span className="text-xs font-bold text-primary">{readingProgress}%</span>
+            </div>
+            <div className="w-full bg-base-200 h-2 rounded-full overflow-hidden">
+              <div className="bg-primary h-full transition-all duration-150" style={{ width: `${readingProgress}%` }}></div>
+            </div>
+            <div className="flex items-center justify-between mt-2 text-[11px] text-base-content/60">
+              <span className="flex items-center gap-1"><Clock size={12} className="text-base-content/50" /> {post.read_time || "5 phút đọc"}</span>
+              <span className="flex items-center gap-1"><Eye size={12} className="text-base-content/50" /> {post.views || 0} lượt xem</span>
+            </div>
+          </div>
+
+          {/* Widget 2: Mục lục bài viết */}
           <TableOfContents content={post.content} headingIdPrefix={"post-" + post.id + "-"} />
 
-          {/* Trắc nghiệm bài viết */}
+          {/* Widget 3: Trắc nghiệm bài viết */}
           <div className="rounded-2xl border border-base-300 bg-base-100 p-4 shadow-sm text-center">
-            <span className="text-2xl mb-1 block">📝</span>
+            <HelpCircle size={28} className="text-amber-500 mx-auto mb-1" />
             <p className="text-sm font-bold text-base-content mb-1">Trắc nghiệm kiến thức</p>
             <p className="text-xs text-base-content/60 mb-3">Kiểm tra mức độ hiểu bài qua các câu hỏi trắc nghiệm!</p>
             <button
@@ -1889,6 +2102,47 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
             >
               Làm bài trắc nghiệm
             </button>
+          </div>
+
+          {/* Widget 4: Chia sẻ bài viết với Brand Icons */}
+          <div className="rounded-2xl border border-base-300 bg-base-100 p-4 shadow-sm">
+            <p className="text-xs font-black uppercase tracking-wider text-base-content/60 mb-2.5">
+              Chia sẻ bài viết
+            </p>
+            <div className="grid grid-cols-4 gap-2">
+              <button
+                type="button"
+                onClick={() => handleShare("facebook")}
+                className="btn btn-xs btn-outline rounded-xl flex items-center justify-center p-0 h-8 hover:bg-blue-500/10 hover:border-blue-500"
+                title="Chia sẻ Facebook"
+              >
+                <BrandIcon name="facebook" size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleShare("twitter")}
+                className="btn btn-xs btn-outline rounded-xl flex items-center justify-center p-0 h-8 hover:bg-neutral-800/10 hover:border-neutral-800"
+                title="Chia sẻ X (Twitter)"
+              >
+                <BrandIcon name="twitter" size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleShare("linkedin")}
+                className="btn btn-xs btn-outline rounded-xl flex items-center justify-center p-0 h-8 hover:bg-blue-600/10 hover:border-blue-600"
+                title="Chia sẻ LinkedIn"
+              >
+                <BrandIcon name="linkedin" size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleShare("copy")}
+                className="btn btn-xs btn-outline rounded-xl flex items-center justify-center p-0 h-8 text-primary hover:bg-primary/10"
+                title="Sao chép liên kết"
+              >
+                <Share2 size={15} />
+              </button>
+            </div>
           </div>
 
           {post.tags?.length > 0 && (
@@ -1900,7 +2154,7 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
                 {post.tags.map((tag) => (
                   <span
                     key={tag}
-                    className="badge badge-sm border border-base-300 bg-base-200/60 text-xs"
+                    className="badge badge-sm border border-base-300 bg-base-200/60 text-xs font-semibold"
                   >
                     #{tag}
                   </span>
@@ -1911,6 +2165,16 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
 
           {/* Banner cơ hội và công cụ tài trợ cho Developer */}
           <DeveloperAdCard category={post.category} />
+
+          {/* Nút Cuộn lên đầu trang */}
+          <button
+            type="button"
+            onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+            className="btn btn-sm btn-ghost w-full gap-2 text-xs text-base-content/60 hover:text-base-content hover:bg-base-200 border border-dashed border-base-300 rounded-xl"
+          >
+            <ArrowUp size={14} />
+            <span>Cuộn lên đầu trang ↑</span>
+          </button>
         </aside>
       </div>
 
@@ -1923,7 +2187,7 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
         className="fixed bottom-6 right-6 z-30 btn btn-primary btn-circle shadow-2xl hover:scale-110 active:scale-95 transition-all text-xl text-white"
         title="Trợ lý AI Đọc hiểu & Hỏi đáp"
       >
-        🤖
+        <Sparkles size={22} className="text-white animate-pulse" />
       </button>
 
       {/* AI Assistant Modal */}
@@ -1937,7 +2201,7 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
             <div className="p-4 sm:p-5 border-b border-base-200 flex items-center justify-between bg-gradient-to-r from-primary/10 via-purple-500/10 to-transparent">
               <div className="flex items-center gap-2.5">
                 <span className="w-9 h-9 rounded-xl bg-primary text-white flex items-center justify-center text-lg font-bold shadow-xs">
-                  🤖
+                  <Sparkles size={20} className="text-white" />
                 </span>
                 <div>
                   <h3 className="font-extrabold text-base text-base-content">Trợ lý AI Đọc hiểu IT</h3>

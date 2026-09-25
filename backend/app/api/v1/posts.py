@@ -168,9 +168,12 @@ def get_post_detail(
     """
     Get full post detail by ID or Slug. Automatically increments view count for published posts.
     """
+    post = None
     if identifier.isdigit():
         post = db.query(Post).filter(Post.id == int(identifier)).first()
-    else:
+    elif identifier.startswith("post_") and identifier[5:].isdigit():
+        post = db.query(Post).filter(Post.id == int(identifier[5:])).first()
+    if not post:
         post = db.query(Post).filter(Post.slug == identifier).first()
 
     if not post:

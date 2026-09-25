@@ -62,7 +62,7 @@ const INITIAL_COURSES = [
 ];
 
 export default function CoursesPage({ onNavigate, params }) {
-  const { currentUser, requireAuth, loginDemo, isAdmin } = useAuth();
+  const { currentUser, requireAuth, isAdmin } = useAuth();
   const { addToast } = useToast();
   const [courses, setCourses] = useState(INITIAL_COURSES);
   const [selectedCourse, setSelectedCourse] = useState(null);
@@ -185,13 +185,14 @@ export default function CoursesPage({ onNavigate, params }) {
   });
 
   // Create Course Modal State
-  const [showCreateCourseModal, setShowCreateCourseModal] = useState(false);
-
-  useEffect(() => {
-    if (params?.action === "create") {
+  const [showCreateCourseModal, setShowCreateCourseModal] = useState(isAdmin && params?.action === "create");
+  const [prevCourseAction, setPrevCourseAction] = useState(params?.action);
+  if (params?.action !== prevCourseAction) {
+    setPrevCourseAction(params?.action);
+    if (params?.action === "create" && isAdmin) {
       setShowCreateCourseModal(true);
     }
-  }, [params]);
+  }
   const [newTitle, setNewTitle] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [newLevel, setNewLevel] = useState("beginner");
@@ -213,6 +214,10 @@ export default function CoursesPage({ onNavigate, params }) {
 
   const handleCreateCourse = async (e) => {
     e.preventDefault();
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền tạo khóa học mới!", "error");
+      return;
+    }
     if (!newTitle.trim() || !newDesc.trim()) return;
     if (!currentUser) {
       requireAuth(() => handleCreateCourse(e), "Vui lòng đăng nhập để lưu khóa học!");
@@ -261,9 +266,9 @@ export default function CoursesPage({ onNavigate, params }) {
   const handleEnroll = (course) => {
     requireAuth(() => {
       setCourses((prev) =>
-        prev.map((c) => (c.id === course.id ? { ...c, is_enrolled: true, enrolled_students: (c.enrolled_students || 0) + 1 } : c))
+        prev.map((c) => (String(c.id) === String(course.id) ? { ...c, is_enrolled: true, enrolled_students: (c.enrolled_students || 0) + 1 } : c))
       );
-      if (selectedCourse && selectedCourse.id === course.id) {
+      if (selectedCourse && String(selectedCourse.id) === String(course.id)) {
         setSelectedCourse((prev) => ({ ...prev, is_enrolled: true }));
       }
       addToast(`Chúc mừng! Bạn đã đăng ký thành công khóa học: ${course.title} 🎓`, "success");
@@ -278,9 +283,9 @@ export default function CoursesPage({ onNavigate, params }) {
 
       setCourses((prev) =>
         prev.map((c) => {
-          if (c.id !== courseId) return c;
+          if (String(c.id) !== String(courseId)) return c;
           const updatedLessons = (c.lessons || []).map((l) =>
-            l.id === lessonId ? { ...l, is_completed: !l.is_completed } : l
+            String(l.id) === String(lessonId) ? { ...l, is_completed: !l.is_completed } : l
           );
           const completedCount = updatedLessons.filter((l) => l.is_completed).length;
           const pct = Math.round((completedCount / updatedLessons.length) * 100);
@@ -290,10 +295,10 @@ export default function CoursesPage({ onNavigate, params }) {
         })
       );
 
-      if (selectedCourse && selectedCourse.id === courseId) {
+      if (selectedCourse && String(selectedCourse.id) === String(courseId)) {
         setSelectedCourse((prev) => {
           const updatedLessons = (prev.lessons || []).map((l) =>
-            l.id === lessonId ? { ...l, is_completed: !l.is_completed } : l
+            String(l.id) === String(lessonId) ? { ...l, is_completed: !l.is_completed } : l
           );
           const completedCount = updatedLessons.filter((l) => l.is_completed).length;
           const pct = Math.round((completedCount / updatedLessons.length) * 100);
@@ -405,16 +410,18 @@ export default function CoursesPage({ onNavigate, params }) {
             🎓 Đang học ({courses.filter((c) => c.is_enrolled).length})
           </button>
 
-          {/* Export Learning Summary Button */}
-          <button
-            type="button"
-            onClick={handleExportLearningSummaryMd}
-            className="btn btn-xs btn-outline btn-ghost hover:text-primary rounded-xl font-bold gap-1 border border-base-300"
-            title="Tải báo cáo tiến độ học tập cá nhân dạng Markdown (.md) cho Obsidian/Notion"
-          >
-            <span>📥</span>
-            <span>Báo cáo học tập (.md)</span>
-          </button>
+          {/* Export Learning Summary Button (Admin only) */}
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={handleExportLearningSummaryMd}
+              className="btn btn-xs btn-outline btn-ghost hover:text-primary rounded-xl font-bold gap-1 border border-base-300"
+              title="Tải báo cáo tiến độ học tập cá nhân dạng Markdown (.md) cho Obsidian/Notion"
+            >
+              <span>📥</span>
+              <span>Báo cáo học tập (.md)</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -719,7 +726,7 @@ export default function CoursesPage({ onNavigate, params }) {
       )}
 
       {/* Modal: Create Course */}
-      {showCreateCourseModal && (
+      {isAdmin && showCreateCourseModal && (
         <div
           className="modal modal-open bg-black/50 backdrop-blur-xs z-50"
           onClick={(e) => { if (e.target === e.currentTarget) setShowCreateCourseModal(false); }}

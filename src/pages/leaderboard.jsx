@@ -20,7 +20,7 @@ const PLATFORM_BADGES = [
 ];
 
 export default function LeaderboardPage({ onNavigate }) {
-  const { isAdmin } = useAuth();
+  const { currentUser, requireAuth, loginDemo, isAdmin } = useAuth();
   const { addToast } = useToast();
   const [leaderboard, setLeaderboard] = useState(DEFAULT_LEADERBOARD);
   const [badges, setBadges] = useState(PLATFORM_BADGES);
@@ -161,6 +161,78 @@ export default function LeaderboardPage({ onNavigate }) {
           Tôn vinh những tác giả và chuyên gia có đóng góp xuất sắc nhất cho cộng đồng công nghệ qua hệ thống điểm Uy Tín (Reputation) và Huy Hiệu Thành Tựu (Badges).
         </p>
       </div>
+
+      {/* Khach vang lai: Thong bao che do xem Top 10 */}
+      {!currentUser && (
+        <div className="mb-6 p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-500/10 via-base-200 to-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs shadow-sm animate-fade-in">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-500 flex items-center justify-center text-xl shrink-0">
+              🏆
+            </div>
+            <div>
+              <p className="font-bold text-base-content text-sm">
+                Bạn đang xem Bảng xếp hạng ở chế độ Khách (Top 10)
+              </p>
+              <p className="text-base-content/70 mt-0.5">
+                Đăng nhập để xem vị trí thứ hạng cụ thể của chính bạn, theo dõi tiến trình kiếm điểm và mở khóa các huy hiệu công nghệ!
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => loginDemo("user")}
+              className="btn btn-xs btn-outline border-base-300 font-bold"
+            >
+              ⚡ Demo 1-chạm
+            </button>
+            <button
+              type="button"
+              onClick={() => requireAuth(() => {}, "Vui lòng đăng nhập để kiểm tra thứ hạng của bạn!")}
+              className="btn btn-sm btn-primary text-white font-bold rounded-xl px-4 shadow-sm"
+            >
+              Đăng nhập ngay
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Thanh vien da dang nhap: The hien thi thu hang va diem uy tin ca nhan */}
+      {currentUser && (
+        <div className="mb-6 p-4 sm:p-5 rounded-2xl bg-base-100 border border-primary/30 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fade-in">
+          <div className="flex items-center gap-3.5">
+            <img
+              src={currentUser.avatar || "https://api.dicebear.com/7.x/bottts/svg?seed=dev"}
+              alt={currentUser.name}
+              className="w-11 h-11 rounded-2xl bg-base-200 border border-base-300 object-cover"
+              onError={(e) => {
+                e.currentTarget.src = "https://api.dicebear.com/7.x/bottts/svg?seed=dev";
+              }}
+            />
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-sm text-base-content">{currentUser.name}</h3>
+                <span className="badge badge-xs bg-primary text-white font-bold uppercase">{currentUser.role || "User"}</span>
+              </div>
+              <p className="text-xs text-base-content/60 font-mono">@{currentUser.username}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 text-xs">
+            <div className="p-2.5 px-4 rounded-xl bg-base-200/60 text-center">
+              <span className="text-[10px] text-base-content/60 block">Thứ hạng của bạn</span>
+              <span className="font-black text-amber-500 text-sm">
+                #{sortedAndFilteredLeaderboard.findIndex((u) => String(u.user_id) === String(currentUser.id) || u.username === currentUser.username) !== -1
+                  ? sortedAndFilteredLeaderboard.findIndex((u) => String(u.user_id) === String(currentUser.id) || u.username === currentUser.username) + 1
+                  : "Top 20"}
+              </span>
+            </div>
+            <div className="p-2.5 px-4 rounded-xl bg-base-200/60 text-center">
+              <span className="text-[10px] text-base-content/60 block">Điểm Uy Tín</span>
+              <span className="font-black text-primary text-sm">{currentUser.reputation_points || 65} pts</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Left 2 Cols: Leaderboard Table */}

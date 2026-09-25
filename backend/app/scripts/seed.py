@@ -433,6 +433,48 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
             for q in sample_questions:
                 db.add(q)
 
+        # 12. Seed Sample Notifications
+        print("  -> Nạp thông báo hệ thống mẫu ban đầu...")
+        from app.models.notification import Notification
+        if db.query(Notification).count() == 0 and admin:
+            posts = db.query(Post).filter(Post.status == "approved").order_by(Post.id.desc()).limit(3).all()
+            p1 = posts[0].id if len(posts) > 0 else 1
+            p2 = posts[1].id if len(posts) > 1 else p1
+            p3 = posts[2].id if len(posts) > 2 else p1
+            notifs = [
+                Notification(
+                    recipient_id=admin.id,
+                    sender_id=None,
+                    type="comment",
+                    entity_id=p1,
+                    entity_type="post",
+                    content="Nguyễn Văn Hoàng đã bình luận bài viết của bạn.",
+                    is_read=False,
+                    created_at=datetime.now(timezone.utc)
+                ),
+                Notification(
+                    recipient_id=admin.id,
+                    sender_id=None,
+                    type="like",
+                    entity_id=p2,
+                    entity_type="post",
+                    content="12 lập trình viên đã thích bài viết của bạn.",
+                    is_read=False,
+                    created_at=datetime.now(timezone.utc)
+                ),
+                Notification(
+                    recipient_id=admin.id,
+                    sender_id=None,
+                    type="system",
+                    entity_id=p3,
+                    entity_type="post",
+                    content="Bài viết của bạn đã được duyệt và xuất bản trên hệ thống.",
+                    is_read=True,
+                    created_at=datetime.now(timezone.utc)
+                )
+            ]
+            db.add_all(notifs)
+
         db.commit()
         print("✅ Nạp dữ liệu mẫu thành công 100%!")
 

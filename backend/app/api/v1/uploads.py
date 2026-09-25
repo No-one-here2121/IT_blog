@@ -58,7 +58,7 @@ async def upload_image(
 
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=getattr(status, "HTTP_413_CONTENT_TOO_LARGE", 413),
             detail=f"Kích thước tệp vượt quá giới hạn cho phép (Tối đa 5MB, hiện tại {len(content) / (1024 * 1024):.1f}MB)."
         )
 

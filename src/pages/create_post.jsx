@@ -156,10 +156,18 @@ jobs:
 ];
 
 export default function CreatePostPage({ editPostData, onNavigate, onPostCreated }) {
-  const { currentUser, loginDemo, requireAuth, isAdmin } = useAuth();
+  const { currentUser, loginDemo, requireAuth, isAdmin, isModerator } = useAuth();
   const { createPost, updatePost } = useBlog();
 
   const isEditing = !!editPostData;
+  const isSupervisor = Boolean(isAdmin || isModerator);
+  const isAuthor = Boolean(
+    currentUser && editPostData && (
+      String(currentUser.id) === String(editPostData.authorId || editPostData.author?.id) ||
+      (currentUser.username && (currentUser.username === editPostData.author?.username || currentUser.username === editPostData.authorUsername))
+    )
+  );
+  const canEdit = !isEditing || isAuthor || isSupervisor;
 
   const savedDraft = !isEditing
     ? (() => {
@@ -461,44 +469,181 @@ ${content}
 
 
 
-  if (!currentUser) {
+    if (isEditing && !canEdit) {
     return (
-      <div className="max-w-md mx-auto my-16 p-8 bg-base-100 rounded-3xl border border-base-300 shadow-xl text-center space-y-4 animate-fade-in">
-        <div className="w-16 h-16 mx-auto rounded-full bg-primary/10 text-primary flex items-center justify-center text-3xl">
-          🔒
-        </div>
-        <h2 className="text-2xl font-black text-base-content">Yêu cầu đăng nhập</h2>
-        <p className="text-sm text-base-content/70">
-          Bạn cần đăng nhập tài khoản để có thể tạo và xuất bản bài viết trên IT Blog.
-        </p>
-        <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
-          <button
-            type="button"
-            onClick={() => loginDemo()}
-            className="btn btn-primary btn-sm rounded-xl text-white font-bold gap-1 shadow-xs"
-          >
-            <span>⚡</span> Đăng nhập Demo (1 chạm)
-          </button>
-          <button
-            type="button"
-            onClick={() => requireAuth(() => {}, "Vui lòng đăng nhập để viết bài mới!")}
-            className="btn btn-outline border-base-300 btn-sm rounded-xl font-semibold"
-          >
-            Đăng nhập / Đăng ký
-          </button>
-          <button
-            type="button"
-            onClick={() => onNavigate("home")}
-            className="btn btn-ghost btn-sm rounded-xl"
-          >
-            Về trang chủ
-          </button>
+      <div className="w-full max-w-4xl mx-auto px-4 py-16 animate-fade-in">
+        <div className="bg-base-100 border border-error/20 rounded-3xl p-8 sm:p-12 shadow-xl text-center space-y-6">
+          <div className="w-20 h-20 rounded-3xl bg-error/10 text-error flex items-center justify-center text-4xl mx-auto ring-8 ring-error/5">
+            ⛔
+          </div>
+          <div className="space-y-2 max-w-lg mx-auto">
+            <h2 className="text-2xl font-black text-base-content">
+              Quyền truy cập bị từ chối (403 Forbidden)
+            </h2>
+            <p className="text-sm text-base-content/70 leading-relaxed">
+              Bạn không có quyền chỉnh sửa bài viết của tác giả khác! Chỉ tác giả bài viết hoặc Ban quản trị (Admin/Moderator) mới có quyền chỉnh sửa nội dung này.
+            </p>
+          </div>
+          <div className="flex justify-center gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => onNavigate && onNavigate("home")}
+              className="btn btn-primary btn-sm text-white font-bold rounded-xl"
+            >
+              Quay về Trang chủ
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
-  const handleSubmit = (submitStatus = "approved") => {
+  if (!currentUser) {
+    return (
+      <div className="w-full min-h-[calc(100vh-140px)] flex items-center justify-center py-10 px-4 sm:px-6 lg:px-8 animate-fade-in">
+        <div className="w-full max-w-4xl bg-base-100 rounded-3xl border border-base-300 shadow-2xl p-6 sm:p-10 md:p-12 space-y-8">
+          {/* Top Breadcrumb & Feature Badge */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-base-200 pb-5">
+            <div className="flex items-center gap-2 text-xs text-base-content/60 font-medium">
+              <button
+                type="button"
+                onClick={() => onNavigate && onNavigate("home")}
+                className="hover:text-primary transition-colors cursor-pointer"
+              >
+                Trang chủ
+              </button>
+              <span>/</span>
+              <span className="text-base-content font-bold">Biên tập bài viết</span>
+            </div>
+            <span className="badge badge-primary badge-outline text-xs font-semibold px-3 py-2">
+              ✨ Trình soạn thảo Markdown Chuẩn IT
+            </span>
+          </div>
+
+          {/* Hero Section */}
+          <div className="text-center space-y-3 max-w-2xl mx-auto">
+            <div className="w-18 h-18 mx-auto rounded-3xl bg-primary/10 text-primary flex items-center justify-center text-4xl shadow-inner ring-8 ring-primary/5">
+              ✍️
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-black text-base-content tracking-tight">
+              Yêu cầu đăng nhập để Viết bài
+            </h2>
+            <p className="text-sm sm:text-base text-base-content/70 leading-relaxed">
+              Bạn cần đăng nhập tài khoản để biên soạn, xem trước trực tiếp và xuất bản bài viết kỹ thuật lên cộng đồng lập trình viên <strong>IT Blog Platform</strong>.
+            </p>
+          </div>
+
+          {/* Quick Demo Access by Roles */}
+          <div className="p-5 sm:p-6 rounded-2xl bg-base-200/50 border border-base-300/80 space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <span className="text-xs font-bold text-base-content uppercase tracking-wider flex items-center gap-1.5">
+                <span>⚡</span>
+                <span>Trải nghiệm nhanh với các vai trò mẫu (1 chạm):</span>
+              </span>
+              <span className="text-[11px] text-base-content/50">Không yêu cầu nhập mật khẩu</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <button
+                type="button"
+                onClick={() => loginDemo("user")}
+                className="btn btn-outline border-base-300 hover:border-primary hover:bg-primary/5 text-xs font-bold rounded-xl py-2.5 h-auto flex flex-col items-center gap-1 transition-all"
+              >
+                <span className="text-base">👤</span>
+                <span className="text-base-content font-bold">Thành viên Kỹ sư</span>
+                <span className="text-[10px] text-base-content/60 font-normal">Quyền viết & đăng bài</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => loginDemo("moderator")}
+                className="btn btn-outline border-base-300 hover:border-secondary hover:bg-secondary/5 text-xs font-bold rounded-xl py-2.5 h-auto flex flex-col items-center gap-1 transition-all"
+              >
+                <span className="text-base">🛡️</span>
+                <span className="text-base-content font-bold">Kiểm duyệt viên</span>
+                <span className="text-[10px] text-base-content/60 font-normal">Duyệt bài & kiểm soát</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => loginDemo("admin")}
+                className="btn btn-outline border-base-300 hover:border-amber-500 hover:bg-amber-500/5 text-xs font-bold rounded-xl py-2.5 h-auto flex flex-col items-center gap-1 transition-all"
+              >
+                <span className="text-base">👑</span>
+                <span className="text-base-content font-bold">Quản trị viên (Admin)</span>
+                <span className="text-[10px] text-base-content/60 font-normal">Toàn quyền hệ thống</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Features Highlight Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 pt-1">
+            <div className="p-3.5 rounded-2xl bg-base-100 border border-base-200 space-y-1.5 shadow-2xs">
+              <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center text-lg font-bold">
+                📝
+              </div>
+              <h4 className="text-xs font-bold text-base-content">Markdown Chuẩn IT</h4>
+              <p className="text-[11px] text-base-content/60 leading-relaxed">
+                Cú pháp mở rộng, Code Highlight đa ngôn ngữ, bảng biểu và chèn sơ đồ kỹ thuật.
+              </p>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-base-100 border border-base-200 space-y-1.5 shadow-2xs">
+              <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center text-lg font-bold">
+                ⚡
+              </div>
+              <h4 className="text-xs font-bold text-base-content">Xem trước Trực tiếp</h4>
+              <p className="text-[11px] text-base-content/60 leading-relaxed">
+                Khung chia đôi Live Split Preview đồng bộ thanh cuộn thời gian thực giữa 2 màn hình.
+              </p>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-base-100 border border-base-200 space-y-1.5 shadow-2xs">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center text-lg font-bold">
+                🤖
+              </div>
+              <h4 className="text-xs font-bold text-base-content">Trợ lý AI Gemini</h4>
+              <p className="text-[11px] text-base-content/60 leading-relaxed">
+                Tự động gợi ý tiêu đề thu hút, tóm tắt SEO và gắn thẻ danh mục thông minh.
+              </p>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-base-100 border border-base-200 space-y-1.5 shadow-2xs">
+              <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center text-lg font-bold">
+                💾
+              </div>
+              <h4 className="text-xs font-bold text-base-content">Tự động Lưu nháp</h4>
+              <p className="text-[11px] text-base-content/60 leading-relaxed">
+                Bảo vệ nội dung tức thì trên trình duyệt, không lo mất bài khi mất kết nối mạng.
+              </p>
+            </div>
+          </div>
+
+          {/* Action Footer Buttons */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-base-200">
+            <button
+              type="button"
+              onClick={() => onNavigate && onNavigate("home")}
+              className="btn btn-sm btn-ghost text-base-content/70 hover:text-base-content gap-1 text-xs order-2 sm:order-1"
+            >
+              ← Quay về Trang chủ
+            </button>
+
+            <button
+              type="button"
+              onClick={() => requireAuth(() => {}, "Vui lòng đăng nhập để bắt đầu viết bài mới!")}
+              className="btn btn-primary btn-sm rounded-xl text-white font-bold gap-2 px-6 shadow-md hover:shadow-lg order-1 sm:order-2 w-full sm:w-auto"
+            >
+              <span>🔑</span>
+              <span>Đăng nhập / Đăng ký Tài khoản</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const handleSubmit = (submitStatus) => {
     if (!title.trim() || !content.trim()) return;
 
     if (!currentUser) {
@@ -508,6 +653,12 @@ ${content}
       );
       return;
     }
+
+    // Phân quyền xuất bản: Chỉ Ban quản trị (Admin / Moderator) mới có quyền xuất bản trực tiếp ("approved").
+    // Thành viên thông thường đăng bài sẽ luôn được chuyển vào hàng đợi ("pending") để Ban quản trị kiểm duyệt.
+    const resolvedStatus = isSupervisor
+      ? (submitStatus || "approved")
+      : (isEditing ? (editPostData?.status || "pending") : "pending");
 
     // Chuẩn hóa tags
     const tags = tagsString
@@ -522,7 +673,7 @@ ${content}
       coverImage: coverImage.trim() || undefined,
       excerpt: excerpt.trim() || title.trim(),
       content: content.trim(),
-      status: submitStatus,
+      status: resolvedStatus,
       techStackVersion: techStackVersion.trim() || undefined,
       scheduledAt: (() => {
         if (!scheduledAt) return undefined;
@@ -535,9 +686,13 @@ ${content}
     };
 
     if (isEditing) {
+      if (!canEdit) {
+        addToast("Bạn không có quyền chỉnh sửa bài viết của tác giả khác!", "error");
+        return;
+      }
       updatePost(editPostData.id, postData);
       if (onPostCreated) onPostCreated(editPostData.id);
-      onNavigate("post_detail");
+      onNavigate("post_detail", { postId: editPostData.id });
     } else {
       try {
         localStorage.removeItem(DRAFT_KEY);
@@ -546,10 +701,15 @@ ${content}
       }
       const newPost = createPost(postData);
       if (submitStatus === "pending") {
-        onNavigate("moderation");
+        if (isAdmin || isModerator) {
+          onNavigate("moderation");
+        } else {
+          addToast("Bài viết đã được gửi vào hàng đợi duyệt! Ban quản trị sẽ kiểm duyệt sớm. ⏳", "info");
+          onNavigate("profile", { tab: "my_posts" });
+        }
       } else if (newPost && onPostCreated) {
         onPostCreated(newPost.id);
-        onNavigate("post_detail");
+        onNavigate("post_detail", { postId: newPost.id });
       } else {
         onNavigate("home");
       }
@@ -775,7 +935,7 @@ ${content}
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              handleSubmit("approved");
+              handleSubmit(isSupervisor ? "approved" : "pending");
             }}
             className="space-y-5"
           >
@@ -1108,11 +1268,12 @@ ${content}
                   👁️ Xem trước
                 </button>
 
-                {!isEditing && (
+                {!isEditing && (isAdmin || isModerator) && (
                   <button
                     type="button"
                     onClick={() => handleSubmit("pending")}
                     className="btn btn-sm border border-amber-400/80 bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/60 gap-1 text-xs font-bold transition-colors"
+                    title="Ban quản trị: Gửi bài viết vào danh sách chờ duyệt"
                   >
                     ⏳ Gửi chờ duyệt
                   </button>
@@ -1122,7 +1283,11 @@ ${content}
                   type="submit"
                   className="btn btn-sm btn-primary text-white font-bold px-5 shadow-md hover:scale-105 active:scale-95 transition-all text-xs"
                 >
-                  {isEditing ? "Lưu thay đổi" : "✓ Xuất bản ngay"}
+                  {isEditing
+                    ? "Lưu thay đổi"
+                    : isSupervisor
+                    ? "✓ Xuất bản ngay"
+                    : "⏳ Gửi bài chờ duyệt"}
                 </button>
               </div>
             </div>
@@ -1198,10 +1363,10 @@ ${content}
               ← Quay lại soạn thảo
             </button>
             <button
-              onClick={() => handleSubmit("approved")}
+              onClick={() => handleSubmit(isSupervisor ? "approved" : "pending")}
               className="btn btn-sm btn-primary text-white font-bold text-xs"
             >
-              ✓ Xác nhận xuất bản
+              {isSupervisor ? "✓ Xác nhận xuất bản" : "⏳ Gửi bài chờ duyệt"}
             </button>
           </div>
         </div>

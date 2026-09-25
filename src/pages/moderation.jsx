@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useBlog } from "../context/BlogContext";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
@@ -77,26 +77,9 @@ const FALLBACK_USERS = [
 
 export default function ModerationPage({ onNavigate, onSelectPost, initialTab = "settings" }) {
   const { pendingPosts, approvedPosts, rejectedPosts, approvePost, rejectPost, deletePost, getAuthor } = useBlog();
-  const { currentUser, loginDemo, isAdmin } = useAuth();
+  const { currentUser, loginDemo, logout, isAdmin, isModerator } = useAuth();
 
-  const canAccessModeration = Boolean(
-    currentUser && (
-      currentUser.role === "admin" ||
-      currentUser.role === "moderator" ||
-      currentUser.is_superuser ||
-      currentUser.id === "demo_user" ||
-      String(currentUser.id) === "1" ||
-      currentUser.email === "admin@itblog.dev" ||
-      currentUser.username === "admin" ||
-      (Array.isArray(currentUser.roles) && (
-        currentUser.roles.includes("admin") ||
-        currentUser.roles.includes("moderator") ||
-        currentUser.roles.some((r) =>
-          typeof r === "string" ? r === "admin" || r === "moderator" : r?.name === "admin" || r?.name === "moderator"
-        )
-      ))
-    )
-  );
+  const canAccessModeration = Boolean(isAdmin || isModerator);
   const { addToast } = useToast();
 
   const [activeTab, setActiveTab] = useState(initialTab); // 'pending' | 'approved' | 'rejected' | 'analytics' | 'gemini' | 'settings'
@@ -173,6 +156,7 @@ export default function ModerationPage({ onNavigate, onSelectPost, initialTab = 
   const [loadingCrawler, setLoadingCrawler] = useState(false);
   const [crawlingInProgress, setCrawlingInProgress] = useState(false);
   const [crawlingSourceId, setCrawlingSourceId] = useState(null);
+  const [isEnriching, setIsEnriching] = useState(false);
   const [newSourceName, setNewSourceName] = useState("");
   const [newSourceUrl, setNewSourceUrl] = useState("");
   const [newSourceCategory, setNewSourceCategory] = useState("Frontend");
@@ -368,7 +352,7 @@ export default function ModerationPage({ onNavigate, onSelectPost, initialTab = 
     }
   };
 
-  const loadBugReports = (status = bugReportsFilter, category = bugCategoryFilter, search = bugSearch) => {
+  const loadBugReports = useCallback((status = bugReportsFilter, category = bugCategoryFilter, search = bugSearch) => {
     setLoadingBugReports(true);
     api.bugReports.adminList({ status, category, search })
       .then((data) => {
@@ -383,7 +367,7 @@ export default function ModerationPage({ onNavigate, onSelectPost, initialTab = 
         setBugReports(getStoredBugReports());
       })
       .finally(() => setLoadingBugReports(false));
-  };
+  }, [bugReportsFilter, bugCategoryFilter, bugSearch]);
 
   const handleUpdateBugStatus = async (bugId, nextStatus) => {
     setIsUpdatingBug(true);
@@ -539,6 +523,20 @@ export default function ModerationPage({ onNavigate, onSelectPost, initialTab = 
       window.dispatchEvent(new CustomEvent("refresh_posts"));
     } catch (err) {
       addToast(`Lỗi thêm nguồn: ${err.message}`, "error");
+    }
+  };
+
+  const handleEnrichAllPosts = async () => {
+    setIsEnriching(true);
+    try {
+      const res = await api.crawler.enrichAll(30);
+      addToast(res.message || `Đã cập nhật nội dung toàn bài cho ${res.updated_posts || 0} bài viết!`, "success");
+      loadCrawler();
+      window.dispatchEvent(new CustomEvent("refresh_posts"));
+    } catch (err) {
+      addToast(`Lỗi cập nhật: ${err.message}`, "error");
+    } finally {
+      setIsEnriching(false);
     }
   };
 
@@ -821,7 +819,18 @@ ${mdRows}
         if (data) setGeminiPool(data);
       })
       .catch(() => {});
-    loadBugReports();
+    api.bugReports.adminList({ status: "all", category: "all", search: "" })
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setBugReports(data);
+          saveStoredBugReports(data);
+        } else {
+          setBugReports(getStoredBugReports());
+        }
+      })
+      .catch(() => {
+        setBugReports(getStoredBugReports());
+      });
     api.moderation.getReports("pending")
       .then((data) => {
         if (Array.isArray(data)) setReports(data);
@@ -1018,7 +1027,7 @@ ${mdRows}
               Quyền truy cập bị từ chối (403 Forbidden)
             </h2>
             <p className="text-sm text-base-content/70 leading-relaxed">
-              Tài khoản <span className="font-bold text-primary">{currentUser.name || currentUser.username}</span> ({currentUser.email}) hiện tại chỉ có vai trò là <span className="badge badge-xs bg-base-300 font-bold uppercase">{currentUser.role || "User"}</span>.
+              Tài khoản <span className="font-bold text-primary">{currentUser?.name || currentUser?.username || "Thành viên"}</span> ({currentUser?.email || "Chưa có email"}) hiện tại chỉ có vai trò là <span className="badge badge-xs bg-base-300 font-bold uppercase">{currentUser?.role || "User"}</span>.
             </p>
             <p className="text-xs text-base-content/60 leading-relaxed">
               Bạn không đủ quyền hạn để truy cập vào <span className="font-bold">Cài đặt & Quản trị hệ thống</span>. Phân hệ này yêu cầu vai trò tối thiểu là <span className="font-bold text-secondary">Kiểm duyệt viên (Moderator)</span> hoặc <span className="font-bold text-primary">Quản trị viên (Admin)</span>.
@@ -1035,10 +1044,13 @@ ${mdRows}
             </button>
             <button
               type="button"
-              onClick={() => onNavigate && onNavigate("login")}
+              onClick={() => {
+                if (logout) logout();
+                if (onNavigate) onNavigate("login");
+              }}
               className="btn btn-outline btn-ghost w-full text-xs font-bold rounded-xl"
             >
-              Đổi tài khoản Quản trị khác
+              Đổi tài khoản Quản trị khác (Đăng xuất & Đăng nhập lại)
             </button>
           </div>
         </div>
@@ -2165,24 +2177,46 @@ ${mdRows}
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={() => handleTriggerCrawl()}
-              disabled={crawlingInProgress}
-              className="btn btn-secondary text-white font-bold text-xs rounded-xl px-5 shrink-0 shadow-sm"
-            >
-              {crawlingSourceId === "all" ? (
-                <>
-                  <span className="loading loading-spinner loading-xs"></span>
-                  Đang cào toàn bộ nguồn...
-                </>
-              ) : (
-                <>
-                  <span>🌐</span>
-                  Kích hoạt cào tin ngay
-                </>
-              )}
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleEnrichAllPosts}
+                disabled={isEnriching || crawlingInProgress}
+                className="btn btn-outline btn-secondary text-xs rounded-xl px-4 font-bold shadow-2xs"
+                title="Quét lại các bài viết cũ đang chỉ có tóm tắt để cào toàn bộ nội dung chi tiết từ trang gốc"
+              >
+                {isEnriching ? (
+                  <>
+                    <span className="loading loading-spinner loading-xs"></span>
+                    Đang quét & lấy toàn bài...
+                  </>
+                ) : (
+                  <>
+                    <span>🔄</span>
+                    Lấy toàn văn bài cũ
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleTriggerCrawl()}
+                disabled={crawlingInProgress || isEnriching}
+                className="btn btn-secondary text-white font-bold text-xs rounded-xl px-5 shadow-sm"
+              >
+                {crawlingSourceId === "all" ? (
+                  <>
+                    <span className="loading loading-spinner loading-xs"></span>
+                    Đang cào toàn bộ nguồn...
+                  </>
+                ) : (
+                  <>
+                    <span>🌐</span>
+                    Kích hoạt cào tin ngay
+                  </>
+                )}
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

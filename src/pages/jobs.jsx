@@ -70,8 +70,8 @@ export default function JobsPage({ onNavigate, params }) {
   const handleToggleSaveJob = (jobId, jobTitle) => {
     requireAuth(() => {
       setSavedJobIds((prev) => {
-        const exists = prev.includes(jobId);
-        const next = exists ? prev.filter((id) => id !== jobId) : [...prev, jobId];
+        const exists = prev.some((id) => String(id) === String(jobId));
+        const next = exists ? prev.filter((id) => String(id) !== String(jobId)) : [...prev, String(jobId)];
         try {
           localStorage.setItem("it_blog_saved_jobs", JSON.stringify(next));
         } catch {
@@ -132,7 +132,7 @@ export default function JobsPage({ onNavigate, params }) {
       addToast("Chỉ Quản trị viên (Admin) mới có quyền xuất dữ liệu Markdown (.md)!", "error");
       return;
     }
-    const savedJobsList = jobs.filter((j) => savedJobIds.includes(j.id));
+    const savedJobsList = jobs.filter((j) => savedJobIds.some((id) => String(id) === String(j.id)));
     if (savedJobsList.length === 0) {
       addToast("Chưa có tin tuyển dụng nào trong danh sách đã lưu để xuất! ℹ️", "info");
       return;
@@ -227,13 +227,14 @@ ${rows}
   };
 
   // Post a Job Modal States
-  const [showCreateJobModal, setShowCreateJobModal] = useState(false);
-
-  useEffect(() => {
-    if (params?.action === "create") {
+  const [showCreateJobModal, setShowCreateJobModal] = useState(isAdmin && params?.action === "create");
+  const [prevJobAction, setPrevJobAction] = useState(params?.action);
+  if (params?.action !== prevJobAction) {
+    setPrevJobAction(params?.action);
+    if (params?.action === "create" && isAdmin) {
       setShowCreateJobModal(true);
     }
-  }, [params]);
+  }
   const [jobTitle, setJobTitle] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [jobLocation, setJobLocation] = useState("Hà Nội / Hybrid");
@@ -287,7 +288,7 @@ ${rows}
   };
 
   const filteredJobs = jobs.filter((j) => {
-    if (showSavedOnly && !savedJobIds.includes(j.id)) {
+    if (showSavedOnly && !savedJobIds.some((id) => String(id) === String(j.id))) {
       return false;
     }
 
@@ -342,6 +343,10 @@ ${rows}
 
   const handleCreateJob = async (e) => {
     e.preventDefault();
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền đăng tin tuyển dụng mới!", "error");
+      return;
+    }
     setIsCreatingJob(true);
     try {
       const created = await api.jobs.create({
@@ -606,7 +611,7 @@ ${rows}
                   <span className="badge badge-ghost text-xs font-semibold capitalize">
                     {job.work_type}
                   </span>
-                  {savedJobIds.includes(job.id) && (
+                  {savedJobIds.some((id) => String(id) === String(job.id)) && (
                     <span className="badge badge-warning text-amber-950 font-bold text-[10px]">
                       🔖 Đã lưu
                     </span>
@@ -656,13 +661,13 @@ ${rows}
                       handleToggleSaveJob(job.id, job.title);
                     }}
                     className={`btn btn-sm rounded-xl font-medium transition-all ${
-                      savedJobIds.includes(job.id)
+                      savedJobIds.some((id) => String(id) === String(job.id))
                         ? "btn-soft btn-warning text-amber-950 font-bold text-xs"
                         : "btn-ghost text-xs text-base-content/60 hover:text-base-content"
                     }`}
-                    title={savedJobIds.includes(job.id) ? "Bỏ lưu tin tuyển dụng" : "Lưu tin tuyển dụng"}
+                    title={savedJobIds.some((id) => String(id) === String(job.id)) ? "Bỏ lưu tin tuyển dụng" : "Lưu tin tuyển dụng"}
                   >
-                    <span>{savedJobIds.includes(job.id) ? "🔖 Đã lưu" : "🏷️ Lưu"}</span>
+                    <span>{savedJobIds.some((id) => String(id) === String(job.id)) ? "🔖 Đã lưu" : "🏷️ Lưu"}</span>
                   </button>
                   <button
                     onClick={() => setSelectedJob(job)}
@@ -751,12 +756,12 @@ ${rows}
                   type="button"
                   onClick={() => handleToggleSaveJob(selectedJob.id, selectedJob.title)}
                   className={`btn btn-sm rounded-xl font-bold gap-1.5 ${
-                    savedJobIds.includes(selectedJob.id)
+                    savedJobIds.some((id) => String(id) === String(selectedJob.id))
                       ? "btn-soft btn-warning text-amber-950 font-bold"
                       : "btn-ghost text-base-content/70"
                   }`}
                 >
-                  <span>{savedJobIds.includes(selectedJob.id) ? "🔖 Đã lưu tin" : "🏷️ Lưu tin này"}</span>
+                  <span>{savedJobIds.some((id) => String(id) === String(selectedJob.id)) ? "🔖 Đã lưu tin" : "🏷️ Lưu tin này"}</span>
                 </button>
                 {isAdmin && (
                   <button
@@ -907,7 +912,7 @@ ${rows}
       )}
 
       {/* Modal Đăng Tin Tuyển Dụng Mới (Employer Post a Job) */}
-      {showCreateJobModal && (
+      {isAdmin && showCreateJobModal && (
         <div
           className="modal modal-open bg-black/50 backdrop-blur-xs z-50"
           onClick={(e) => { if (e.target === e.currentTarget) setShowCreateJobModal(false); }}

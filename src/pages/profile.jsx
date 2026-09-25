@@ -6,12 +6,143 @@ import { api } from "../services/api";
 import PostCard from "../components/PostCard";
 
 export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, authorId, initialTab }) {
-  const { currentUser, updateProfile, users, toggleFollow, requireAuth, isAdmin } = useAuth();
+  const { currentUser, updateProfile, users, toggleFollow, requireAuth, loginDemo, isAdmin } = useAuth();
   const { posts, deletePost, toggleBookmark } = useBlog();
   const { addToast } = useToast();
 
   const [activeTab, setActiveTab] = useState(initialTab || "my_posts"); // 'my_posts' | 'bookmarks' | 'following' | 'gamification' | 'applications' | 'history' | 'security'
   const [isEditingProfile, setIsEditingProfile] = useState(false);
+
+  // Real Backend Activity States (hoisted to top so effects and memos can safely access)
+  const [backendActivity, setBackendActivity] = useState(null);
+  const [publicActivity, setPublicActivity] = useState(null);
+
+  // Email privacy toggle & masking
+  const [showEmail, setShowEmail] = useState(false);
+  const maskEmail = (email) => {
+    if (!email || typeof email !== "string") return "";
+    const parts = email.split("@");
+    if (parts.length !== 2) return email;
+    const [namePart, domain] = parts;
+    if (namePart.length <= 2) {
+      return namePart[0] + "*@" + domain;
+    }
+    const visibleCount = Math.min(3, Math.max(1, Math.floor(namePart.length / 3)));
+    return namePart.slice(0, visibleCount) + "*".repeat(Math.max(3, namePart.length - visibleCount)) + "@" + domain;
+  };
+
+  // Real reading history & streak
+  const [readingHistory, setReadingHistory] = useState(() => {
+    try {
+      if (!currentUser?.id) return [];
+      const raw = localStorage.getItem("it_blog_reading_history_" + currentUser.id);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    api.users.getActivity(currentUser.id)
+      .then((data) => {
+        if (data && typeof data.total_contributions === "number") {
+          setBackendActivity(data);
+          if (Array.isArray(data.reading_history) && data.reading_history.length > 0) {
+            setReadingHistory(data.reading_history);
+            try {
+              localStorage.setItem("it_blog_reading_history_" + currentUser.id, JSON.stringify(data.reading_history));
+            } catch { /* ignore */ }
+          }
+        }
+      })
+      .catch(() => {});
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      try {
+        if (!currentUser?.id) return;
+        const raw = localStorage.getItem("it_blog_reading_history_" + currentUser.id);
+        if (raw) setReadingHistory(JSON.parse(raw));
+        api.users.getActivity(currentUser.id)
+          .then((act) => {
+            if (act && typeof act.total_contributions === "number") setBackendActivity(act);
+          })
+          .catch(() => {});
+      } catch {
+        setReadingHistory([]);
+      }
+    };
+    window.addEventListener("reading_history_updated", handleUpdate);
+    return () => window.removeEventListener("reading_history_updated", handleUpdate);
+  }, [currentUser?.id]);
+
+  const handleClearReadingHistory = () => {
+    if (window.confirm("Bạn có chắc chắn muốn xóa toàn bộ lịch sử đọc bài viết cá nhân?")) {
+      try {
+        if (currentUser?.id) {
+          localStorage.removeItem("it_blog_reading_history_" + currentUser.id);
+        }
+        setReadingHistory([]);
+        addToast("Đã làm sạch lịch sử đọc bài viết!", "info");
+      } catch {
+        // ignore
+      }
+    }
+  };
+
+  const localReadingStreak = useMemo(() => {
+    if (!Array.isArray(readingHistory) || readingHistory.length === 0) return 0;
+    const dates = new Set();
+    readingHistory.forEach((item) => {
+      if (item.readAt) {
+        try {
+          const d = new Date(item.readAt);
+          if (!isNaN(d.getTime())) {
+            dates.add(d.toISOString().split("T")[0]);
+          }
+        } catch {
+          // ignore
+        }
+      }
+    });
+
+    if (dates.size === 0) return 0;
+
+    const today = new Date();
+    const todayStr = today.toISOString().split("T")[0];
+
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split("T")[0];
+
+    if (!dates.has(todayStr) && !dates.has(yesterdayStr)) {
+      return 0;
+    }
+
+    let streak = 0;
+    let checkDate = dates.has(todayStr) ? new Date(today) : new Date(yesterday);
+
+    while (true) {
+      const checkStr = checkDate.toISOString().split("T")[0];
+      if (dates.has(checkStr)) {
+        streak++;
+        checkDate.setDate(checkDate.getDate() - 1);
+      } else {
+        break;
+      }
+    }
+
+    return streak;
+  }, [readingHistory]);
+
+  const readingStreak = useMemo(() => {
+    if (backendActivity && typeof backendActivity.reading_streak === "number") {
+      return backendActivity.reading_streak;
+    }
+    return localReadingStreak;
+  }, [backendActivity, localReadingStreak]);
 
   const [prevInitialTab, setPrevInitialTab] = useState(initialTab);
   if (initialTab !== prevInitialTab) {
@@ -37,6 +168,36 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
   const [allBadges, setAllBadges] = useState([]);
   const [loadingApplications, setLoadingApplications] = useState(false);
 
+  const [serverBookmarks, setServerBookmarks] = useState([]);
+
+  // Lọc bài viết của user
+  const myPosts = useMemo(() => {
+    if (!currentUser) return [];
+    return posts.filter((p) =>
+      String(p.authorId || p.author_id || p.author?.id) === String(currentUser.id) ||
+      (currentUser.username && (currentUser.username === p.author?.username || currentUser.username === p.authorUsername))
+    );
+  }, [posts, currentUser]);
+
+  // Lọc bài viết user đã lưu (bookmark) - hợp nhất từ state và server
+  const bookmarkedPosts = useMemo(() => {
+    if (!currentUser) return [];
+    const list = posts.filter((p) =>
+      (Array.isArray(p.bookmarks) && p.bookmarks.some((id) => String(id) === String(currentUser.id))) ||
+      (Array.isArray(currentUser.bookmarks) && currentUser.bookmarks.some((id) => String(id) === String(p.id)))
+    );
+    const existingIds = new Set(list.map((p) => String(p.id)));
+    if (Array.isArray(serverBookmarks)) {
+      serverBookmarks.forEach((sb) => {
+        if (sb && !existingIds.has(String(sb.id))) {
+          list.push(sb);
+          existingIds.add(String(sb.id));
+        }
+      });
+    }
+    return list;
+  }, [posts, currentUser, serverBookmarks]);
+
   // Job Applications
   const [jobApplications, setJobApplications] = useState([]);
 
@@ -46,16 +207,80 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
   const [publicReputation, setPublicReputation] = useState(null);
   const [publicActiveTab, setPublicActiveTab] = useState("posts"); // 'posts' | 'gamification'
 
+// Real Backend Activity States declared at top
+
   // Developer Activity Heatmap States
   const [selectedDay, setSelectedDay] = useState(null);
 
-  // Generate deterministic contribution heatmap for the last 16 weeks (112 days)
-  const heatmapWeeks = useMemo(() => {
+  // Real Activity Data Computation (Posts, Comments, Quizzes, Reading History, Gamification Logs)
+  const userPosts = useMemo(() => {
+    if (!currentUser?.id) return [];
+    return posts.filter(
+      (p) => String(p.authorId) === String(currentUser.id) || String(p.author_id) === String(currentUser.id)
+    );
+  }, [posts, currentUser]);
+
+  const userComments = useMemo(() => {
+    if (!currentUser) return [];
+    const list = [];
+    posts.forEach((p) => {
+      if (Array.isArray(p.comments)) {
+        p.comments.forEach((c) => {
+          if (
+            (currentUser.id && (String(c.authorId) === String(currentUser.id) || String(c.user_id) === String(currentUser.id))) ||
+            (currentUser.name && c.author === currentUser.name)
+          ) {
+            list.push(c);
+          }
+        });
+      }
+    });
+    return list;
+  }, [posts, currentUser]);
+
+  const userQuizzes = useMemo(() => {
+    try {
+      const raw = localStorage.getItem("it_blog_quiz_history");
+      const list = raw ? JSON.parse(raw) : [];
+      return Array.isArray(list) ? list : [];
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const activityMap = useMemo(() => {
+    const map = {};
+
+    const addEvent = (rawDate, weight = 1) => {
+      if (!rawDate) return;
+      try {
+        const d = new Date(rawDate);
+        if (!isNaN(d.getTime())) {
+          const key = d.toISOString().split("T")[0];
+          map[key] = (map[key] || 0) + weight;
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    userPosts.forEach((p) => addEvent(p.createdAt || p.created_at, 2));
+    userComments.forEach((c) => addEvent(c.createdAt || c.created_at || c.date, 1));
+    userQuizzes.forEach((q) => addEvent(q.date || q.createdAt, 1));
+    readingHistory.forEach((r) => addEvent(r.readAt, 1));
+    if (Array.isArray(reputationData?.recent_logs)) {
+      reputationData.recent_logs.forEach((log) => addEvent(log.created_at, 1));
+    }
+
+    return map;
+  }, [userPosts, userComments, userQuizzes, readingHistory, reputationData]);
+
+  // Generate real contribution heatmap for the last 16 weeks (112 days)
+  const localHeatmapWeeks = useMemo(() => {
     const weeks = [];
     const today = new Date();
     today.setHours(23, 59, 59, 999);
 
-    const seed = (currentUser?.id || 1) * 31 + (currentUser?.name?.length || 5);
     const totalDays = 112;
     const allDays = [];
 
@@ -65,20 +290,7 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
       const dateStr = d.toISOString().split("T")[0];
       const dayOfWeek = d.getDay();
 
-      const pseudoRandom = Math.sin(seed * (i + 1) * 9301 + 49297) * 233280;
-      const randVal = Math.abs(pseudoRandom - Math.floor(pseudoRandom));
-
-      let count = 0;
-      const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
-      if (isWeekday && randVal > 0.35) {
-        count = Math.floor(randVal * 6) + 1;
-      } else if (!isWeekday && randVal > 0.65) {
-        count = Math.floor(randVal * 4) + 1;
-      }
-
-      if (i <= 4) {
-        count = Math.max(count, (i % 3) + 2);
-      }
+      const count = activityMap[dateStr] || 0;
 
       let level = 0;
       if (count >= 5) level = 4;
@@ -104,26 +316,78 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
     }
 
     return weeks;
-  }, [currentUser]);
+  }, [activityMap]);
 
-  const heatmapMetrics = useMemo(() => {
+  const localHeatmapMetrics = useMemo(() => {
     let total = 0;
-    heatmapWeeks.forEach((week) => {
+    const allDays = [];
+
+    localHeatmapWeeks.forEach((week) => {
       week.forEach((day) => {
         total += day.count;
+        allDays.push(day);
       });
     });
 
-    const userPostsCount = posts.filter(
-      (p) => currentUser && p.authorId === currentUser.id
-    ).length;
+    if (total === 0) {
+      return {
+        totalContributions: 0,
+        currentStreak: 0,
+        maxStreak: 0
+      };
+    }
+
+    let maxStreak = 0;
+    let tempStreak = 0;
+    for (let i = 0; i < allDays.length; i++) {
+      if (allDays[i].count > 0) {
+        tempStreak++;
+        if (tempStreak > maxStreak) maxStreak = tempStreak;
+      } else {
+        tempStreak = 0;
+      }
+    }
+
+    let currentStreak = 0;
+    const lastDayIdx = allDays.length - 1;
+    const todayHasActivity = allDays[lastDayIdx]?.count > 0;
+    const yesterdayHasActivity = allDays[lastDayIdx - 1]?.count > 0;
+
+    if (todayHasActivity || yesterdayHasActivity) {
+      const startIdx = todayHasActivity ? lastDayIdx : lastDayIdx - 1;
+      for (let i = startIdx; i >= 0; i--) {
+        if (allDays[i].count > 0) {
+          currentStreak++;
+        } else {
+          break;
+        }
+      }
+    }
 
     return {
-      totalContributions: total + userPostsCount * 3,
-      currentStreak: 5,
-      maxStreak: 16
+      totalContributions: total,
+      currentStreak,
+      maxStreak
     };
-  }, [heatmapWeeks, posts, currentUser]);
+  }, [localHeatmapWeeks]);
+
+  const heatmapWeeks = useMemo(() => {
+    if (backendActivity?.heatmap_weeks && Array.isArray(backendActivity.heatmap_weeks)) {
+      return backendActivity.heatmap_weeks;
+    }
+    return localHeatmapWeeks;
+  }, [backendActivity, localHeatmapWeeks]);
+
+  const heatmapMetrics = useMemo(() => {
+    if (backendActivity && typeof backendActivity.total_contributions === "number") {
+      return {
+        totalContributions: backendActivity.total_contributions,
+        currentStreak: backendActivity.current_streak,
+        maxStreak: backendActivity.max_streak
+      };
+    }
+    return localHeatmapMetrics;
+  }, [backendActivity, localHeatmapMetrics]);
 
   // Post Author Analytics Modal
   const [selectedPostForAnalytics, setSelectedPostForAnalytics] = useState(null);
@@ -160,19 +424,22 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
   useEffect(() => {
     if (!currentUser?.id) return;
 
+    api.interactions.getMyBookmarks()
+      .then((res) => {
+        if (res?.items && Array.isArray(res.items)) {
+          setServerBookmarks(res.items);
+        }
+      })
+      .catch(() => {});
+
     api.gamification.userReputation(currentUser.id)
       .then((data) => setReputationData(data))
       .catch(() => {
         setReputationData({
-          total_points: 65,
-          rank: 2,
-          badges: [
-            { id: 1, name: "Thực tập sinh tiềm năng", slug: "junior-dev", description: "Gia nhập nền tảng IT Blog và đăng bài viết đầu tiên.", points_required: 10 }
-          ],
-          recent_logs: [
-            { id: 1, action: "approved_post", points: 15, description: "Bài viết kỹ thuật được xuất bản thành công", created_at: new Date().toISOString() },
-            { id: 2, action: "initial_welcome", points: 10, description: "Gia nhập cộng đồng lập trình viên", created_at: new Date(Date.now() - 86400000).toISOString() }
-          ]
+          total_points: 0,
+          rank: "-",
+          badges: [],
+          recent_logs: []
         });
       });
 
@@ -246,35 +513,21 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
       .then((data) => setPublicReputation(data))
       .catch(() => {
         setPublicReputation({
-          total_points: 125,
-          rank: 2,
-          badges: [
-            {
-              id: 1,
-              name: "Thực tập sinh tiềm năng",
-              slug: "junior-dev",
-              description: "Gia nhập nền tảng IT Blog và đăng bài viết đầu tiên.",
-              points_required: 10
-            },
-            {
-              id: 2,
-              name: "Tác giả uy tín (Verified Author)",
-              slug: "verified-author",
-              description: "Có bài viết được chuyên gia kiểm chứng chuẩn kỹ thuật.",
-              points_required: 50
-            }
-          ],
-          recent_logs: [
-            {
-              id: 1,
-              action: "approved_post",
-              points: 15,
-              description: "Bài viết kỹ thuật được xuất bản thành công",
-              created_at: new Date().toISOString()
-            }
-          ]
+          total_points: 0,
+          rank: "-",
+          badges: [],
+          recent_logs: []
         });
       });
+
+    api.users
+      .getActivity(authorId)
+      .then((data) => {
+        if (data && typeof data.total_contributions === "number") {
+          setPublicActivity(data);
+        }
+      })
+      .catch(() => {});
   }, [authorId, isOwnProfile, users, posts]);
 
   if (!isOwnProfile) {
@@ -292,12 +545,14 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
 
     const targetPosts = posts.filter(
       (p) =>
-        String(p.authorId) === String(authorId) ||
-        String(p.author?.id) === String(authorId) ||
-        String(p.author_id) === String(authorId)
+        String(p.authorId || p.author_id || p.author?.id) === String(targetUser.id) ||
+        String(p.authorId || p.author_id || p.author?.id) === String(authorId) ||
+        (targetUser.username && (targetUser.username === p.author?.username || targetUser.username === p.authorUsername))
     );
 
-    const isFollowing = currentUser?.following && Array.isArray(currentUser.following) && currentUser.following.includes(targetUser.id);
+    const isFollowing = Boolean(
+      currentUser?.following && Array.isArray(currentUser.following) && currentUser.following.some((id) => String(id) === String(targetUser.id))
+    );
 
     const handleFollowPublicAuthor = () => {
       if (requireAuth) {
@@ -336,8 +591,8 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
           <div className="relative pt-6 flex flex-col sm:flex-row items-center sm:items-start justify-between gap-6">
             <div className="flex flex-col sm:flex-row items-center gap-5 text-center sm:text-left">
               <img
-                src={targetUser.avatar}
-                alt={targetUser.name}
+                src={targetUser.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(targetUser.name || "dev")}`}
+                alt={targetUser.name || "dev"}
                 className="w-24 h-24 rounded-full border-4 border-base-100 shadow-md object-cover bg-base-200"
                 onError={(e) => {
                   e.currentTarget.src = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(targetUser.name || "dev")}`;
@@ -374,7 +629,11 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
                   </span>
                   <span>•</span>
                   <span className="badge badge-sm badge-warning text-amber-950 font-bold gap-1 shadow-2xs">
-                    ⭐ {publicReputation?.total_points ?? 125} Điểm Uy tín
+                    ⭐ {publicReputation?.total_points ?? 0} Điểm Uy tín {publicReputation?.rank && publicReputation.rank !== "-" ? ("(Hạng #" + publicReputation.rank + ")") : ""}
+                  </span>
+                  <span>•</span>
+                  <span className="badge badge-sm badge-primary badge-outline font-bold gap-1 shadow-2xs">
+                    🚀 {publicActivity?.total_contributions ?? 0} đóng góp
                   </span>
                 </div>
               </div>
@@ -394,6 +653,77 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
               </button>
             </div>
           </div>
+        </div>
+
+        {/* Biểu Đồ Đóng Góp Kiểu GitHub của Tác giả */}
+        <div className="bg-base-100 rounded-3xl border border-base-300 p-5 sm:p-6 mb-6 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base sm:text-lg font-bold text-base-content flex items-center gap-2">
+                  <span>📊 Lịch Đóng Góp Kỹ Sư</span>
+                </h3>
+                <span className="badge badge-sm badge-success badge-outline font-bold">16 tuần qua</span>
+              </div>
+              <p className="text-xs text-base-content/60 mt-0.5">
+                Hoạt động đóng góp kiến thức và xuất bản bài viết công nghệ thực tế trên IT Blog.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-orange-500/10 text-orange-600 dark:text-orange-400 font-bold border border-orange-500/20">
+                <span>🔥</span>
+                <span>Chuỗi hiện tại: <strong>{publicActivity?.current_streak ?? 0} ngày</strong></span>
+              </div>
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 font-bold border border-amber-500/20">
+                <span>⭐</span>
+                <span>Kỷ lục: <strong>{publicActivity?.max_streak ?? 0} ngày</strong></span>
+              </div>
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-primary/10 text-primary font-bold border border-primary/20">
+                <span>🚀</span>
+                <span>Tổng: <strong>{publicActivity?.total_contributions ?? 0} đóng góp</strong></span>
+              </div>
+            </div>
+          </div>
+
+          {/* Grid 16 tuần của tác giả */}
+          {publicActivity?.heatmap_weeks && Array.isArray(publicActivity.heatmap_weeks) && (
+            <div className="overflow-x-auto pb-2 scrollbar-thin">
+              <div className="inline-block min-w-full">
+                <div className="flex gap-1.5 items-start">
+                  <div className="flex flex-col justify-between text-[10px] text-base-content/40 font-mono pr-1 select-none h-[116px] sm:h-[132px] py-0.5">
+                    <span>CN</span>
+                    <span>T3</span>
+                    <span>T5</span>
+                    <span>T7</span>
+                  </div>
+                  <div className="flex gap-1 sm:gap-1.5">
+                    {publicActivity.heatmap_weeks.map((week, wIdx) => (
+                      <div key={wIdx} className="flex flex-col gap-1 sm:gap-1.5">
+                        {Array.isArray(week) && week.map((day, dIdx) => (
+                          <div
+                            key={dIdx}
+                            title={day.count + " đóng góp vào " + (day.display_date || day.displayDate)}
+                            className={"w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-[4px] transition-all hover:scale-110 " + (
+                              day.level === 4
+                                ? "bg-emerald-600 dark:bg-emerald-400"
+                                : day.level === 3
+                                ? "bg-emerald-500 dark:bg-emerald-500"
+                                : day.level === 2
+                                ? "bg-emerald-400 dark:bg-emerald-700"
+                                : day.level === 1
+                                ? "bg-emerald-200 dark:bg-emerald-800/80 dark:border dark:border-emerald-700/50"
+                                : "bg-base-200 dark:bg-base-300/60"
+                            )}
+                          />
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Tabs điều hướng công khai */}
@@ -482,13 +812,25 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
                 <div className="flex justify-between items-center p-3 rounded-xl bg-base-200/60">
                   <span className="text-xs text-base-content/70">Tổng điểm uy tín</span>
                   <span className="text-sm font-bold text-primary">
-                    {publicReputation?.total_points ?? 125} pts
+                    {publicReputation?.total_points ?? 0} pts
                   </span>
                 </div>
                 <div className="flex justify-between items-center p-3 rounded-xl bg-base-200/60">
                   <span className="text-xs text-base-content/70">Xếp hạng cộng đồng</span>
                   <span className="text-sm font-bold text-amber-500">
-                    #{publicReputation?.rank ?? 2}
+                    {publicReputation?.rank && publicReputation.rank !== "-" ? ("#" + publicReputation.rank) : "Chưa xếp hạng"}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center p-3 rounded-xl bg-base-200/60">
+                  <span className="text-xs text-base-content/70">Tổng đóng góp (16 tuần)</span>
+                  <span className="text-sm font-bold text-success">
+                    {publicActivity?.total_contributions ?? 0} lượt
+                  </span>
+                </div>
+                <div className="flex justify-between items-center p-3 rounded-xl bg-base-200/60">
+                  <span className="text-xs text-base-content/70">Chuỗi hoạt động</span>
+                  <span className="text-sm font-bold text-orange-500">
+                    {publicActivity?.current_streak ?? 0} ngày
                   </span>
                 </div>
                 <div className="flex justify-between items-center p-3 rounded-xl bg-base-200/60">
@@ -507,34 +849,76 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
 
   if (!currentUser) {
     return (
-      <div className="max-w-md mx-auto my-16 p-8 bg-base-100 rounded-3xl border border-base-300 shadow-lg text-center space-y-4">
-        <div className="w-16 h-16 mx-auto rounded-full bg-primary/10 text-primary flex items-center justify-center text-3xl">
-          👤
-        </div>
-        <h2 className="text-2xl font-black text-base-content">Trang cá nhân</h2>
-        <p className="text-sm text-base-content/70">
-          Vui lòng đăng nhập để xem thông tin hồ sơ, bài viết đã lưu và danh sách theo dõi của bạn.
-        </p>
-        <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
-          <button
-            onClick={() => onNavigate("login")}
-            className="btn btn-primary btn-sm rounded-full text-white font-bold"
-          >
-            Đăng nhập ngay
-          </button>
-          <button
-            onClick={() => onNavigate("home")}
-            className="btn btn-ghost btn-sm rounded-full"
-          >
-            Quay lại trang chủ
-          </button>
+      <div className="w-full min-h-[calc(100vh-140px)] flex items-center justify-center py-10 px-4 sm:px-6 lg:px-8 animate-fade-in">
+        <div className="w-full max-w-3xl bg-base-100 rounded-3xl border border-base-300 shadow-2xl p-6 sm:p-10 space-y-6 text-center">
+          <div className="w-18 h-18 mx-auto rounded-3xl bg-primary/10 text-primary flex items-center justify-center text-4xl shadow-inner ring-8 ring-primary/5">
+            👤
+          </div>
+          <div className="space-y-2 max-w-lg mx-auto">
+            <h2 className="text-2xl sm:text-3xl font-black text-base-content tracking-tight">
+              Yêu cầu đăng nhập tài khoản
+            </h2>
+            <p className="text-sm text-base-content/70 leading-relaxed">
+              Bạn cần đăng nhập để quản lý trang cá nhân, xem các bài viết đã lưu, hồ sơ ứng tuyển việc làm và theo dõi biểu đồ đóng góp của mình.
+            </p>
+          </div>
+
+          {/* Quick Demo Logins */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-base-200/50 border border-base-300/80 space-y-3">
+            <span className="text-xs font-bold text-base-content uppercase tracking-wider block">
+              ⚡ Trải nghiệm nhanh với tài khoản Demo (1 chạm):
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <button
+                type="button"
+                onClick={() => loginDemo("user")}
+                className="btn btn-outline border-base-300 hover:border-primary text-xs font-bold rounded-xl py-2 h-auto flex flex-col items-center gap-0.5"
+              >
+                <span>👤 Thành viên Kỹ sư</span>
+                <span className="text-[10px] text-base-content/50 font-normal">Quản lý bài viết cá nhân</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => loginDemo("moderator")}
+                className="btn btn-outline border-base-300 hover:border-secondary text-xs font-bold rounded-xl py-2 h-auto flex flex-col items-center gap-0.5"
+              >
+                <span>🛡️ Kiểm duyệt viên</span>
+                <span className="text-[10px] text-base-content/50 font-normal">Hồ sơ kiểm duyệt</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => loginDemo("admin")}
+                className="btn btn-outline border-base-300 hover:border-amber-500 text-xs font-bold rounded-xl py-2 h-auto flex flex-col items-center gap-0.5"
+              >
+                <span>👑 Quản trị viên (Admin)</span>
+                <span className="text-[10px] text-base-content/50 font-normal">Toàn quyền hệ thống</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => onNavigate && onNavigate("home")}
+              className="btn btn-sm btn-ghost text-base-content/70 text-xs order-2 sm:order-1"
+            >
+              ← Quay về Trang chủ
+            </button>
+            <button
+              type="button"
+              onClick={() => requireAuth(() => {}, "Vui lòng đăng nhập để mở trang cá nhân!")}
+              className="btn btn-primary btn-sm rounded-xl text-white font-bold gap-2 px-6 shadow-md hover:shadow-lg order-1 sm:order-2 w-full sm:w-auto"
+            >
+              <span>🔑</span>
+              <span>Đăng nhập / Đăng ký Tài khoản</span>
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
-  // Lọc bài viết của user
-  const myPosts = posts.filter((p) => p.authorId === currentUser.id);
+
 
   // Xuất danh sách bài viết của tôi dưới dạng Markdown (.md)
   const handleExportMyPostsMd = () => {
@@ -614,8 +998,7 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
     }
   };
 
-  // Lọc bài viết user đã lưu (bookmark)
-  const bookmarkedPosts = posts.filter((p) => Array.isArray(p.bookmarks) && currentUser && p.bookmarks.includes(currentUser.id));
+
 
   // Xuất danh sách bài viết đã lưu dưới dạng Markdown (.md)
   const handleExportBookmarksMd = () => {
@@ -693,11 +1076,11 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
       const devEmail = currentUser?.email || "developer@itblog.vn";
       const devBio = currentUser?.bio || "Chuyên gia phát triển phần mềm, đóng góp tri thức và chia sẻ kinh nghiệm kỹ thuật trên IT Blog.";
       const devRole = currentUser?.role === "admin" ? "System Administrator / Tech Lead" : currentUser?.role === "moderator" ? "Technical Moderator / Senior Developer" : "Software Engineer";
-      const totalPoints = reputationData?.total_points ?? 65;
-      const rank = reputationData?.rank ?? 1;
-      const streak = heatmapMetrics.currentStreak || 5;
-      const longestStreak = heatmapMetrics.maxStreak || 16;
-      const contributions = heatmapMetrics.totalContributions || 42;
+      const totalPoints = reputationData?.total_points ?? 0;
+      const rank = reputationData?.rank && reputationData.rank !== "-" ? ("#" + reputationData.rank) : "Chưa xếp hạng";
+      const streak = heatmapMetrics.currentStreak || 0;
+      const longestStreak = heatmapMetrics.maxStreak || 0;
+      const contributions = heatmapMetrics.totalContributions || 0;
       const badges = reputationData?.badges && reputationData.badges.length > 0 ? reputationData.badges : (allBadges.slice(0, 2));
 
       let md = `# 👨‍💻 HỒ SƠ NĂNG LỰC KỸ SƯ / DEVELOPER CV\n\n`;
@@ -714,7 +1097,7 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
       md += `| Chỉ số | Giá trị đạt được | Ghi chú |\n`;
       md += `|---|---|---|\n`;
       md += `| **Điểm uy tín (Reputation)** | **${totalPoints} pts** | Điểm tích lũy từ bài viết kỹ thuật & giải đáp chuyên môn |\n`;
-      md += `| **Thứ hạng cộng đồng** | **#${rank}** | Xếp hạng trong mạng lưới kỹ sư IT Blog |\n`;
+      md += `| **Thứ hạng cộng đồng** | **${rank}** | Xếp hạng trong mạng lưới kỹ sư IT Blog |\n`;
       md += `| **Chuỗi ngày hoạt động liên tục** | **${streak} ngày** | Chuỗi kỷ lục cá nhân: **${longestStreak} ngày** |\n`;
       md += `| **Tổng đóng góp kỹ thuật (16 tuần)** | **${contributions} đóng góp** | Xuất bản bài viết, phản hồi thảo luận và giải đố |\n`;
       md += `| **Bài viết đã công bố** | **${myPosts.length} bài** | Đóng góp tri thức kỹ thuật cho cộng đồng |\n`;
@@ -772,7 +1155,9 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
   };
 
   // Danh sách tác giả đang theo dõi
-  const followingAuthors = users.filter((u) => Array.isArray(currentUser?.following) && currentUser.following.includes(u.id));
+  const followingAuthors = users.filter((u) =>
+    Array.isArray(currentUser?.following) && currentUser.following.some((id) => String(id) === String(u.id))
+  );
 
   const handleToggleEdit = () => {
     if (!isEditingProfile) {
@@ -856,9 +1241,34 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
                   {currentUser.name}
                 </h1>
               </div>
-              <p className="text-xs text-base-content/60 font-mono">
-                {currentUser.email}
-              </p>
+              <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-base-200/80 border border-base-300 font-mono text-base-content/80 shadow-2xs">
+                  <span title="Riêng tư">🔒</span>
+                  <span className="font-semibold">{showEmail ? currentUser.email : maskEmail(currentUser.email)}</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowEmail(!showEmail)}
+                    className="btn btn-ghost btn-2xs text-base-content/60 hover:text-base-content p-0.5 ml-0.5"
+                    title={showEmail ? "Ẩn bớt email" : "Hiện đầy đủ email"}
+                    aria-label="Toggle email visibility"
+                  >
+                    {showEmail ? (
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18" />
+                      </svg>
+                    ) : (
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                <span className="badge badge-sm badge-ghost text-base-content/60 gap-1 border-dashed" title="Email của bạn được bảo mật tuyệt đối, chỉ hiển thị với chính bạn. Khách và người dùng khác chỉ xem được tên hiển thị và @username.">
+                  <span>🛡️</span>
+                  <span>Riêng tư • Chỉ mình bạn nhìn thấy</span>
+                </span>
+              </div>
               <p className="text-sm text-base-content/80 max-w-lg mt-1">
                 {currentUser.bio || "Chưa có lời giới thiệu."}
               </p>
@@ -876,11 +1286,17 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
                 </span>
                 <span>•</span>
                 <span className="badge badge-sm badge-warning text-amber-950 font-bold gap-1 shadow-2xs">
-                  ⭐ {reputationData?.total_points ?? 65} Điểm Uy tín (Hạng #{reputationData?.rank ?? 1})
+                  ⭐ {reputationData?.total_points ?? 0} Điểm Uy tín {reputationData?.rank && reputationData.rank !== "-" ? ("(Hạng #" + reputationData.rank + ")") : ""}
                 </span>
-                <span className="badge badge-sm badge-error text-white font-bold gap-1 shadow-2xs">
-                  🔥 Chuỗi đọc: 5 ngày
-                </span>
+                {readingStreak > 0 ? (
+                  <span className="badge badge-sm badge-error text-white font-bold gap-1 shadow-2xs">
+                    🔥 Chuỗi đọc: {readingStreak} ngày
+                  </span>
+                ) : (
+                  <span className="badge badge-sm badge-ghost text-base-content/60 font-semibold gap-1 shadow-2xs" title="Đọc bài viết đều đặn mỗi ngày để bắt đầu chuỗi đọc kiến thức">
+                    🌱 Chuỗi đọc: 0 ngày
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -927,9 +1343,10 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
               <div>
                 <label className="label text-xs font-semibold">Avatar URL</label>
                 <input
-                  type="url"
+                  type="text"
                   value={avatar}
                   onChange={(e) => setAvatar(e.target.value)}
+                  placeholder="https://... hoặc data:image/..."
                   className="input input-bordered w-full text-sm"
                   required
                 />
@@ -992,6 +1409,15 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
           </div>
         </div>
 
+        {heatmapMetrics.totalContributions === 0 && (
+          <div className="p-3.5 rounded-2xl bg-base-200/50 border border-base-300 text-xs text-base-content/75 flex items-center gap-2.5">
+            <span className="text-xl">🌱</span>
+            <div>
+              <strong>Tài khoản mới:</strong> Bạn chưa có hoạt động đóng góp nào trong 16 tuần qua. Hãy bắt đầu bằng việc đọc bài viết, chia sẻ công nghệ hoặc làm bài trắc nghiệm để tích lũy chuỗi hoạt động!
+            </div>
+          </div>
+        )}
+
         {/* Heatmap Grid & Month labels */}
         <div className="overflow-x-auto pb-2 scrollbar-thin">
           <div className="inline-block min-w-full">
@@ -1008,13 +1434,14 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
               <div className="flex gap-1 sm:gap-1.5">
                 {heatmapWeeks.map((week, wIdx) => (
                   <div key={wIdx} className="flex flex-col gap-1 sm:gap-1.5">
-                    {week.map((day, dIdx) => {
+                    {Array.isArray(week) && week.map((day, dIdx) => {
+                      if (!day) return null;
                       const isSelected = selectedDay?.date === day.date;
                       return (
                         <div
                           key={dIdx}
                           onClick={() => setSelectedDay(day)}
-                          title={`${day.count} đóng góp vào ${day.displayDate}`}
+                          title={`${day.count} đóng góp vào ${day.display_date || day.displayDate}`}
                           className={`w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-[4px] cursor-pointer transition-all ${
                             isSelected ? "ring-2 ring-primary ring-offset-1 scale-110 z-10" : "hover:scale-110"
                           } ${
@@ -1043,7 +1470,7 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
           <div className="text-base-content/70">
             {selectedDay ? (
               <span className="animate-fade-in inline-flex items-center gap-1.5">
-                <span className="font-bold text-primary">📅 {selectedDay.displayDate}:</span>
+                <span className="font-bold text-primary">📅 {selectedDay.display_date || selectedDay.displayDate}:</span>
                 <span>
                   {selectedDay.count > 0
                     ? `${selectedDay.count} lượt đóng góp (Bài viết, bình luận, trắc nghiệm)`
@@ -1124,7 +1551,7 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
             activeTab === "history" ? "tab-active bg-primary text-white font-bold" : ""
           }`}
         >
-          Lịch sử đọc
+          Lịch sử đọc ({readingHistory.length})
         </button>
         <button
           onClick={() => setActiveTab("security")}
@@ -1360,50 +1787,87 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
             <span className="text-base-content/70">
               Lịch sử ghi nhận các bài viết bạn đã đọc gần đây để bạn có thể tiếp tục xem nội dung dở dang.
             </span>
-            <span className="badge badge-sm badge-outline font-bold">Tự động đồng bộ</span>
+            <div className="flex items-center gap-2">
+              <span className="badge badge-sm badge-outline font-bold">Tự động đồng bộ</span>
+              {readingHistory.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearReadingHistory}
+                  className="btn btn-ghost btn-xs text-error hover:bg-error/10 font-bold"
+                  title="Xóa toàn bộ lịch sử đọc"
+                >
+                  🗑️ Xóa lịch sử
+                </button>
+              )}
+            </div>
           </div>
 
-          <div className="space-y-3">
-            {posts.slice(0, 4).map((post, idx) => (
-              <div
-                key={post.id}
-                onClick={() => {
-                  if (onSelectPost) onSelectPost(post.id);
-                  onNavigate("post_detail");
-                }}
-                className="p-4 rounded-2xl bg-base-100 border border-base-300 hover:border-primary/40 hover:shadow-md transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-4 group"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-xl bg-base-200 overflow-hidden shrink-0">
-                    <img
-                      src={post.coverImage}
-                      alt={post.title}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                      onError={(e) => {
-                        e.currentTarget.src = "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=600&auto=format&fit=crop&q=80";
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="badge badge-xs badge-primary font-bold">{post.category}</span>
-                      <span className="text-[11px] text-base-content/50">Đã đọc {idx === 0 ? "hôm nay" : `${idx + 1} ngày trước`}</span>
+          {readingHistory.length > 0 ? (
+            <div className="space-y-3">
+              {readingHistory.map((item) => (
+                <div
+                  key={item.id}
+                  onClick={() => {
+                    if (onSelectPost) onSelectPost(item.id);
+                    onNavigate("post_detail");
+                  }}
+                  className="p-4 rounded-2xl bg-base-100 border border-base-300 hover:border-primary/40 hover:shadow-md transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-4 group"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-16 h-16 rounded-xl bg-base-200 overflow-hidden shrink-0">
+                      <img
+                        src={item.coverImage}
+                        alt={item.title}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                        onError={(e) => {
+                          e.currentTarget.src = "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=600&auto=format&fit=crop&q=80";
+                        }}
+                      />
                     </div>
-                    <h4 className="font-bold text-sm text-base-content group-hover:text-primary transition-colors">
-                      {post.title}
-                    </h4>
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="badge badge-xs badge-primary font-bold">{item.category}</span>
+                        <span className="text-[11px] text-base-content/50">
+                          {item.readAt ? new Date(item.readAt).toLocaleString("vi-VN", {
+                            day: "2-digit",
+                            month: "2-digit",
+                            year: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit"
+                          }) : "Đã đọc gần đây"}
+                        </span>
+                      </div>
+                      <h4 className="font-bold text-sm text-base-content group-hover:text-primary transition-colors">
+                        {item.title}
+                      </h4>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
+                    <span className="text-xs text-base-content/60">{item.readTime}</span>
+                    <button className="btn btn-xs btn-primary text-white font-bold">
+                      Tiếp tục đọc →
+                    </button>
                   </div>
                 </div>
-
-                <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
-                  <span className="text-xs text-base-content/60">{post.readTime}</span>
-                  <button className="btn btn-xs btn-primary text-white font-bold">
-                    Tiếp tục đọc →
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="bg-base-100 rounded-3xl border border-dashed border-base-300 p-12 text-center max-w-lg mx-auto space-y-3">
+              <div className="text-4xl">📖</div>
+              <h3 className="text-lg font-bold text-base-content">Chưa có lịch sử đọc bài</h3>
+              <p className="text-xs text-base-content/60 leading-relaxed">
+                Tài khoản mới chưa đọc bài viết nào. Hãy khám phá các bài viết công nghệ mới nhất trên trang chủ để bắt đầu tích lũy kiến thức!
+              </p>
+              <button
+                type="button"
+                onClick={() => onNavigate && onNavigate("home")}
+                className="btn btn-sm btn-primary text-white rounded-full mt-2 font-bold"
+              >
+                Khám phá bài viết ngay →
+              </button>
+            </div>
+          )}
         </div>
       )}
 

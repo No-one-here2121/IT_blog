@@ -1,12 +1,12 @@
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Union
 from pydantic import BaseModel, ConfigDict
 from app.schemas.user import AuthorSummary
 
 
 class ReportCreate(BaseModel):
     target_type: str
-    target_id: int
+    target_id: Union[int, str]
     reason: str
     details: Optional[str] = None
 

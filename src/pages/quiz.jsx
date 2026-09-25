@@ -1,6 +1,6 @@
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import api from "../services/api";
 import { DEFAULT_QUIZ_TOPICS, DEFAULT_QUIZ_QUESTIONS } from "../data/quizBank";
 
@@ -52,7 +52,14 @@ export default function QuizPage({ params = {}, onNavigate }) {
 
   // AI Quiz Generator States
   // Manual Quiz Creation Modal States
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(isAdmin && params?.action === "create");
+  const [prevQuizAction, setPrevQuizAction] = useState(params?.action);
+  if (params?.action !== prevQuizAction) {
+    setPrevQuizAction(params?.action);
+    if (params?.action === "create" && isAdmin) {
+      setShowCreateModal(true);
+    }
+  }
   const [newQuestionText, setNewQuestionText] = useState("");
   const [newQuestionCode, setNewQuestionCode] = useState("");
   const [newOptions, setNewOptions] = useState(["", "", "", ""]);
@@ -69,11 +76,7 @@ export default function QuizPage({ params = {}, onNavigate }) {
   const [aiCount, setAiCount] = useState(5);
   const [aiAlert, setAiAlert] = useState("");
 
-  useEffect(() => {
-    if (params?.action === "create") {
-      setShowCreateModal(true);
-    }
-  }, [params]);
+
 
   // 1. Tai danh sach chuyen de kem so luong cau hoi tu backend
   useEffect(() => {
@@ -90,50 +93,52 @@ export default function QuizPage({ params = {}, onNavigate }) {
   }, []);
 
   // 2. Tai toan bo cau hoi cua chu de da chon tu backend hoac fallback
-  const fetchQuestionsForTopic = useCallback(async (topicId) => {
-    setLoading(true);
-    setError("");
-    try {
-      const queryParams = {
-        limit: 200,
-        randomize: false,
-      };
-      if (courseId) queryParams.course_id = courseId;
-      if (postId) queryParams.post_id = postId;
-      if (topicId && topicId !== "all") queryParams.language = topicId;
+  useEffect(() => {
+    let ignore = false;
+    const queryParams = {
+      limit: 200,
+      randomize: false,
+    };
+    if (courseId) queryParams.course_id = courseId;
+    if (postId) queryParams.post_id = postId;
+    if (selectedTopic && selectedTopic !== "all") queryParams.language = selectedTopic;
 
-      const res = await api.quiz.getQuestions(queryParams);
-      let list = res?.questions || [];
-
-      if (!list || list.length === 0) {
-        if (topicId === "all") {
-          list = DEFAULT_QUIZ_QUESTIONS;
+    api.quiz.getQuestions(queryParams)
+      .then((res) => {
+        if (ignore) return;
+        let list = Array.isArray(res) ? res : (res?.questions || []);
+        if (!list || list.length === 0) {
+          if (selectedTopic === "all") {
+            list = DEFAULT_QUIZ_QUESTIONS;
+          } else {
+            list = DEFAULT_QUIZ_QUESTIONS.filter(
+              (q) => (q.language || "").toLowerCase().includes(selectedTopic.toLowerCase())
+            );
+          }
+        }
+        setAllPoolQuestions(list);
+      })
+      .catch((err) => {
+        if (ignore) return;
+        console.warn("Quiz questions fetch error, using local fallback data:", err);
+        if (selectedTopic === "all") {
+          setAllPoolQuestions(DEFAULT_QUIZ_QUESTIONS);
         } else {
-          list = DEFAULT_QUIZ_QUESTIONS.filter(
-            (q) => (q.language || "").toLowerCase().includes(topicId.toLowerCase())
+          setAllPoolQuestions(
+            DEFAULT_QUIZ_QUESTIONS.filter(
+              (q) => (q.language || "").toLowerCase().includes(selectedTopic.toLowerCase())
+            )
           );
         }
-      }
-      setAllPoolQuestions(list);
-    } catch (err) {
-      console.warn("Quiz questions fetch error, using local fallback data:", err);
-      if (topicId === "all") {
-        setAllPoolQuestions(DEFAULT_QUIZ_QUESTIONS);
-      } else {
-        setAllPoolQuestions(
-          DEFAULT_QUIZ_QUESTIONS.filter(
-            (q) => (q.language || "").toLowerCase().includes(topicId.toLowerCase())
-          )
-        );
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [courseId, postId]);
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false);
+      });
 
-  useEffect(() => {
-    fetchQuestionsForTopic(selectedTopic);
-  }, [selectedTopic, fetchQuestionsForTopic]);
+    return () => {
+      ignore = true;
+    };
+  }, [courseId, postId, selectedTopic]);
 
   // 3. Chuan bi bo cau hoi
   const prepareExamQuestions = useCallback(() => {
@@ -170,20 +175,24 @@ export default function QuizPage({ params = {}, onNavigate }) {
   }, [allPoolQuestions, selectedCount, selectedDifficulty]);
 
   useEffect(() => {
-    if (isExamStarted) {
-      prepareExamQuestions();
-      setTimerActive(true);
+    if (isExamStarted && allPoolQuestions.length > 0 && questions.length === 0) {
+      queueMicrotask(() => {
+        prepareExamQuestions();
+        setTimerActive(true);
+      });
     }
-  }, [allPoolQuestions, isExamStarted, prepareExamQuestions]);
+  }, [allPoolQuestions.length, isExamStarted, questions.length, prepareExamQuestions]);
 
   const handleStartExam = (topicId) => {
-    if (topicId) {
-      setSelectedTopic(topicId);
-    }
-    setIsExamStarted(true);
-    prepareExamQuestions();
-    setTimerActive(true);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    requireAuth(() => {
+      if (topicId) {
+        setSelectedTopic(topicId);
+      }
+      setIsExamStarted(true);
+      prepareExamQuestions();
+      setTimerActive(true);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }, "Vui lòng đăng nhập để bắt đầu làm bài thi trắc nghiệm và lưu kết quả!");
   };
 
   const handleExitToTopics = () => {
@@ -338,6 +347,10 @@ export default function QuizPage({ params = {}, onNavigate }) {
 
   const handleCreateQuestion = async (e) => {
     e.preventDefault();
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền thêm câu hỏi vào ngân hàng đề chính thức!", "error");
+      return;
+    }
     if (!newQuestionText.trim()) {
       addToast("Vui lòng nhập nội dung câu hỏi!", "warning");
       return;
@@ -397,8 +410,9 @@ export default function QuizPage({ params = {}, onNavigate }) {
         setQuestions(res.created);
       } else {
         const fresh = await api.quiz.getQuestions({ language: aiTopic, limit: Number(aiCount) });
-        if (fresh?.questions?.length > 0) {
-          setQuestions(fresh.questions);
+        const freshList = Array.isArray(fresh) ? fresh : (fresh?.questions || []);
+        if (freshList.length > 0) {
+          setQuestions(freshList);
         }
       }
       setAnswers({});
@@ -417,16 +431,12 @@ export default function QuizPage({ params = {}, onNavigate }) {
     }
   };
 
-  const score = useMemo(() => {
-    return questions.reduce(
-      (acc, q) => acc + (answers[q.id] === q.answer_index ? 1 : 0),
-      0
-    );
-  }, [questions, answers]);
+  const score = questions.reduce(
+    (acc, q) => acc + (answers[q.id] === (q.answer_index ?? q.correct_index) ? 1 : 0),
+    0
+  );
 
-  const wrongQuestions = useMemo(() => {
-    return questions.filter((q) => answers[q.id] !== q.answer_index);
-  }, [questions, answers]);
+  const wrongQuestions = questions.filter((q) => answers[q.id] !== (q.answer_index ?? q.correct_index));
 
   const displayedQuestions = filterWrongOnly && submitted ? wrongQuestions : questions;
   const currentTopicMeta = topics.find((t) => t.id === selectedTopic) || topics[0];
@@ -782,6 +792,31 @@ export default function QuizPage({ params = {}, onNavigate }) {
           )}
 
           {/* Ket qua sau khi nop bai */}
+          {submitted && !currentUser && (
+            <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-r from-primary/10 via-base-200 to-primary/10 border border-primary/30 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs animate-fade-in shadow-xs">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-primary/20 text-primary flex items-center justify-center text-xl shrink-0">
+                  💡
+                </div>
+                <div>
+                  <p className="font-bold text-sm text-base-content">
+                    Bạn vừa hoàn thành bài thi thử! ({score}/{questions.length} câu đúng)
+                  </p>
+                  <p className="text-base-content/70 mt-0.5">
+                    Đăng nhập tài khoản để tự động lưu điểm số vào lịch sử, tích lũy điểm uy tín và ghi danh trên Bảng xếp hạng lập trình viên!
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => requireAuth(() => {}, "Vui lòng đăng nhập để lưu điểm số và xếp hạng!")}
+                className="btn btn-sm btn-primary text-white font-bold rounded-xl px-5 shrink-0 shadow-md hover:scale-105 transition-all"
+              >
+                Đăng nhập để lưu điểm
+              </button>
+            </div>
+          )}
+
           {submitted && (
             <div className="p-5 sm:p-6 rounded-3xl bg-base-100 border border-base-300 shadow-sm flex flex-col md:flex-row items-center justify-between gap-5 animate-fade-in">
               <div>
@@ -1264,6 +1299,173 @@ export default function QuizPage({ params = {}, onNavigate }) {
                     <>
                       <span>✨</span>
                       <span>Bắt đầu tạo đề thi</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Them cau hoi trac nghiem thu cong */}
+      {isAdmin && showCreateModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in"
+          onClick={(e) => {
+            if (!isSubmittingQuestion && e.target === e.currentTarget) setShowCreateModal(false);
+          }}
+        >
+          <div className="bg-base-100 rounded-3xl border border-base-300 shadow-2xl w-full max-w-xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-5 border-b border-base-200 flex items-center justify-between bg-gradient-to-r from-primary/10 to-transparent">
+              <div className="flex items-center gap-2.5">
+                <span className="w-9 h-9 rounded-xl bg-primary text-white flex items-center justify-center text-lg font-bold shadow-xs">
+                  🧠
+                </span>
+                <div>
+                  <h3 className="font-extrabold text-base text-base-content">Thêm câu hỏi trắc nghiệm mới</h3>
+                  <p className="text-[11px] text-base-content/60">Đóng góp câu hỏi kiểm tra kiến thức vào ngân hàng đề</p>
+                </div>
+              </div>
+              <button
+                onClick={() => !isSubmittingQuestion && setShowCreateModal(false)}
+                disabled={isSubmittingQuestion}
+                className="btn btn-sm btn-ghost btn-circle"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateQuestion} className="p-5 space-y-4 overflow-y-auto">
+              <div>
+                <label className="block text-xs font-bold text-base-content/80 mb-1">
+                  Nội dung câu hỏi <span className="text-error">*</span>
+                </label>
+                <textarea
+                  value={newQuestionText}
+                  onChange={(e) => setNewQuestionText(e.target.value)}
+                  placeholder="Ví dụ: Trong React 19, hook use() có thể nhận đối tượng nào làm đối số?"
+                  className="textarea textarea-bordered w-full text-xs focus:textarea-primary rounded-xl"
+                  rows={2}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-base-content/80 mb-1">
+                  Đoạn code minh họa (Tùy chọn)
+                </label>
+                <textarea
+                  value={newQuestionCode}
+                  onChange={(e) => setNewQuestionCode(e.target.value)}
+                  placeholder="const data = use(fetchPromise);"
+                  className="textarea textarea-bordered w-full font-mono text-xs focus:textarea-primary rounded-xl"
+                  rows={2}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-base-content/80 mb-1">
+                    Chủ đề / Ngôn ngữ
+                  </label>
+                  <select
+                    value={newLanguage}
+                    onChange={(e) => setNewLanguage(e.target.value)}
+                    className="select select-bordered select-sm w-full text-xs rounded-xl"
+                  >
+                    <option value="React">React 19</option>
+                    <option value="FastAPI">FastAPI / Python</option>
+                    <option value="Docker">Docker / DevOps</option>
+                    <option value="PostgreSQL">PostgreSQL</option>
+                    <option value="Security">Bảo mật Web</option>
+                    <option value="System Design">System Design</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-base-content/80 mb-1">
+                    Độ khó
+                  </label>
+                  <select
+                    value={newDifficulty}
+                    onChange={(e) => setNewDifficulty(e.target.value)}
+                    className="select select-bordered select-sm w-full text-xs rounded-xl"
+                  >
+                    <option value="easy">Cơ bản (Easy)</option>
+                    <option value="intermediate">Trung bình (Medium)</option>
+                    <option value="hard">Nâng cao (Hard)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-base-content/80">
+                  4 Phương án trả lời (Chọn radio để đánh dấu đáp án đúng) <span className="text-error">*</span>
+                </label>
+                {newOptions.map((opt, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="correctOption"
+                      checked={newCorrectIndex === idx}
+                      onChange={() => setNewCorrectIndex(idx)}
+                      className="radio radio-primary radio-sm"
+                      title="Chọn phương án này làm đáp án đúng"
+                    />
+                    <span className="font-bold text-xs w-5 text-center text-base-content/70">
+                      {String.fromCharCode(65 + idx)}
+                    </span>
+                    <input
+                      type="text"
+                      value={opt}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setNewOptions((prev) => prev.map((o, i) => (i === idx ? val : o)));
+                      }}
+                      placeholder={`Phương án ${String.fromCharCode(65 + idx)}`}
+                      className="input input-bordered input-sm flex-1 text-xs focus:input-primary rounded-xl"
+                      required
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-base-content/80 mb-1">
+                  Giải thích đáp án kỹ thuật
+                </label>
+                <textarea
+                  value={newExplanation}
+                  onChange={(e) => setNewExplanation(e.target.value)}
+                  placeholder="Giải thích ngắn gọn lý do tại sao phương án này chính xác..."
+                  className="textarea textarea-bordered w-full text-xs focus:textarea-primary rounded-xl"
+                  rows={2}
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-base-200">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  disabled={isSubmittingQuestion}
+                  className="btn btn-sm btn-ghost rounded-xl"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingQuestion}
+                  className="btn btn-sm btn-primary text-white font-bold gap-1.5 shadow-md rounded-xl"
+                >
+                  {isSubmittingQuestion ? (
+                    <>
+                      <span className="loading loading-spinner loading-xs"></span>
+                      <span>Đang lưu...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>+</span>
+                      <span>Thêm câu hỏi</span>
                     </>
                   )}
                 </button>
