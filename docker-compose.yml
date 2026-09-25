@@ -45,7 +45,7 @@ services:
       - DATABASE_URL=postgresql://postgres:postgres123@postgres:5432/it_blog_db
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=supersecretjwtkey_itblog_2026_production_change_me
-      - CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+      - CORS_ORIGINS=http://localhost:5173,http://localhost:3000,http://localhost,http://localhost:80
     volumes:
       - ./backend:/app
     depends_on:
@@ -54,6 +54,18 @@ services:
       redis:
         condition: service_healthy
 
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: it_blog_frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
 volumes:
   pgdata:
   redisdata:
+
