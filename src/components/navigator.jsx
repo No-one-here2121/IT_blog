@@ -6,7 +6,10 @@ import ThemeToggle from "./ThemeToggle";
 import { api } from "../services/api";
 import {
   Bell, Heart, MessageSquare, BadgeCheck,
-  Clock, Keyboard, Home, UserCheck
+  Clock, Keyboard, Home, UserCheck, Milestone,
+  GraduationCap, HelpCircle, Briefcase, Calendar,
+  Award, ShieldCheck, PenTool, User, LogOut,
+  LogIn, Sparkles, X, Flame, Share2, Trash2
 } from "./icons";
 import { EmptyNotificationsIllustration } from "./illustrations";
 
@@ -576,7 +579,7 @@ ${rows}
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                   </svg>
                   {searchQuery && (
-                    <button onClick={() => setSearchQuery("")} className="absolute right-2 top-1.5 text-xs text-base-content/40 hover:text-base-content">✕</button>
+                    <button onClick={() => setSearchQuery("")} className="absolute right-2 top-1.5 text-xs text-base-content/40 hover:text-base-content" aria-label="Xóa tìm kiếm"><X size={14} /></button>
                   )}
                 </div>
               </li>
@@ -586,7 +589,7 @@ ${rows}
                   onClick={() => handleNavAndCloseMobile("home")}
                   className={`flex items-center gap-2 py-2 font-semibold ${currentPage === "home" ? "active text-white bg-primary font-bold" : ""}`}
                 >
-                  <span>🏠</span>
+                  <Home size={18} className="text-primary shrink-0" />
                   <span>Trang chủ</span>
                 </button>
               </li>
@@ -595,7 +598,7 @@ ${rows}
                   onClick={() => handleNavAndCloseMobile("roadmaps")}
                   className={`flex items-center gap-2 py-2 font-semibold ${currentPage === "roadmaps" ? "active text-white bg-primary font-bold" : ""}`}
                 >
-                  <span>🗺️</span>
+                  <Milestone size={18} className="text-indigo-500 shrink-0" />
                   <span>Lộ trình IT</span>
                 </button>
               </li>
@@ -604,7 +607,7 @@ ${rows}
                   onClick={() => handleNavAndCloseMobile("courses")}
                   className={`flex items-center gap-2 py-2 font-semibold ${currentPage === "courses" ? "active text-white bg-primary font-bold" : ""}`}
                 >
-                  <span>🎓</span>
+                  <GraduationCap size={18} className="text-emerald-500 shrink-0" />
                   <span>Khóa học</span>
                 </button>
               </li>
@@ -613,7 +616,7 @@ ${rows}
                   onClick={() => handleNavAndCloseMobile("quiz")}
                   className={`flex items-center gap-2 py-2 font-semibold ${currentPage === "quiz" ? "active text-white bg-primary font-bold" : ""}`}
                 >
-                  <span>🧠</span>
+                  <HelpCircle size={18} className="text-amber-500 shrink-0" />
                   <span>Trắc nghiệm IT</span>
                 </button>
               </li>
@@ -622,7 +625,7 @@ ${rows}
                   onClick={() => handleNavAndCloseMobile("jobs")}
                   className={`flex items-center gap-2 py-2 font-semibold ${currentPage === "jobs" ? "active text-white bg-primary font-bold" : ""}`}
                 >
-                  <span>💼</span>
+                  <Briefcase size={18} className="text-sky-500 shrink-0" />
                   <span>Việc làm IT</span>
                 </button>
               </li>
@@ -631,7 +634,7 @@ ${rows}
                   onClick={() => handleNavAndCloseMobile("events")}
                   className={`flex items-center gap-2 py-2 font-semibold ${currentPage === "events" ? "active text-white bg-primary font-bold" : ""}`}
                 >
-                  <span>📅</span>
+                  <Calendar size={18} className="text-purple-500 shrink-0" />
                   <span>Sự kiện & Workshop</span>
                 </button>
               </li>
@@ -640,7 +643,7 @@ ${rows}
                   onClick={() => handleNavAndCloseMobile("leaderboard")}
                   className={`flex items-center gap-2 py-2 font-semibold ${currentPage === "leaderboard" ? "active text-white bg-primary font-bold" : ""}`}
                 >
-                  <span>🏆</span>
+                  <Award size={18} className="text-amber-500 shrink-0" />
                   <span>Bảng xếp hạng</span>
                 </button>
               </li>
@@ -651,7 +654,7 @@ ${rows}
                     className={`flex items-center justify-between py-2 font-semibold ${currentPage === "moderation" ? "active text-white bg-primary font-bold" : ""}`}
                   >
                     <div className="flex items-center gap-2">
-                      <span>⚙️</span>
+                      <ShieldCheck size={18} className="text-rose-500 shrink-0" />
                       <span>Cài đặt hệ thống</span>
                     </div>
                     {pendingPosts?.length > 0 && (
@@ -668,7 +671,7 @@ ${rows}
                   }}
                   className={`flex items-center gap-2 py-2 font-semibold ${currentPage === "create_post" ? "active text-white bg-primary font-bold" : ""}`}
                 >
-                  <span>✍️</span>
+                  <PenTool size={18} className="text-primary shrink-0" />
                   <span>Viết bài mới</span>
                 </button>
               </li>
@@ -680,7 +683,7 @@ ${rows}
                       onClick={() => handleNavAndCloseMobile("profile")}
                       className={`flex items-center gap-2 py-2 font-semibold ${currentPage === "profile" ? "active text-white bg-primary font-bold" : "text-base-content/80"}`}
                     >
-                      <span>👤</span>
+                      <User size={18} className="text-cyan-500 shrink-0" />
                       <span className="truncate">Trang cá nhân ({currentUser.name || currentUser.username})</span>
                     </button>
                   </li>
@@ -692,7 +695,7 @@ ${rows}
                       }}
                       className="flex items-center gap-2 py-2 font-semibold text-error hover:bg-error/10"
                     >
-                      <span>🚪</span>
+                      <LogOut size={18} className="text-error shrink-0" />
                       <span>Đăng xuất</span>
                     </button>
                   </li>
@@ -705,7 +708,7 @@ ${rows}
                       onClick={() => handleNavAndCloseMobile("login")}
                       className="flex items-center gap-2 py-2 font-semibold text-primary"
                     >
-                      <span>🔑</span>
+                      <LogIn size={18} className="text-primary shrink-0" />
                       <span>Đăng nhập</span>
                     </button>
                   </li>
@@ -714,7 +717,7 @@ ${rows}
                       onClick={() => handleNavAndCloseMobile("logup")}
                       className="flex items-center gap-2 py-2 font-semibold text-base-content/80 hover:text-primary"
                     >
-                      <span>✨</span>
+                      <Sparkles size={18} className="text-amber-500 shrink-0" />
                       <span>Đăng ký tài khoản</span>
                     </button>
                   </li>
@@ -856,7 +859,7 @@ ${rows}
                     onClick={() => onNavigate && onNavigate("jobs")}
                     className={currentPage === "jobs" ? "active text-white bg-primary font-bold" : ""}
                   >
-                    <span>💼</span> Việc làm IT
+                    <span className="flex items-center gap-2"><Briefcase size={16} className="text-sky-500 shrink-0" /> Việc làm IT</span>
                   </button>
                 </li>
                 <li>
@@ -864,7 +867,7 @@ ${rows}
                     onClick={() => onNavigate && onNavigate("events")}
                     className={currentPage === "events" ? "active text-white bg-primary font-bold" : ""}
                   >
-                    <span>📅</span> Sự kiện & Workshop
+                    <span className="flex items-center gap-2"><Calendar size={16} className="text-purple-500 shrink-0" /> Sự kiện & Workshop</span>
                   </button>
                 </li>
                 <li>
@@ -872,7 +875,7 @@ ${rows}
                     onClick={() => onNavigate && onNavigate("leaderboard")}
                     className={currentPage === "leaderboard" ? "active text-white bg-primary font-bold" : ""}
                   >
-                    <span>🏆</span> Bảng xếp hạng
+                    <span className="flex items-center gap-2"><Award size={16} className="text-amber-500 shrink-0" /> Bảng xếp hạng</span>
                   </button>
                 </li>
                 {canAccessModeration && (
@@ -881,7 +884,7 @@ ${rows}
                       onClick={() => onNavigate && onNavigate("moderation")}
                       className={currentPage === "moderation" ? "active text-white bg-primary font-bold" : ""}
                     >
-                      <span>⚙️</span> Cài đặt hệ thống
+                      <span className="flex items-center gap-2"><ShieldCheck size={16} className="text-rose-500 shrink-0" /> Cài đặt hệ thống</span>
                       {pendingPosts?.length > 0 && (
                         <span className="badge badge-xs bg-amber-400 text-amber-950 font-bold ml-auto">
                           {pendingPosts.length}
@@ -976,7 +979,7 @@ ${rows}
               {/* Gợi ý chủ đề Hot */}
               <div>
                 <div className="text-[11px] font-bold text-base-content/60 mb-2 px-1">
-                  🔥 Chủ đề & Công nghệ thịnh hành
+                  <span className="flex items-center gap-1.5"><Flame size={14} className="text-rose-500 shrink-0" /> Chủ đề & Công nghệ thịnh hành</span>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {POPULAR_SEARCH_TAGS.map((tag, idx) => (
@@ -1045,7 +1048,7 @@ ${rows}
                     }}
                     className="flex items-center gap-2.5 py-2 font-semibold text-primary hover:bg-primary/10 rounded-xl cursor-pointer"
                   >
-                    <span className="text-base">✍️</span>
+                    <PenTool size={18} className="text-primary shrink-0" />
                     <div>
                       <p className="font-bold">Viết bài mới</p>
                       <p className="text-[10px] text-base-content/60 font-normal">Soạn thảo bài viết & chia sẻ kiến thức IT</p>
@@ -1063,7 +1066,7 @@ ${rows}
                     onClick={() => onNavigate && onNavigate("courses", { action: "create" })}
                     className="flex items-center gap-2.5 py-2 hover:bg-base-200 rounded-xl cursor-pointer"
                   >
-                    <span className="text-base">🎓</span>
+                    <GraduationCap size={18} className="text-emerald-500 shrink-0" />
                     <div>
                       <p className="font-bold text-base-content">Tạo khóa học mới</p>
                       <p className="text-[10px] text-base-content/60 font-normal">Biên soạn chuỗi bài giảng công nghệ</p>
@@ -1076,7 +1079,7 @@ ${rows}
                     onClick={() => onNavigate && onNavigate("quiz", { action: "create" })}
                     className="flex items-center gap-2.5 py-2 hover:bg-base-200 rounded-xl cursor-pointer"
                   >
-                    <span className="text-base">🧠</span>
+                    <HelpCircle size={18} className="text-amber-500 shrink-0" />
                     <div>
                       <p className="font-bold text-base-content">Thêm bài trắc nghiệm</p>
                       <p className="text-[10px] text-base-content/60 font-normal">Tạo câu hỏi trắc nghiệm hoặc tạo đề AI</p>
@@ -1089,7 +1092,7 @@ ${rows}
                     onClick={() => onNavigate && onNavigate("jobs", { action: "create" })}
                     className="flex items-center gap-2.5 py-2 hover:bg-base-200 rounded-xl cursor-pointer"
                   >
-                    <span className="text-base">💼</span>
+                    <Briefcase size={18} className="text-sky-500 shrink-0" />
                     <div>
                       <p className="font-bold text-base-content">Đăng tin tuyển dụng</p>
                       <p className="text-[10px] text-base-content/60 font-normal">Tìm kiếm ứng viên kỹ sư IT</p>
@@ -1102,7 +1105,7 @@ ${rows}
                     onClick={() => onNavigate && onNavigate("roadmaps", { action: "create" })}
                     className="flex items-center gap-2.5 py-2 hover:bg-base-200 rounded-xl cursor-pointer"
                   >
-                    <span className="text-base">🗺️</span>
+                    <Milestone size={18} className="text-indigo-500 shrink-0" />
                     <div>
                       <p className="font-bold text-base-content">Tạo lộ trình học tập</p>
                       <p className="text-[10px] text-base-content/60 font-normal">Xây dựng roadmap kỹ năng cho lập trình viên</p>
@@ -1115,7 +1118,7 @@ ${rows}
                     onClick={() => onNavigate && onNavigate("events", { action: "create" })}
                     className="flex items-center gap-2.5 py-2 hover:bg-base-200 rounded-xl cursor-pointer"
                   >
-                    <span className="text-base">📅</span>
+                    <Calendar size={18} className="text-purple-500 shrink-0" />
                     <div>
                       <p className="font-bold text-base-content">Tổ chức sự kiện</p>
                       <p className="text-[10px] text-base-content/60 font-normal">Webinar, workshop & meetup công nghệ</p>
@@ -1177,7 +1180,7 @@ ${rows}
                   <div className="absolute right-0 mt-2 w-80 sm:w-96 max-w-[calc(100vw-2rem)] bg-base-100 rounded-2xl shadow-2xl border border-base-300 p-3 z-50 animate-fade-in space-y-2">
                     <div className="flex items-center justify-between pb-2 border-b border-base-200">
                       <div className="flex items-center gap-1.5">
-                        <span className="font-bold text-xs text-base-content">🔔 Thông báo của bạn</span>
+                        <span className="font-bold text-xs text-base-content flex items-center gap-1.5"><Bell size={14} className="text-primary shrink-0" /> Thông báo của bạn</span>
                         {unreadCount > 0 && (
                           <span className="badge badge-xs badge-error text-white font-bold">{unreadCount} mới</span>
                         )}
@@ -1293,7 +1296,7 @@ ${rows}
                         className="btn btn-ghost btn-xs text-primary font-bold hover:underline gap-1 p-1 h-auto min-h-0 disabled:opacity-40"
                         title="Xuất toàn bộ nhật ký thông báo ra định dạng Markdown (.md)"
                       >
-                        <span>📥</span>
+                        <Share2 size={13} className="shrink-0 text-primary" />
                         <span>Xuất nhật ký (.md)</span>
                         </button>
                       )}
@@ -1305,7 +1308,7 @@ ${rows}
                         className="btn btn-ghost btn-xs text-error font-semibold hover:underline gap-1 p-1 h-auto min-h-0 disabled:opacity-40"
                         title="Dọn dẹp sạch toàn bộ danh sách thông báo"
                       >
-                        <span>🗑️</span>
+                        <Trash2 size={13} className="shrink-0 text-error" />
                         <span>Xóa hết</span>
                       </button>
                     </div>
@@ -1396,7 +1399,7 @@ ${rows}
                     onClick={() => handleNavAndCloseMobile("leaderboard")}
                     className="flex items-center gap-2 py-2"
                   >
-                    <span>🏆</span>
+                    <Award size={16} className="text-amber-500 shrink-0" />
                     <span>Bảng xếp hạng & Huy hiệu</span>
                   </button>
                 </li>
@@ -1432,7 +1435,7 @@ ${rows}
                   className="btn btn-xs sm:btn-sm btn-outline btn-warning font-bold flex items-center gap-1 rounded-xl"
                   title="Trải nghiệm nhanh các vai trò Demo"
                 >
-                  <span>⚡ Demo</span>
+                  <Sparkles size={14} className="text-amber-500 shrink-0" /> <span>Demo</span>
                 </button>
                 <div tabIndex={0} className="dropdown-content z-50 menu p-2 shadow-2xl bg-base-100 rounded-2xl border border-base-300 w-56 text-xs space-y-1 mt-1">
                   <p className="font-bold text-[11px] text-base-content/60 px-2 py-1">Chọn vai trò trải nghiệm:</p>
@@ -1442,7 +1445,7 @@ ${rows}
                     className="flex items-center justify-between p-2 rounded-xl hover:bg-primary/10 hover:text-primary transition-colors text-left w-full cursor-pointer"
                   >
                     <div>
-                      <span className="font-bold block text-primary">👑 Quản trị viên (Admin)</span>
+                      <span className="font-bold flex items-center gap-1.5 text-primary"><ShieldCheck size={14} className="text-primary shrink-0" /> Quản trị viên (Admin)</span>
                       <span className="text-[10px] text-base-content/60">Toàn quyền, xóa feed, xuất md</span>
                     </div>
                   </button>
@@ -1452,7 +1455,7 @@ ${rows}
                     className="flex items-center justify-between p-2 rounded-xl hover:bg-secondary/10 hover:text-secondary transition-colors text-left w-full cursor-pointer"
                   >
                     <div>
-                      <span className="font-bold block text-secondary">🛡️ Kiểm duyệt viên (Mod)</span>
+                      <span className="font-bold flex items-center gap-1.5 text-secondary"><ShieldCheck size={14} className="text-secondary shrink-0" /> Kiểm duyệt viên (Mod)</span>
                       <span className="text-[10px] text-base-content/60">Duyệt bài, xóa feed, không xuất md</span>
                     </div>
                   </button>
@@ -1462,7 +1465,7 @@ ${rows}
                     className="flex items-center justify-between p-2 rounded-xl hover:bg-base-200 transition-colors text-left w-full cursor-pointer"
                   >
                     <div>
-                      <span className="font-bold block text-base-content">👤 Thành viên (User)</span>
+                      <span className="font-bold flex items-center gap-1.5 text-base-content"><User size={14} className="text-base-content/80 shrink-0" /> Thành viên (User)</span>
                       <span className="text-[10px] text-base-content/60">Đọc, viết bài, like & lưu</span>
                     </div>
                   </button>
@@ -1553,7 +1556,7 @@ ${rows}
 
             <div>
               <div className="text-[11px] font-bold text-base-content/60 mb-1 px-0.5">
-                🔥 Công nghệ hot
+                <span className="flex items-center gap-1 text-amber-500 font-bold"><Flame size={12} className="shrink-0" /> Công nghệ hot</span>
               </div>
               <div className="flex flex-wrap gap-1">
                 {POPULAR_SEARCH_TAGS.slice(0, 6).map((tag, idx) => (

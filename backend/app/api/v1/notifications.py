@@ -140,6 +140,7 @@ def get_notifications(
     """
     Get user notifications with filtering and unread count badge.
     """
+    ensure_user_seed_notifications(db, current_user.id)
     query = db.query(Notification).filter(Notification.recipient_id == current_user.id)
 
     if type_filter and type_filter.lower() != "all":
@@ -170,6 +171,7 @@ def get_unread_count(
     """
     Get unread notifications count for header badge.
     """
+    ensure_user_seed_notifications(db, current_user.id)
     count = (
         db.query(Notification)
         .filter(Notification.recipient_id == current_user.id, Notification.is_read == False)

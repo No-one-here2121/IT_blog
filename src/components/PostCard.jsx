@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useBlog } from "../context/BlogContext";
 import { useToast } from "../context/ToastContext";
-import { BrandIcon, Heart, MessageSquare, Eye, Bookmark, Pin, Trash2, Edit3, Clock, BadgeCheck } from "./icons";
+import { BrandIcon, Heart, MessageSquare, Eye, Bookmark, Pin, Trash2, Edit3, Clock, BadgeCheck, AlertTriangle, X } from "./icons";
 
 // Thumbnail mặc định theo từng chủ đề
 const CATEGORY_THUMBNAILS = {
@@ -168,7 +168,7 @@ export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDel
           <div className="absolute top-3 left-3 flex flex-wrap gap-1.5 items-center">
             {post.isPinned && (
               <span className="badge bg-amber-400 text-amber-950 font-black text-xs shadow-md border-amber-300 gap-1">
-                <span>📌</span> ĐÃ GHIM
+                <span className="flex items-center gap-1"><Pin size={12} className="text-amber-500 fill-amber-500 shrink-0" /> ĐÃ GHIM</span>
               </span>
             )}
             <span className="badge badge-primary text-white font-bold text-xs uppercase shadow-md">
@@ -395,7 +395,7 @@ export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDel
               <p className="text-base-content/60">Tác giả: {author?.name || "Tác giả IT"} • Chuyên mục: {post.category}</p>
               {isAdmin && !isAuthor && (
                 <p className="text-warning font-bold flex items-center gap-1 pt-1">
-                  <span>⚠️</span> Bạn đang thực hiện quyền hạn Quản trị viên (Admin).
+                  <span className="flex items-center gap-1.5"><AlertTriangle size={14} className="text-warning shrink-0" /> Bạn đang thực hiện quyền hạn Quản trị viên (Admin).</span>
                 </p>
               )}
             </div>
@@ -429,7 +429,7 @@ export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDel
           <div className="bg-base-100 rounded-3xl max-w-xl w-full p-6 border border-base-300 shadow-2xl flex flex-col max-h-[85vh]">
             <div className="flex items-center justify-between pb-3 border-b border-base-200">
               <div className="flex items-center gap-2">
-                <span className="text-xl">💬</span>
+                <MessageSquare size={20} className="text-primary shrink-0" />
                 <div>
                   <h3 className="text-base font-black text-base-content">
                     Bình luận ({post.comments?.length || 0})
@@ -441,8 +441,9 @@ export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDel
                 type="button"
                 onClick={() => setShowCommentsModal(false)}
                 className="btn btn-sm btn-circle btn-ghost"
+                aria-label="Đóng"
               >
-                ✕
+                <X size={16} />
               </button>
             </div>
 
