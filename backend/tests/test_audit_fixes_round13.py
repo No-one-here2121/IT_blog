@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 from app.api.v1.crawler import trigger_crawl
 from app.schemas.crawler import TriggerCrawlRequest
 from app.models.user import User

@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import pytest
 from app.models.user import User, Role
 from app.models.moderation import BugReport, BugReportStatus

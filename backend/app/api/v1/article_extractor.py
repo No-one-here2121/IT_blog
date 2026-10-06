@@ -1,4 +1,4 @@
-﻿import re
+import re
 import html
 from typing import Optional
 from urllib.parse import urljoin
