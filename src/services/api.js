@@ -820,8 +820,15 @@ export const api = {
     getPostQuizzes: () => request("/quiz/post-quizzes"),
     getQuestions: (params = {}) => {
       const query = new URLSearchParams();
-      if (params.course_id || params.courseId) query.append("course_id", params.course_id || params.courseId);
-      if (params.post_id || params.postId) query.append("post_id", params.post_id || params.postId);
+      const rawCourseId = params.course_id ?? params.courseId;
+      const rawPostId = params.post_id ?? params.postId;
+
+      if (rawCourseId && !isNaN(Number(rawCourseId)) && Number(rawCourseId) > 0) {
+        query.append("course_id", Number(rawCourseId));
+      }
+      if (rawPostId && !isNaN(Number(rawPostId)) && Number(rawPostId) > 0) {
+        query.append("post_id", Number(rawPostId));
+      }
       if (params.language && params.language !== "all") query.append("language", params.language);
       if (params.difficulty && params.difficulty !== "mixed" && params.difficulty !== "all") query.append("difficulty", params.difficulty);
       if (params.limit) query.append("limit", params.limit);

@@ -16,31 +16,37 @@ export default function QuizPage({ params = {}, onNavigate }) {
   const { addToast } = useToast();
   const { courseId, postId, title } = params;
 
+  // Validate that postId and courseId are valid positive numbers (ignore fake strings like "post_001")
+  const cleanPostId = (postId && !isNaN(Number(postId)) && Number(postId) > 0) ? Number(postId) : null;
+  const cleanCourseId = (courseId && !isNaN(Number(courseId)) && Number(courseId) > 0) ? Number(courseId) : null;
+
   // Topics, Post Quizzes & Questions Data States
   const [topics, setTopics] = useState(DEFAULT_QUIZ_TOPICS);
   const [postQuizzes, setPostQuizzes] = useState([]);
-  const [activePostId, setActivePostId] = useState(postId || null);
-  const [activeCourseId, setActiveCourseId] = useState(courseId || null);
+  const [activePostId, setActivePostId] = useState(cleanPostId);
+  const [activeCourseId, setActiveCourseId] = useState(cleanCourseId);
   const [activeTitle, setActiveTitle] = useState(title || "");
   const [selectedTopic, setSelectedTopic] = useState("all");
   const [selectedCount, setSelectedCount] = useState(10); // 5, 10, 15, 20, "all"
   const [selectedDifficulty, setSelectedDifficulty] = useState("all"); // "all", "easy", "medium", "hard"
 
-  // Trang thai bat dau lam bai: Chi hien thi cau hoi khi nguoi dung bam vao de tai hoac bam "Bat dau"
-  const [isExamStarted, setIsExamStarted] = useState(Boolean(courseId || postId));
+  // Trang thai bat dau lam bai: Chi bat dau ngay neu co postId hoac courseId hop le
+  const [isExamStarted, setIsExamStarted] = useState(Boolean(cleanCourseId || cleanPostId));
 
   useEffect(() => {
-    if (postId) setActivePostId(postId);
-    if (courseId) setActiveCourseId(courseId);
+    setActivePostId(cleanPostId);
+    setActiveCourseId(cleanCourseId);
     if (title) setActiveTitle(title);
-    if (courseId || postId) {
+    if (cleanCourseId || cleanPostId) {
       setIsExamStarted(true);
       setQuestions([]);
       setAnswers({});
       setSubmitted(false);
       setFilterWrongOnly(false);
+    } else {
+      setIsExamStarted(false);
     }
-  }, [courseId, postId, title]);
+  }, [cleanCourseId, cleanPostId, title]);
 
   const [allPoolQuestions, setAllPoolQuestions] = useState([]);
   const [questions, setQuestions] = useState([]);
@@ -127,8 +133,12 @@ export default function QuizPage({ params = {}, onNavigate }) {
     loadPostQuizzes();
   }, [loadTopics, loadPostQuizzes]);
 
-  const effectivePostId = activePostId || postId;
-  const effectiveCourseId = activeCourseId || courseId;
+  const effectivePostId = (activePostId && !isNaN(Number(activePostId)) && Number(activePostId) > 0)
+    ? Number(activePostId)
+    : cleanPostId;
+  const effectiveCourseId = (activeCourseId && !isNaN(Number(activeCourseId)) && Number(activeCourseId) > 0)
+    ? Number(activeCourseId)
+    : cleanCourseId;
   const effectiveTitle = activeTitle || title;
 
   // 2. Tai toan bo cau hoi cua chu de da chon tu backend hoac fallback
@@ -151,13 +161,15 @@ export default function QuizPage({ params = {}, onNavigate }) {
         let list = Array.isArray(res) ? res : (res?.questions || []);
         if (!list || list.length === 0) {
           if (effectivePostId) {
-            list = [];
+            // Neu bai viet chua co cau hoi hoac dang tao, lay bo de du phong phu hop
+            list = DEFAULT_QUIZ_QUESTIONS;
           } else if (selectedTopic === "all") {
             list = DEFAULT_QUIZ_QUESTIONS;
           } else {
             list = DEFAULT_QUIZ_QUESTIONS.filter(
               (q) => (q.language || "").toLowerCase().includes(selectedTopic.toLowerCase())
             );
+            if (list.length === 0) list = DEFAULT_QUIZ_QUESTIONS;
           }
         }
         const normalized = (list || []).map((q, idx) => ({
@@ -176,13 +188,13 @@ export default function QuizPage({ params = {}, onNavigate }) {
       .catch((err) => {
         if (ignore) return;
         console.warn("Quiz questions fetch error, using local fallback data:", err);
-        const list = effectivePostId
-          ? []
-          : selectedTopic === "all"
-          ? DEFAULT_QUIZ_QUESTIONS
-          : DEFAULT_QUIZ_QUESTIONS.filter(
-              (q) => (q.language || "").toLowerCase().includes(selectedTopic.toLowerCase())
-            );
+        let list = DEFAULT_QUIZ_QUESTIONS;
+        if (selectedTopic && selectedTopic !== "all") {
+          const matched = DEFAULT_QUIZ_QUESTIONS.filter(
+            (q) => (q.language || "").toLowerCase().includes(selectedTopic.toLowerCase())
+          );
+          if (matched.length > 0) list = matched;
+        }
         const normalized = (list || []).map((q, idx) => ({
           ...q,
           id: q.id != null && String(q.id).trim() !== "" ? String(q.id) : `fallback_${idx + 1}`
