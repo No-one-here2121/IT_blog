@@ -144,6 +144,10 @@ export default function QuizPage({ params = {}, onNavigate }) {
   // 2. Tai toan bo cau hoi cua chu de da chon tu backend hoac fallback
   useEffect(() => {
     let ignore = false;
+    setLoading(true);
+    setQuestions([]);
+    setAllPoolQuestions([]);
+
     const queryParams = {
       limit: 200,
       randomize: false,
@@ -161,8 +165,7 @@ export default function QuizPage({ params = {}, onNavigate }) {
         let list = Array.isArray(res) ? res : (res?.questions || []);
         if (!list || list.length === 0) {
           if (effectivePostId) {
-            // Neu bai viet chua co cau hoi hoac dang tao, lay bo de du phong phu hop
-            list = DEFAULT_QUIZ_QUESTIONS;
+            list = [];
           } else if (selectedTopic === "all") {
             list = DEFAULT_QUIZ_QUESTIONS;
           } else {
@@ -178,6 +181,12 @@ export default function QuizPage({ params = {}, onNavigate }) {
         }));
         setAllPoolQuestions(normalized);
 
+        // Neu dang trong che do thi, nap ngay bo cau hoi vua lay vao bai thi
+        if (isExamStarted && normalized.length > 0) {
+          prepareExamQuestions(normalized);
+          setTimerActive(true);
+        }
+
         // Nếu đang load câu hỏi theo postId, câu hỏi mới có thể vừa được tạo.
         // Refresh topics và postQuizzes để cập nhật danh sách ngay lập tức.
         if (effectivePostId && normalized.length > 0) {
@@ -188,8 +197,8 @@ export default function QuizPage({ params = {}, onNavigate }) {
       .catch((err) => {
         if (ignore) return;
         console.warn("Quiz questions fetch error, using local fallback data:", err);
-        let list = DEFAULT_QUIZ_QUESTIONS;
-        if (selectedTopic && selectedTopic !== "all") {
+        let list = effectivePostId ? [] : DEFAULT_QUIZ_QUESTIONS;
+        if (!effectivePostId && selectedTopic && selectedTopic !== "all") {
           const matched = DEFAULT_QUIZ_QUESTIONS.filter(
             (q) => (q.language || "").toLowerCase().includes(selectedTopic.toLowerCase())
           );
@@ -200,6 +209,10 @@ export default function QuizPage({ params = {}, onNavigate }) {
           id: q.id != null && String(q.id).trim() !== "" ? String(q.id) : `fallback_${idx + 1}`
         }));
         setAllPoolQuestions(normalized);
+        if (isExamStarted && normalized.length > 0) {
+          prepareExamQuestions(normalized);
+          setTimerActive(true);
+        }
       })
       .finally(() => {
         if (!ignore) setLoading(false);
@@ -211,19 +224,20 @@ export default function QuizPage({ params = {}, onNavigate }) {
   }, [effectiveCourseId, effectivePostId, selectedTopic, loadTopics, loadPostQuizzes]);
 
   // 3. Chuan bi bo cau hoi
-  const prepareExamQuestions = useCallback(() => {
-    if (!allPoolQuestions || allPoolQuestions.length === 0) {
+  const prepareExamQuestions = useCallback((customPool = null) => {
+    const pool = customPool || allPoolQuestions;
+    if (!pool || pool.length === 0) {
       setQuestions([]);
       return;
     }
 
-    let filtered = [...allPoolQuestions];
+    let filtered = [...pool];
     if (selectedDifficulty && selectedDifficulty !== "all") {
       filtered = filtered.filter(
         (q) => (q.difficulty || "medium").toLowerCase() === selectedDifficulty.toLowerCase()
       );
       if (filtered.length === 0) {
-        filtered = [...allPoolQuestions];
+        filtered = [...pool];
       }
     }
 
@@ -257,12 +271,10 @@ export default function QuizPage({ params = {}, onNavigate }) {
 
   useEffect(() => {
     if (isExamStarted && allPoolQuestions.length > 0 && questions.length === 0) {
-      queueMicrotask(() => {
-        prepareExamQuestions();
-        setTimerActive(true);
-      });
+      prepareExamQuestions(allPoolQuestions);
+      setTimerActive(true);
     }
-  }, [allPoolQuestions.length, isExamStarted, questions.length, prepareExamQuestions]);
+  }, [allPoolQuestions, isExamStarted, questions.length, prepareExamQuestions]);
 
   const handleStartExam = (topicId) => {
     requireAuth(() => {
@@ -284,9 +296,11 @@ export default function QuizPage({ params = {}, onNavigate }) {
       setActivePostId(pq.post_id);
       setActiveCourseId(null);
       setActiveTitle(pq.title);
+      setQuestions([]);
+      setAllPoolQuestions([]);
+      setLoading(true);
       setIsExamStarted(true);
       setTimerActive(true);
-      setQuestions([]);
       setAnswers({});
       setSubmitted(false);
       setFilterWrongOnly(false);
