@@ -255,6 +255,40 @@ def get_post_quizzes(db: Session = Depends(get_db)):
     return result
 
 
+@router.get("/ai-quizzes", response_model=List[Dict[str, Any]])
+def get_ai_quizzes(db: Session = Depends(get_db)):
+    """
+    Lấy danh sách các bộ đề thi trắc nghiệm được tạo bằng AI trong CSDL.
+    """
+    rows = (
+        db.query(
+            QuizQuestion.language,
+            func.count(QuizQuestion.id).label("question_count"),
+            func.max(QuizQuestion.created_at).label("latest_created_at")
+        )
+        .filter(QuizQuestion.source == "ai")
+        .group_by(QuizQuestion.language)
+        .order_by(func.max(QuizQuestion.created_at).desc())
+        .all()
+    )
+    result = []
+    for lang, count, latest_at in rows:
+        clean_lang = (lang or "").strip()
+        if not clean_lang:
+            continue
+        display_title = f"Đề thi AI: {clean_lang.title() if len(clean_lang) > 3 else clean_lang.upper()}"
+        result.append({
+            "id": f"ai_{clean_lang.lower().replace(' ', '_')}",
+            "language": clean_lang,
+            "title": display_title,
+            "question_count": count,
+            "created_at": latest_at.isoformat() if latest_at else None,
+            "badge": "⚡ AI Gemini",
+            "icon": "🤖"
+        })
+    return result
+
+
 @router.get("/questions", response_model=Dict[str, List[QuizQuestionResponse]])
 def get_quiz_questions(
     course_id: Optional[int] = Query(None, description="Lọc theo ID khóa học"),

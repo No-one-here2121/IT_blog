@@ -818,6 +818,7 @@ export const api = {
   quiz: {
     getTopics: () => request("/quiz/topics"),
     getPostQuizzes: () => request("/quiz/post-quizzes"),
+    getAiQuizzes: () => request("/quiz/ai-quizzes"),
     getQuestions: (params = {}) => {
       const query = new URLSearchParams();
       const rawCourseId = params.course_id ?? params.courseId;
