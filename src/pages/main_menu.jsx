@@ -386,8 +386,8 @@ export default function Menu_main({ onNavigate, onSelectPost, onEditPost }) {
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-xs">Hiển thị:</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="font-medium text-xs whitespace-nowrap">Hiển thị:</span>
             <select
               value={postsPerPage}
               onChange={(e) => {
@@ -412,7 +412,7 @@ export default function Menu_main({ onNavigate, onSelectPost, onEditPost }) {
               type="button"
               onClick={() => handlePageChange(1)}
               disabled={currentPage === 1}
-              className="btn btn-xs sm:btn-sm btn-ghost border border-base-300 rounded-xl disabled:opacity-30 font-semibold"
+              className="btn btn-xs sm:btn-sm btn-ghost border border-base-300 rounded-xl disabled:opacity-40 disabled:bg-base-200/50 disabled:text-base-content/40 disabled:border-base-300 font-semibold"
               title="Về trang đầu tiên"
             >
               ⏮
@@ -423,9 +423,10 @@ export default function Menu_main({ onNavigate, onSelectPost, onEditPost }) {
               type="button"
               onClick={() => handlePageChange(currentPage - 1)}
               disabled={currentPage === 1}
-              className="btn btn-xs sm:btn-sm btn-outline btn-neutral rounded-xl disabled:opacity-30 font-semibold gap-1"
+              className="btn btn-xs sm:btn-sm rounded-xl font-semibold gap-1 border border-base-300 bg-base-100 text-base-content hover:bg-base-200 disabled:opacity-40 disabled:bg-base-200/50 disabled:text-base-content/40 disabled:border-base-300"
             >
-              ◀ <span className="hidden sm:inline">Trước</span>
+              <span>◀</span>
+              <span className="hidden sm:inline">Trước</span>
             </button>
 
             {/* Các số trang */}
@@ -446,7 +447,7 @@ export default function Menu_main({ onNavigate, onSelectPost, onEditPost }) {
                   className={`btn btn-xs sm:btn-sm rounded-xl font-bold min-w-[32px] sm:min-w-[36px] transition-all ${
                     isCurrent
                       ? "btn-primary text-white shadow-sm"
-                      : "btn-ghost hover:bg-base-200 text-base-content/80"
+                      : "btn-ghost border border-base-300/60 hover:bg-base-200 text-base-content"
                   }`}
                 >
                   {p}
@@ -459,9 +460,10 @@ export default function Menu_main({ onNavigate, onSelectPost, onEditPost }) {
               type="button"
               onClick={() => handlePageChange(currentPage + 1)}
               disabled={currentPage === totalPages}
-              className="btn btn-xs sm:btn-sm btn-outline btn-neutral rounded-xl disabled:opacity-30 font-semibold gap-1"
+              className="btn btn-xs sm:btn-sm rounded-xl font-semibold gap-1 border border-base-300 bg-base-100 text-base-content hover:bg-base-200 disabled:opacity-40 disabled:bg-base-200/50 disabled:text-base-content/40 disabled:border-base-300"
             >
-              <span className="hidden sm:inline">Sau</span> ▶
+              <span className="hidden sm:inline">Sau</span>
+              <span>▶</span>
             </button>
 
             {/* Nút Cuối */}
@@ -469,7 +471,7 @@ export default function Menu_main({ onNavigate, onSelectPost, onEditPost }) {
               type="button"
               onClick={() => handlePageChange(totalPages)}
               disabled={currentPage === totalPages}
-              className="btn btn-xs sm:btn-sm btn-ghost border border-base-300 rounded-xl disabled:opacity-30 font-semibold"
+              className="btn btn-xs sm:btn-sm btn-ghost border border-base-300 rounded-xl disabled:opacity-40 disabled:bg-base-200/50 disabled:text-base-content/40 disabled:border-base-300 font-semibold"
               title="Tới trang cuối cùng"
             >
               ⏭
@@ -478,7 +480,7 @@ export default function Menu_main({ onNavigate, onSelectPost, onEditPost }) {
 
           {/* Ô nhảy nhanh tới trang */}
           <form onSubmit={handleJumpPage} className="flex items-center gap-1.5 text-xs">
-            <span className="text-base-content/60 font-medium hidden md:inline">Nhảy tới:</span>
+            <span className="text-base-content/70 font-medium whitespace-nowrap hidden md:inline">Nhảy tới:</span>
             <input
               type="number"
               min={1}
@@ -488,7 +490,7 @@ export default function Menu_main({ onNavigate, onSelectPost, onEditPost }) {
               placeholder={`${currentPage}`}
               className="input input-xs input-bordered w-14 text-center font-bold bg-base-100 rounded-lg focus:input-primary"
             />
-            <span className="text-base-content/50">/ {totalPages}</span>
+            <span className="text-base-content/60 font-medium whitespace-nowrap">/ {totalPages}</span>
             <button
               type="submit"
               className="btn btn-xs btn-primary text-white font-bold rounded-lg px-2.5"
