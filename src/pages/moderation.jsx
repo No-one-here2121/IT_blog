@@ -127,7 +127,7 @@ export default function ModerationPage({ onNavigate, onSelectPost, initialTab = 
   };
 
   // Gemini Multi-Key States
-  const [geminiPool, setGeminiPool] = useState({ model: "gemini-1.5-flash", total_keys: 0, active_keys: 0, keys: [] });
+  const [geminiPool, setGeminiPool] = useState({ model: "gemini-3.1-flash-lite", total_keys: 0, active_keys: 0, keys: [] });
   const [keysInputText, setKeysInputText] = useState("");
   const [testKeyInput, setTestKeyInput] = useState("");
   const [testKeyResult, setTestKeyResult] = useState(null);
@@ -645,7 +645,7 @@ ${mdRows}
 - **Bị từ chối (Rejected):** ${rejectedPosts.length}
 
 ## 2. TRẠNG THÁI AI & GEMINI MULTI-KEY POOL
-- **Mô hình AI:** \`${geminiPool?.model || "gemini-1.5-flash"}\`
+- **Mô hình AI:** \`${geminiPool?.model || "gemini-3.1-flash-lite"}\`
 - **Khóa API hoạt động:** ${geminiPool?.active_keys || 0} / ${geminiPool?.total_keys || 0}
 - **Trạng thái cân bằng tải (Round-robin):** ${geminiPool?.active_keys > 0 ? "Hoạt động ổn định" : "Cần bổ sung API Key"}
 - **Chế độ kiểm duyệt tự động AI:** Sẵn sàng
@@ -794,7 +794,7 @@ ${mdRows}
         prev.map((u) => (u.id === userId ? { ...u, is_active: nextStatus } : u))
       );
       addToast(
-        nextStatus ? "Đã mở khóa tài khoản thành viên! 🟢" : "Đã tạm khóa tài khoản thành viên! 🔴",
+        nextStatus ? "Đã duyệt và kích hoạt tài khoản thành viên thành công! 🎉" : "Đã tạm khóa tài khoản thành viên! 🔴",
         nextStatus ? "success" : "warning"
       );
     } catch {
@@ -802,7 +802,7 @@ ${mdRows}
         prev.map((u) => (u.id === userId ? { ...u, is_active: nextStatus } : u))
       );
       addToast(
-        nextStatus ? "Đã mở khóa tài khoản thành viên! 🟢" : "Đã tạm khóa tài khoản thành viên! 🔴",
+        nextStatus ? "Đã duyệt và kích hoạt tài khoản thành viên thành công! 🎉" : "Đã tạm khóa tài khoản thành viên! 🔴",
         nextStatus ? "success" : "warning"
       );
     } finally {
@@ -885,14 +885,34 @@ ${mdRows}
       return;
     }
 
+    // Chặn luôn nếu key sai định dạng (không gửi lên backend để tránh lưu key rác)
+    // Chấp nhận cả key cũ 'AIza...' và key Auth mới 'AQ....' (AI Studio 2026 chỉ tạo key AQ.)
+    const isGeminiKey = (k) => k.length >= 20 && (k.startsWith("AIza") || k.startsWith("AQ."));
+    const badKeys = keys.filter((k) => !isGeminiKey(k));
+    if (badKeys.length > 0) {
+      addToast(`Key '${badKeys[0].slice(0, 10)}...' không phải key Gemini (phải bắt đầu bằng 'AIza...' hoặc 'AQ.', dài 20+ ký tự). Lấy key đúng tại https://aistudio.google.com/apikey → Create API key`, "error");
+      return;
+    }
+
     setIsSavingKeys(true);
     try {
+      // Kiểm tra đăng nhập backend thật trước khi gọi (tránh lỗi 401 khó hiểu)
+      const token = localStorage.getItem("it_blog_token");
+      if (!token) {
+        addToast("Bạn đang dùng tài khoản Demo (chưa có phiên backend). Hãy Đăng nhập backend bằng admin@itblog.dev / AdminPassword123! rồi lưu key lại.", "warning");
+        return;
+      }
       const data = await api.ai.updateKeys(keys);
       setGeminiPool(data);
       setKeysInputText("");
       addToast(`Đã lưu thành công ${data.total_keys} Gemini API Key vào hệ thống xoay vòng! 🚀`, "success");
     } catch (err) {
-      addToast(`Lỗi lưu API Key: ${err.message}`, "error");
+      const msg = err.message || "Lỗi không xác định";
+      if (/xác thực|hết hạn|401|Unauthorized/i.test(msg)) {
+        addToast("Lỗi lưu API Key: Bạn chưa đăng nhập backend thật (đang dùng Demo). Hãy Đăng xuất Demo → Đăng nhập bằng admin@itblog.dev / AdminPassword123! rồi lưu lại.", "error");
+      } else {
+        addToast(`Lỗi lưu API Key: ${msg}`, "error");
+      }
     } finally {
       setIsSavingKeys(false);
     }
@@ -1443,7 +1463,7 @@ ${mdRows}
                 <span className="text-lg">🤖</span>
               </div>
               <p className="text-xl sm:text-2xl font-black text-primary">
-                {geminiPool.model || "gemini-1.5-flash"}
+                {geminiPool.model || "gemini-3.1-flash-lite"}
               </p>
               <span className="text-[11px] text-base-content/60">Google DeepMind API</span>
             </div>
@@ -3036,14 +3056,14 @@ ${mdRows}
 
                           <td>
                             <span
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
                                 user.is_active
                                   ? "bg-success/15 text-success"
-                                  : "bg-error/15 text-error"
+                                  : "bg-warning/15 text-warning border border-warning/30"
                               }`}
                             >
-                              <span className={`w-1.5 h-1.5 rounded-full ${user.is_active ? "bg-success" : "bg-error"}`}></span>
-                              {user.is_active ? "Hoạt động" : "Đã khóa"}
+                              <span className={`w-1.5 h-1.5 rounded-full ${user.is_active ? "bg-success" : "bg-warning animate-pulse"}`}></span>
+                              {user.is_active ? "Hoạt động" : "Chờ duyệt"}
                             </span>
                           </td>
 
@@ -3076,20 +3096,20 @@ ${mdRows}
                                 </button>
                               )}
 
-                              {/* Khóa / Mở khóa tài khoản */}
+                              {/* Khóa / Duyệt & Mở khóa tài khoản */}
                               {!isSuper && !isCurrent && (
                                 <button
                                   type="button"
                                   disabled={updatingUserId === user.id}
                                   onClick={() => handleToggleUserStatus(user.id, user.is_active)}
-                                  className={`btn btn-xs rounded-lg font-bold ${
+                                  className={`btn btn-xs rounded-lg font-bold shadow-xs ${
                                     user.is_active
-                                      ? "btn-ghost text-error hover:bg-error/10"
-                                      : "btn-success text-white"
+                                      ? "btn-ghost text-error hover:bg-error/10 border border-error/20"
+                                      : "btn-success text-white hover:scale-105 transition-transform"
                                   }`}
-                                  title={user.is_active ? "Khóa tài khoản" : "Mở khóa tài khoản"}
+                                  title={user.is_active ? "Khóa tài khoản" : "Duyệt & Kích hoạt tài khoản"}
                                 >
-                                  {user.is_active ? "🔴 Khóa" : "🟢 Mở khóa"}
+                                  {user.is_active ? "🔴 Khóa" : "✅ Duyệt"}
                                 </button>
                               )}
 

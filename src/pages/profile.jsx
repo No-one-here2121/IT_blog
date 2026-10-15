@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useBlog } from "../context/BlogContext";
 import { useToast } from "../context/ToastContext";
@@ -156,6 +156,51 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
   const [name, setName] = useState(currentUser?.name || "");
   const [bio, setBio] = useState(currentUser?.bio || "");
   const [avatar, setAvatar] = useState(currentUser?.avatar || "");
+  // Ảnh đại diện: tải tệp từ máy tính & xem trước cục bộ
+  const avatarFileRef = useRef(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarPreview, setAvatarPreview] = useState("");
+
+  const resolveUploadUrl = (url) => {
+    if (!url) return url;
+    // Backend trả về đường dẫn tương đối "/uploads/xxx" -> ghép với host API để <img> hiển thị được
+    if (url.startsWith("http") || url.startsWith("data:") || url.startsWith("blob:")) return url;
+    const base = (import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1").replace(/\/api\/v1\/?$/, "");
+    return base + url;
+  };
+
+  const handleAvatarFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // cho phép chọn lại cùng một tệp
+    if (!file) return;
+
+    // Kiểm tra nhanh phía client
+    const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/svg+xml"];
+    if (!allowed.includes(file.type)) {
+      addToast("Định dạng ảnh không được hỗ trợ. Chỉ chấp nhận JPG, PNG, WEBP, GIF, SVG.", "error");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      addToast("Kích thước ảnh vượt quá 5MB. Vui lòng chọn ảnh nhỏ hơn.", "error");
+      return;
+    }
+
+    // Xem trước ngay lập tức
+    const previewUrl = URL.createObjectURL(file);
+    setAvatarPreview(previewUrl);
+    setUploadingAvatar(true);
+    try {
+      const res = await api.uploads.uploadImage(file);
+      const uploadedUrl = resolveUploadUrl(res?.url);
+      setAvatar(uploadedUrl);
+      addToast("Tải ảnh đại diện thành công! Nhấn \"Lưu thay đổi\" để cập nhật hồ sơ.", "success");
+    } catch (err) {
+      setAvatarPreview("");
+      addToast(err?.message || "Tải ảnh thất bại. Vui lòng thử lại.", "error");
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
 
   // Change password state (Section 2)
   const [oldPassword, setOldPassword] = useState("");
@@ -1164,14 +1209,20 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
       setName(currentUser.name || "");
       setBio(currentUser.bio || "");
       setAvatar(currentUser.avatar || "");
+      setAvatarPreview("");
     }
     setIsEditingProfile(!isEditingProfile);
   };
 
   const handleSaveProfile = (e) => {
     e.preventDefault();
+    if (uploadingAvatar) {
+      addToast("Ảnh đại diện đang được tải lên, vui lòng đợi thêm một chút...", "warning");
+      return;
+    }
     updateProfile({ name: name.trim(), bio: bio.trim(), avatar: avatar.trim() });
     setIsEditingProfile(false);
+    setAvatarPreview("");
   };
 
   const handleDeletePost = (postId) => {
@@ -1341,15 +1392,62 @@ export default function ProfilePage({ onNavigate, onSelectPost, onEditPost, auth
                 />
               </div>
               <div>
-                <label className="label text-xs font-semibold">Avatar URL</label>
-                <input
-                  type="text"
-                  value={avatar}
-                  onChange={(e) => setAvatar(e.target.value)}
-                  placeholder="https://... hoặc data:image/..."
-                  className="input input-bordered w-full text-sm"
-                  required
-                />
+                <label className="label text-xs font-semibold">Ảnh đại diện</label>
+                <div className="flex items-center gap-3">
+                  {/* Xem trước ảnh đại diện */}
+                  <div className="relative shrink-0">
+                    <img
+                      src={avatarPreview || avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(name || "User")}`}
+                      alt="Xem trước ảnh đại diện"
+                      className="w-16 h-16 rounded-full object-cover border-2 border-primary/30 bg-base-200"
+                      onError={(e) => {
+                        e.currentTarget.src = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(name || "User")}`;
+                      }}
+                    />
+                    {uploadingAvatar && (
+                      <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center">
+                        <span className="loading loading-spinner loading-xs text-white"></span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 space-y-2">
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => avatarFileRef.current?.click()}
+                        disabled={uploadingAvatar}
+                        className="btn btn-xs btn-outline btn-primary gap-1 font-bold"
+                      >
+                        {uploadingAvatar ? "Đang tải..." : "📤 Tải ảnh lên"}
+                      </button>
+                      <input
+                        ref={avatarFileRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleAvatarFile}
+                      />
+                      {avatarPreview && (
+                        <button
+                          type="button"
+                          onClick={() => { setAvatarPreview(""); }}
+                          className="btn btn-xs btn-ghost text-base-content/60"
+                          title="Bỏ ảnh xem trước"
+                        >
+                          Đặt lại
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      value={avatar}
+                      onChange={(e) => { setAvatar(e.target.value); setAvatarPreview(""); }}
+                      placeholder="https://... (hoặc tải ảnh từ máy tính)"
+                      className="input input-bordered input-sm w-full text-xs"
+                    />
+                  </div>
+                </div>
+                <p className="text-[11px] text-base-content/50 mt-1.5">Hỗ trợ JPG, PNG, WEBP, GIF, SVG. Tối đa 5MB.</p>
               </div>
             </div>
             <div>

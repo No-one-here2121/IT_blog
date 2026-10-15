@@ -34,6 +34,10 @@ class ArticleSummarizeRequest(BaseModel):
     post_id: int
 
 
+class ArticleSpeechRequest(BaseModel):
+    post_id: int
+
+
 class ArticleSummarizeResponse(BaseModel):
     post_id: int
     summary: str

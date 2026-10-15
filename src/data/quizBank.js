@@ -2,7 +2,7 @@
  * Ngan hang cau hoi trac nghiem IT Blog (Fallback & Cache)
  */
 
-export const DEFAULT_QUIZ_TOPICS = [
+export const RAW_QUIZ_TOPICS = [
   {
     "id": "all",
     "title": "Tất cả Đề tài",
@@ -68,7 +68,7 @@ export const DEFAULT_QUIZ_TOPICS = [
   }
 ];
 
-export const DEFAULT_QUIZ_QUESTIONS = [
+const RAW_QUIZ_QUESTIONS = [
   {
     "language": "React",
     "question": "Trong React 19, cú pháp để truyền và nhận ref trong một function component đã được đơn giản hóa như thế nào?",
@@ -1175,3 +1175,33 @@ export const DEFAULT_QUIZ_QUESTIONS = [
     "difficulty": "hard"
   }
 ];
+
+export const DEFAULT_QUIZ_QUESTIONS = RAW_QUIZ_QUESTIONS.map((q, idx) => ({
+  id: q.id != null ? String(q.id) : `qb-${idx + 1}`,
+  ...q
+}));
+
+const FALLBACK_TOPIC_ALIASES = {
+  all: [],
+  React: ["react", "react 19", "frontend", "tailwind css", "tailwind", "nextjs", "ui"],
+  FastAPI: ["fastapi", "backend", "pydantic"],
+  PostgreSQL: ["postgresql", "database", "sql"],
+  DevOps: ["devops", "docker", "ci/cd", "kubernetes", "k8s"],
+  Python: ["python", "asyncio"],
+  Security: ["security", "web security", "owasp", "bảo mật"],
+  Architecture: ["architecture", "microservices", "system design", "kiến trúc"],
+  Fullstack: ["fullstack", "full stack", "html5", "css3", "javascript", "html/web", "web"]
+};
+
+export const DEFAULT_QUIZ_TOPICS = RAW_QUIZ_TOPICS.map((topic) => {
+  if (topic.id === "all") {
+    return { ...topic, question_count: RAW_QUIZ_QUESTIONS.length };
+  }
+  const aliases = FALLBACK_TOPIC_ALIASES[topic.id] || [topic.id.toLowerCase()];
+  const cnt = RAW_QUIZ_QUESTIONS.filter((q) => {
+    const lang = (q.language || "").toLowerCase();
+    return aliases.some((a) => lang.includes(a));
+  }).length;
+  return { ...topic, question_count: cnt };
+});
+

@@ -8,6 +8,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api/
 // Helper for HTTP requests
 async function request(endpoint, options = {}) {
   const token = localStorage.getItem("it_blog_token");
+  const { responseType, ...fetchOptions } = options;
   const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
   const headers = {
     ...(!isFormData ? { "Content-Type": "application/json" } : {}),
@@ -19,7 +20,7 @@ async function request(endpoint, options = {}) {
   }
 
   const config = {
-    ...options,
+    ...fetchOptions,
     headers,
   };
 
@@ -29,6 +30,10 @@ async function request(endpoint, options = {}) {
     // Handle 204 No Content
     if (response.status === 204) {
       return null;
+    }
+
+    if (response.ok && responseType === "blob") {
+      return response.blob();
     }
 
     if (response.status === 401 && !options._isRetry && !endpoint.includes("/auth/login") && !endpoint.includes("/auth/refresh")) {
@@ -87,6 +92,10 @@ async function request(endpoint, options = {}) {
   } catch (error) {
     if (!endpoint.includes("/auth/me") && !endpoint.includes("/behavior")) {
       console.warn(`API Error on [${options.method || "GET"} ${endpoint}]:`, error.message);
+    }
+    const raw = String(error?.message || error || "");
+    if (/failed to fetch|networkerror|network request failed|load failed/i.test(raw) || error instanceof TypeError) {
+      throw new Error("Không kết nối được máy chủ backend (http://localhost:8000). Hãy bật backend rồi thử lại.");
     }
     throw error;
   }
@@ -478,6 +487,14 @@ export const api = {
 
   // AI Assistant (Code Explain, Context Q&A, Summarize)
   ai: {
+    readArticle: (postId, options = {}) =>
+      request("/ai/read-article", {
+        ...options,
+        method: "POST",
+        body: JSON.stringify({ post_id: postId }),
+        responseType: "blob",
+      }),
+
     explainCode: (data) => {
       const payload = {
         code_snippet: data.code_snippet || data.code || "",
@@ -723,6 +740,15 @@ export const api = {
     completeLesson: (courseId, lessonId) =>
       request(`/courses/${courseId}/lessons/${lessonId}/complete`, {
         method: "POST",
+      }),
+    update: (id, data) =>
+      request(`/courses/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    delete: (id) =>
+      request(`/courses/${id}`, {
+        method: "DELETE",
       }),
   },
 

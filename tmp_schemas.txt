@@ -1,0 +1,111 @@
+﻿=== AudioResponseFormat ===
+{
+    "type":  "object",
+    "properties":  {
+                       "delivery":  {
+                                        "type":  "string",
+                                        "enum":  [
+                                                     "DELIVERY_UNSPECIFIED",
+                                                     "INLINE",
+                                                     "URI"
+                                                 ],
+                                        "enumDescriptions":  [
+                                                                 "Default value. This value is unused.",
+                                                                 "Audio data is returned inline in the response.",
+                                                                 "Audio data is returned as a URI."
+                                                             ],
+                                        "description":  "Optional. The delivery mode for the audio output."
+                                    },
+                       "mimeType":  {
+                                        "description":  "Optional. The MIME type of the audio output.",
+                                        "enumDescriptions":  [
+                                                                 "Default value. This value is unused.",
+                                                                 "MP3 audio format.",
+                                                                 "OGG Opus audio format.",
+                                                                 "Raw PCM (L16) audio format.",
+                                                                 "WAV audio format.",
+                                                                 "A-law audio format.",
+                                                                 "Mu-law audio format."
+                                                             ],
+                                        "type":  "string",
+                                        "enum":  [
+                                                     "MIME_TYPE_UNSPECIFIED",
+                                                     "AUDIO_MP3",
+                                                     "AUDIO_OGG_OPUS",
+                                                     "AUDIO_L16",
+                                                     "AUDIO_WAV",
+                                                     "AUDIO_ALAW",
+                                                     "AUDIO_MULAW"
+                                                 ]
+                                    },
+                       "bitRate":  {
+                                       "type":  "integer",
+                                       "format":  "int32",
+                                       "description":  "Optional. Bit rate in bits per second (bps). Only applicable for compressed formats (MP3, Opus)."
+                                   },
+                       "sampleRate":  {
+                                          "type":  "integer",
+                                          "format":  "int32",
+                                          "description":  "Optional. Sample rate in Hz."
+                                      }
+                   },
+    "description":  "Configuration for audio output format.",
+    "id":  "AudioResponseFormat"
+}
+=== SpeechConfig ===
+{
+    "id":  "SpeechConfig",
+    "type":  "object",
+    "properties":  {
+                       "voiceConfig":  {
+                                           "description":  "The configuration in case of single-voice output.",
+                                           "$ref":  "VoiceConfig"
+                                       },
+                       "languageCode":  {
+                                            "description":  "Optional. The IETF [BCP-47](https://www.rfc-editor.org/rfc/bcp/bcp47.txt) language code that the user configured the app to use. Used for speech recognition and synthesis. Valid values are: `de-DE`, `en-AU`, `en-GB`, `en-IN`, `en-US`, `es-US`, `fr-FR`, `hi-IN`, `pt-BR`, `ar-XA`, `es-ES`, `fr-CA`, `id-ID`, `it-IT`, `ja-JP`, `tr-TR`, `vi-VN`, `bn-IN`, `gu-IN`, `kn-IN`, `ml-IN`, `mr-IN`, `ta-IN`, `te-IN`, `nl-NL`, `ko-KR`, `cmn-CN`, `pl-PL`, `ru-RU`, and `th-TH`.",
+                                            "type":  "string"
+                                        },
+                       "multiSpeakerVoiceConfig":  {
+                                                       "description":  "Optional. The configuration for the multi-speaker setup. It is mutually exclusive with the voice_config field.",
+                                                       "$ref":  "MultiSpeakerVoiceConfig"
+                                                   }
+                   },
+    "description":  "Config for speech generation and transcription."
+}
+=== SpeechMetadata ===
+{
+    "id":  "SpeechMetadata",
+    "description":  "Speech metadata for `text` parts.",
+    "properties":  {
+                       "speaker":  {
+                                       "type":  "string",
+                                       "description":  "Optional. Optional speaker name for multi-speaker synthesis."
+                                   },
+                       "style":  {
+                                     "description":  "Optional. Optional style instruction for the speech synthesis.",
+                                     "type":  "string"
+                                 }
+                   },
+    "type":  "object"
+}
+=== ResponseFormatConfig ===
+{
+    "description":  "Configuration for the response output format. This is a flat object where each optional sub-field configures a specific output modality.",
+    "type":  "object",
+    "properties":  {
+                       "image":  {
+                                     "$ref":  "ImageResponseFormat",
+                                     "description":  "Optional. Image output format configuration."
+                                 },
+                       "text":  {
+                                    "$ref":  "TextResponseFormat",
+                                    "description":  "Optional. Text output format configuration."
+                                },
+                       "audio":  {
+                                     "description":  "Optional. Audio output format configuration.",
+                                     "$ref":  "AudioResponseFormat"
+                                 }
+                   },
+    "id":  "ResponseFormatConfig"
+}
+=== models methods ===

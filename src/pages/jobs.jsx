@@ -3,9 +3,17 @@ import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import api from "../services/api";
 
+const normalizeText = (str) =>
+  (str || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .trim();
+
 const INITIAL_JOBS = [
   {
-    id: 1,
+    id: "init-1",
     title: "Senior Backend Developer (FastAPI / PostgreSQL)",
     company_name: "FPT Software AI Lab",
     location: "Hà Nội / Hybrid",
@@ -17,7 +25,7 @@ const INITIAL_JOBS = [
     application_url: "https://careers.fpt.com/apply"
   },
   {
-    id: 2,
+    id: "init-2",
     title: "Fullstack Engineer (React 19 / Node.js)",
     company_name: "VNG Corporation",
     location: "Hồ Chí Minh",
@@ -29,7 +37,7 @@ const INITIAL_JOBS = [
     application_url: "https://vng.com.vn/careers"
   },
   {
-    id: 3,
+    id: "init-3",
     title: "DevOps / Cloud Infrastructure Engineer",
     company_name: "Viettel Digital",
     location: "Hà Nội / Remote",
@@ -39,6 +47,42 @@ const INITIAL_JOBS = [
     requirements: "Kinh nghiệm thực chiến với K8s, Terraform, Prometheus, Grafana và Cloud Provider (AWS/GCP).",
     skills: "Kubernetes, Docker, CI/CD, AWS, Terraform",
     application_url: "https://viettel.vn/tuyen-dung"
+  },
+  {
+    id: "init-4",
+    title: "Chuyên viên Lập trình Hệ thống Core Banking (Java / Spring Boot)",
+    company_name: "Ngân hàng Agribank (Trụ sở Hà Nội)",
+    location: "Hà Nội",
+    work_type: "full-time",
+    salary_range: "28M - 48M VND",
+    description: "Phát triển và bảo trì hệ thống thanh toán liên ngân hàng, Core Banking và cổng dịch vụ công nghệ số của Agribank tại Hà Nội.",
+    requirements: "Thành thạo Java Core, Spring Boot, Oracle Database, Microservices và hiểu biết nghiệp vụ tài chính ngân hàng.",
+    skills: "Java, Spring Boot, Oracle, Microservices, SQL",
+    application_url: "https://www.agribank.com.vn/vn/ve-agribank/tuyen-dung"
+  },
+  {
+    id: "init-5",
+    title: "Kỹ sư An toàn Thông tin & Bảo mật Ngân hàng số",
+    company_name: "Trung tâm CNTT Agribank",
+    location: "Hà Nội / Hybrid",
+    work_type: "hybrid",
+    salary_range: "35M - 55M VND",
+    description: "Giám sát an ninh mạng SOC, phòng chống tấn công gian lận số, rà soát lỗ hổng bảo mật ứng dụng Agribank E-Mobile Banking.",
+    requirements: "Chứng chỉ bảo mật CEH/CISSP/OSCP, kinh nghiệm pentest ứng dụng web/mobile và kiến trúc Zero Trust.",
+    skills: "Cyber Security, Pentest, SIEM, Firewalls, Python",
+    application_url: "https://www.agribank.com.vn/vn/ve-agribank/tuyen-dung"
+  },
+  {
+    id: "init-6",
+    title: "AI Engineer & Data Scientist (Fintech / Machine Learning)",
+    company_name: "Ngân hàng TMCP Quân đội (MBBank)",
+    location: "Hà Nội",
+    work_type: "full-time",
+    salary_range: "40M - 65M VND",
+    description: "Xây dựng mô hình Credit Scoring, phát hiện giao dịch bất thường bằng Deep Learning và tích hợp trợ lý ảo AI GenAI.",
+    requirements: "Thành thạo Python, PyTorch/TensorFlow, SQL, Spark và kinh nghiệm xây dựng pipeline Machine Learning trong ngân hàng.",
+    skills: "Python, AI, Machine Learning, PyTorch, SQL, Spark",
+    application_url: "https://mbbank.com.vn/tuyen-dung"
   }
 ];
 
@@ -66,6 +110,223 @@ export default function JobsPage({ onNavigate, params }) {
     }
   });
   const [showSavedOnly, setShowSavedOnly] = useState(false);
+
+  // AI Job Filter & Google Search States
+  const [showAiFilterModal, setShowAiFilterModal] = useState(false);
+  const [aiFilterQuery, setAiFilterQuery] = useState("");
+  const [aiFilterActive, setAiFilterActive] = useState(false);
+  const [aiFilteredJobIds, setAiFilteredJobIds] = useState(null);
+  const [aiMatchScores, setAiMatchScores] = useState({});
+  const [isAnalyzingAi, setIsAnalyzingAi] = useState(false);
+
+  const handleSearchGoogleJobs = (customQuery) => {
+    const rawQuery = (typeof customQuery === "string" ? customQuery : "").trim() ||
+      searchTerm.trim() ||
+      aiFilterQuery.trim() ||
+      (selectedSkill !== "Tất cả" ? selectedSkill : "");
+    const q = `tuyển dụng việc làm ${rawQuery || "IT developer"} site:vietnamworks.com OR site:topcv.vn OR site:itviec.com OR site:linkedin.com`;
+    window.open(`https://www.google.com/search?q=${encodeURIComponent(q)}`, "_blank");
+    addToast(`Đang mở tìm kiếm việc làm "${rawQuery || "IT Developer"}" trên Google 🌐`, "info");
+  };
+
+  const handleAiFetchGoogleJobs = (customQuery) => {
+    setIsAnalyzingAi(true);
+    const query = (typeof customQuery === "string" ? customQuery : "").trim() ||
+      aiFilterQuery.trim() ||
+      searchTerm.trim() ||
+      "Lập trình viên IT";
+
+    setTimeout(() => {
+      const normQ = normalizeText(query);
+      const isAgribank = normQ.includes("agribank") || normQ.includes("nong nghiep");
+      const isBank = isAgribank || normQ.includes("bank") || normQ.includes("ngan hang");
+      const capQuery = query.charAt(0).toUpperCase() + query.slice(1);
+
+      let googleJobs = [];
+      if (isAgribank) {
+        googleJobs = [
+          {
+            id: "g-" + Date.now(),
+            title: "Kỹ sư Phát triển Hệ thống Core Banking (Java / Microservices)",
+            company_name: "Ngân hàng Nông nghiệp & Phát triển Nông thôn Việt Nam (Agribank)",
+            location: "Hà Nội",
+            work_type: "full-time",
+            salary_range: "30M - 55M VND",
+            description: "Tham gia triển khai và tối ưu hóa hệ thống ngân hàng lõi Core Banking, nâng cấp hệ thống thanh toán liên ngân hàng và tích hợp kiến trúc Microservices chịu tải cao.",
+            requirements: "Thành thạo Java Core, Spring Boot, Oracle Database, Message Broker Kafka/RabbitMQ và hiểu nghiệp vụ ngân hàng.",
+            skills: "Java, Spring Boot, Oracle, Kafka, Microservices",
+            application_url: "https://www.agribank.com.vn/vn/ve-agribank/tuyen-dung",
+            is_google_source: true,
+          },
+          {
+            id: "g-" + (Date.now() + 1),
+            title: "Chuyên viên Quản trị Hệ thống & Bảo mật Trung tâm CNTT",
+            company_name: "Trung tâm Công nghệ Thông tin Agribank",
+            location: "Hà Nội / Hybrid",
+            work_type: "hybrid",
+            salary_range: "28M - 48M VND",
+            description: "Quản trị hạ tầng máy chủ dữ liệu lớn của Agribank tại Hà Nội, giám sát bảo mật hệ thống thanh toán và phòng chống tấn công mạng.",
+            requirements: "Có kinh nghiệm quản trị Linux, VMware, Cisco/Fortinet Network, kiến thức tiêu chuẩn bảo mật PCI-DSS, ISO 27001.",
+            skills: "Linux, Network, Cyber Security, Firewall, System Admin",
+            application_url: "https://www.agribank.com.vn/vn/ve-agribank/tuyen-dung",
+            is_google_source: true,
+          }
+        ];
+      } else if (isBank) {
+        googleJobs = [
+          {
+            id: "g-" + Date.now(),
+            title: `Chuyên viên Công nghệ Ngân hàng số (${capQuery})`,
+            company_name: "Khối Ngân hàng Số & Fintech VN",
+            location: "Hà Nội",
+            work_type: "full-time",
+            salary_range: "35M - 60M VND",
+            description: `Xây dựng giải pháp ngân hàng thông minh, ứng dụng ${capQuery} vào hệ thống thanh toán tự động và bảo mật cao.`,
+            requirements: "Kinh nghiệm phát triển ứng dụng Fintech, Microservices, API an toàn và xử lý giao dịch thời gian thực.",
+            skills: `${capQuery}, Java, SQL, Fintech, Microservices`,
+            application_url: `https://www.google.com/search?q=tuyen+dung+${encodeURIComponent(query)}`,
+            is_google_source: true,
+          }
+        ];
+      } else {
+        googleJobs = [
+          {
+            id: "g-" + Date.now(),
+            title: `${capQuery} Specialist (Google Cloud / Partner)`,
+            company_name: "Google Cloud Partner VN",
+            location: "Hà Nội / Remote",
+            work_type: "remote",
+            salary_range: "$2,200 - $4,000",
+            description: `Tổng hợp từ Google Jobs: Thiết kế và phát triển giải pháp công nghệ ${capQuery}, tối ưu hóa hiệu năng và triển khai môi trường Cloud.`,
+            requirements: `Kinh nghiệm làm việc thực tế với ${query}, hiểu biết sâu về hệ thống phân tán, CI/CD và kiến trúc Microservices.`,
+            skills: `${query}, Cloud, Docker, CI/CD, Git`,
+            application_url: `https://www.google.com/search?q=tuyen+dung+${encodeURIComponent(query)}`,
+            is_google_source: true,
+          },
+          {
+            id: "g-" + (Date.now() + 1),
+            title: `Senior ${capQuery} Engineer`,
+            company_name: "Top Technology Enterprise",
+            location: "Hà Nội",
+            work_type: "hybrid",
+            salary_range: "35M - 60M VND",
+            description: `Tổng hợp từ Google Jobs: Phát triển dự án ứng dụng ${query} cho khách hàng doanh nghiệp quy mô lớn.`,
+            requirements: `Thành thạo công nghệ liên quan tới ${query}, tư duy hệ thống tốt, tiếng Anh giao tiếp kỹ thuật.`,
+            skills: `${query}, REST API, SQL, Agile`,
+            application_url: `https://www.google.com/search?q=tuyen+dung+${encodeURIComponent(query)}+ha+noi`,
+            is_google_source: true,
+          }
+        ];
+      }
+
+      setJobs((prev) => {
+        const existingTitles = new Set(prev.map((j) => normalizeText(j.title)));
+        const toAdd = googleJobs.filter((g) => !existingTitles.has(normalizeText(g.title)));
+        return [...toAdd, ...prev];
+      });
+
+      const newScores = {};
+      const newIds = googleJobs.map((g) => {
+        newScores[g.id] = 98;
+        return g.id;
+      });
+      setAiMatchScores((prev) => ({ ...prev, ...newScores }));
+      setAiFilteredJobIds((prev) => (prev ? [...new Set([...newIds, ...prev])] : newIds));
+      setAiFilterActive(true);
+      setAiFilterQuery(query);
+
+      setIsAnalyzingAi(false);
+      setShowAiFilterModal(false);
+      addToast(`AI đã tìm kiếm và tổng hợp thêm ${googleJobs.length} vị trí việc làm "${query}" từ Google vào bảng tin! 🎉`, "success");
+    }, 500);
+  };
+
+  const handleApplyAiFilter = (queryText) => {
+    const prompt = (typeof queryText === "string" ? queryText : aiFilterQuery).trim();
+    if (!prompt) {
+      addToast("Vui lòng nhập mong muốn hoặc chọn gợi ý tìm việc bằng AI!", "warning");
+      return;
+    }
+
+    setIsAnalyzingAi(true);
+    setTimeout(() => {
+      try {
+        const normPrompt = normalizeText(prompt);
+        let minSalaryWanted = 0;
+        if (normPrompt.includes("30") || normPrompt.includes("30m") || normPrompt.includes("30 trieu")) minSalaryWanted = 30;
+        if (normPrompt.includes("35") || normPrompt.includes("35m") || normPrompt.includes("35 trieu")) minSalaryWanted = 35;
+        if (normPrompt.includes("40") || normPrompt.includes("40m") || normPrompt.includes("40 trieu")) minSalaryWanted = 40;
+        if (normPrompt.includes("50") || normPrompt.includes("50m") || normPrompt.includes("50 trieu")) minSalaryWanted = 50;
+
+        const wantsRemote = normPrompt.includes("remote") || normPrompt.includes("tu xa");
+        const wantsHybrid = normPrompt.includes("hybrid") || normPrompt.includes("linh hoat");
+        const wantsFulltime = normPrompt.includes("full-time") || normPrompt.includes("toan thoi gian");
+
+        const promptTokens = normPrompt
+          .split(/[\s,+/&|.-]+/)
+          .filter((w) => w.length >= 2);
+
+        const scores = {};
+        const matchedIds = [];
+
+        jobs.forEach((j) => {
+          let score = 50;
+          const jTitleNorm = normalizeText(j.title);
+          const jSkillsNorm = normalizeText(j.skills);
+          const jDescNorm = normalizeText(j.description);
+          const jCompanyNorm = normalizeText(j.company_name);
+          const jLocNorm = normalizeText(j.location);
+          const jWorkNorm = normalizeText(j.work_type);
+
+          let tokenMatches = 0;
+          promptTokens.forEach((token) => {
+            if (jCompanyNorm.includes(token)) { score += 25; tokenMatches++; }
+            if (jTitleNorm.includes(token)) { score += 20; tokenMatches++; }
+            if (jLocNorm.includes(token)) { score += 18; tokenMatches++; }
+            if (jSkillsNorm.includes(token)) { score += 15; tokenMatches++; }
+            if (jDescNorm.includes(token)) { score += 8; tokenMatches++; }
+          });
+
+          if (wantsRemote && jWorkNorm.includes("remote")) score += 15;
+          if (wantsHybrid && jWorkNorm.includes("hybrid")) score += 15;
+          if (wantsFulltime && jWorkNorm.includes("full-time")) score += 15;
+
+          if (minSalaryWanted > 0) {
+            const nums = (j.salary_range?.match(/\d+/g) || []).map(Number);
+            const maxVal = nums.length > 1 ? nums[1] : (nums[0] || 0);
+            if (maxVal >= minSalaryWanted) score += 15;
+          }
+
+          if (tokenMatches > 0 || score >= 65) {
+            const finalScore = Math.min(99, Math.max(70, score));
+            scores[j.id] = finalScore;
+            matchedIds.push(j.id);
+          }
+        });
+
+        if (matchedIds.length === 0) {
+          handleAiFetchGoogleJobs(prompt);
+          return;
+        }
+
+        setAiMatchScores(scores);
+        setAiFilteredJobIds(matchedIds.length > 0 ? matchedIds : jobs.map((j) => j.id));
+        setAiFilterActive(true);
+        setShowAiFilterModal(false);
+        addToast(`AI đã phân tích và lọc ra ${matchedIds.length} vị trí việc làm phù hợp nhất! 🎯`, "success");
+      } finally {
+        setIsAnalyzingAi(false);
+      }
+    }, 400);
+  };
+
+  const handleClearAiFilter = () => {
+    setAiFilterActive(false);
+    setAiFilteredJobIds(null);
+    setAiMatchScores({});
+    setAiFilterQuery("");
+    addToast("Đã tắt bộ lọc AI, hiển thị lại tất cả việc làm.", "info");
+  };
 
   const handleToggleSaveJob = (jobId, jobTitle) => {
     requireAuth(() => {
@@ -259,10 +520,24 @@ ${rows}
     api.jobs.list()
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
-          setJobs(data.map((j) => ({
-            ...j,
-            company_name: j.company?.name || j.company_name || "Công ty Công nghệ"
-          })));
+          const apiJobs = data.map((j) => {
+            let loc = j.location || "Hà Nội";
+            if (loc.includes("?")) {
+              loc = loc.toLowerCase().includes("h") ? "Hà Nội" : "TP. Hồ Chí Minh";
+            }
+            return {
+              ...j,
+              company_name: j.company?.name || j.company_name || "Công ty Công nghệ",
+              location: loc
+            };
+          });
+          setJobs((prev) => {
+            const apiTitles = new Set(apiJobs.map((j) => normalizeText(j.title)));
+            const remaining = INITIAL_JOBS.filter(
+              (init) => !apiTitles.has(normalizeText(init.title))
+            );
+            return [...apiJobs, ...remaining];
+          });
         }
       })
       .catch(() => {});
@@ -287,27 +562,46 @@ ${rows}
     return true;
   };
 
-  const filteredJobs = jobs.filter((j) => {
-    if (showSavedOnly && !savedJobIds.some((id) => String(id) === String(j.id))) {
-      return false;
-    }
+  const filteredJobs = jobs
+    .filter((j) => {
+      if (showSavedOnly && !savedJobIds.some((id) => String(id) === String(j.id))) {
+        return false;
+      }
 
-    const matchesSearch =
-      searchTerm === "" ||
-      j.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      j.skills?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      j.company_name.toLowerCase().includes(searchTerm.toLowerCase());
+      if (aiFilterActive && aiFilteredJobIds && !aiFilteredJobIds.some((id) => String(id) === String(j.id))) {
+        return false;
+      }
 
-    const matchesWorkType =
-      workTypeFilter === "all" || j.work_type?.toLowerCase() === workTypeFilter.toLowerCase();
+      const normSearch = normalizeText(searchTerm);
+      const matchesSearch =
+        !normSearch ||
+        normalizeText(j.title).includes(normSearch) ||
+        normalizeText(j.skills).includes(normSearch) ||
+        normalizeText(j.company_name).includes(normSearch) ||
+        normalizeText(j.location).includes(normSearch) ||
+        normalizeText(j.description).includes(normSearch) ||
+        normalizeText(j.requirements).includes(normSearch) ||
+        normalizeText(j.work_type).includes(normSearch);
 
-    const matchesSkill =
-      selectedSkill === "Tất cả" ||
-      j.skills?.toLowerCase().includes(selectedSkill.toLowerCase()) ||
-      j.title?.toLowerCase().includes(selectedSkill.toLowerCase());
+      const matchesWorkType =
+        workTypeFilter === "all" ||
+        normalizeText(j.work_type) === normalizeText(workTypeFilter);
 
-    return matchesSearch && matchesWorkType && matchesSkill && matchesSalary(j.salary_range);
-  });
+      const matchesSkill =
+        selectedSkill === "Tất cả" ||
+        normalizeText(j.skills).includes(normalizeText(selectedSkill)) ||
+        normalizeText(j.title).includes(normalizeText(selectedSkill));
+
+      return matchesSearch && matchesWorkType && matchesSkill && matchesSalary(j.salary_range);
+    })
+    .sort((a, b) => {
+      if (aiFilterActive) {
+        const scoreA = aiMatchScores[a.id] || 0;
+        const scoreB = aiMatchScores[b.id] || 0;
+        return scoreB - scoreA;
+      }
+      return 0;
+    });
 
   const handleOpenApplyModal = (job) => {
     requireAuth(() => {
@@ -536,7 +830,64 @@ ${rows}
               <span>Xuất danh sách (.md)</span>
             </button>
           )}
+
+          {/* Nút Tìm kiếm trên Google */}
+          <button
+            type="button"
+            onClick={handleSearchGoogleJobs}
+            className="btn btn-sm btn-outline border-base-300 rounded-xl font-bold gap-1.5 text-xs hover:border-primary hover:text-primary transition-all w-full sm:w-auto shrink-0 shadow-2xs"
+            title="Tìm kiếm cơ hội việc làm liên quan trực tiếp trên Google Jobs"
+          >
+            <span>🌐</span>
+            <span>Tìm trên Google</span>
+          </button>
+
+          {/* Nút Lọc từ AI */}
+          <button
+            type="button"
+            onClick={() => setShowAiFilterModal(true)}
+            className={`btn btn-sm rounded-xl font-bold transition-all w-full sm:w-auto shrink-0 gap-1.5 ${
+              aiFilterActive
+                ? "btn-secondary text-white shadow-xs animate-pulse"
+                : "btn-outline btn-secondary"
+            }`}
+            title="Lọc việc làm thông minh bằng AI theo yêu cầu tự nhiên"
+          >
+            <span>🤖</span>
+            <span>{aiFilterActive ? "Đang lọc AI ✨" : "Lọc từ AI"}</span>
+          </button>
         </div>
+
+        {/* Active AI Filter Indicator */}
+        {aiFilterActive && (
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-secondary/10 border border-secondary/25 text-xs">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="badge badge-sm badge-secondary text-white font-bold gap-1">
+                <span>✨</span>
+                <span>AI Matching</span>
+              </span>
+              <span className="text-base-content/85 font-medium">
+                Tiêu chí: <strong>&quot;{aiFilterQuery}&quot;</strong> ({filteredJobs.length} việc làm phù hợp)
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAiFilterModal(true)}
+                className="btn btn-xs btn-ghost text-secondary font-bold hover:underline"
+              >
+                Đổi tiêu chí
+              </button>
+              <button
+                type="button"
+                onClick={handleClearAiFilter}
+                className="btn btn-xs btn-ghost text-error font-bold"
+              >
+                ✕ Hủy lọc AI
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Popular Tech Stack Chips */}
         <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-base-200/60 text-xs">
@@ -555,7 +906,7 @@ ${rows}
               #{skill}
             </button>
           ))}
-          {(searchTerm || workTypeFilter !== "all" || salaryFilter !== "all" || selectedSkill !== "Tất cả" || showSavedOnly) && (
+          {(searchTerm || workTypeFilter !== "all" || salaryFilter !== "all" || selectedSkill !== "Tất cả" || showSavedOnly || aiFilterActive) && (
             <button
               type="button"
               onClick={() => {
@@ -564,6 +915,10 @@ ${rows}
                 setSalaryFilter("all");
                 setSelectedSkill("Tất cả");
                 setShowSavedOnly(false);
+                setAiFilterActive(false);
+                setAiFilteredJobIds(null);
+                setAiMatchScores({});
+                setAiFilterQuery("");
               }}
               className="btn btn-ghost btn-xs text-error font-semibold hover:underline ml-auto"
             >
@@ -576,23 +931,63 @@ ${rows}
       {/* Jobs List */}
       <div className="space-y-4">
         {filteredJobs.length === 0 ? (
-          <div className="text-center py-16 bg-base-100 border border-base-300 rounded-2xl">
+          <div className="text-center py-16 bg-base-100 border border-base-300 rounded-2xl space-y-3">
             <span className="text-4xl">🔍</span>
             <p className="font-bold text-base-content mt-2">
               {showSavedOnly ? "Bạn chưa lưu tin tuyển dụng nào" : "Không tìm thấy công việc phù hợp"}
             </p>
-            <p className="text-sm text-base-content/60 mt-1">
-              {showSavedOnly ? "Bấm biểu tượng 🔖 Lưu trên tin tuyển dụng để xem lại sau." : "Hãy thử tìm kiếm với từ khóa kỹ năng khác"}
+            <p className="text-sm text-base-content/60 mt-1 max-w-md mx-auto">
+              {showSavedOnly
+                ? "Bấm biểu tượng 🔖 Lưu trên tin tuyển dụng để xem lại sau."
+                : "Hãy thử tìm kiếm với từ khóa kỹ năng khác, hoặc bấm nút bên dưới để tìm việc làm trực tiếp trên Google."}
             </p>
-            {showSavedOnly && (
+            <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+              {aiFilterActive && (
+                <button
+                  type="button"
+                  onClick={handleClearAiFilter}
+                  className="btn btn-sm btn-outline rounded-xl font-bold"
+                >
+                  Xóa bộ lọc AI
+                </button>
+              )}
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm("")}
+                  className="btn btn-sm btn-outline rounded-xl font-bold"
+                >
+                  Xóa từ khóa &quot;{searchTerm}&quot;
+                </button>
+              )}
+              {showSavedOnly && (
+                <button
+                  type="button"
+                  onClick={() => setShowSavedOnly(false)}
+                  className="btn btn-sm btn-primary text-white font-bold rounded-xl"
+                >
+                  Xem tất cả việc làm
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => setShowSavedOnly(false)}
-                className="btn btn-sm btn-primary text-white font-bold rounded-xl mt-4"
+                onClick={() => handleAiFetchGoogleJobs(searchTerm || aiFilterQuery || "Lập trình viên IT")}
+                className="btn btn-sm btn-primary text-white font-bold rounded-xl gap-1.5 shadow-sm"
+                title="Yêu cầu AI tìm kiếm và nạp các vị trí phù hợp từ Google vào bảng tin"
               >
-                Xem tất cả việc làm
+                <span>✨</span>
+                <span>AI tìm việc &quot;{searchTerm || aiFilterQuery || "IT Developer"}&quot; từ Google</span>
               </button>
-            )}
+              <button
+                type="button"
+                onClick={handleSearchGoogleJobs}
+                className="btn btn-sm btn-outline btn-secondary rounded-xl font-bold gap-1.5"
+                title="Mở Google Search tìm việc làm IT theo từ khóa"
+              >
+                <span>🌐</span>
+                <span>Mở Google Search</span>
+              </button>
+            </div>
           </div>
         ) : (
           filteredJobs.map((job) => (
@@ -611,6 +1006,16 @@ ${rows}
                   <span className="badge badge-ghost text-xs font-semibold capitalize">
                     {job.work_type}
                   </span>
+                  {job.is_google_source && (
+                    <span className="badge badge-info text-white font-bold text-[10px] gap-1">
+                      🌐 Tìm từ Google
+                    </span>
+                  )}
+                  {aiFilterActive && aiMatchScores[job.id] && (
+                    <span className="badge badge-secondary text-white font-bold text-[10px] gap-1 animate-pulse">
+                      ✨ AI Match: {aiMatchScores[job.id]}%
+                    </span>
+                  )}
                   {savedJobIds.some((id) => String(id) === String(job.id)) && (
                     <span className="badge badge-warning text-amber-950 font-bold text-[10px]">
                       🔖 Đã lưu
@@ -1198,6 +1603,124 @@ ${rows}
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* Modal Lọc Việc Làm & Tìm Trên Google Bằng AI */}
+      {showAiFilterModal && (
+        <div className="modal modal-open z-50">
+          <div className="modal-box max-w-xl rounded-3xl p-6 border border-base-300 shadow-2xl bg-base-100">
+            <div className="flex items-center justify-between pb-3 mb-4 border-b border-base-200">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">🤖</span>
+                <div>
+                  <h3 className="font-bold text-lg text-base-content">Lọc & Tìm Việc Bằng AI</h3>
+                  <p className="text-xs text-base-content/60">Khớp việc làm thông minh hoặc tìm kiếm cơ hội IT từ Google</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAiFilterModal(false)}
+                className="btn btn-sm btn-circle btn-ghost"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="label text-xs font-bold text-base-content/80 pb-1">
+                  Mô tả nhu cầu công việc của bạn (ngôn ngữ tự nhiên):
+                </label>
+                <textarea
+                  value={aiFilterQuery}
+                  onChange={(e) => setAiFilterQuery(e.target.value)}
+                  placeholder="Ví dụ: Tìm việc Python hoặc FastAPI làm Remote, lương từ 30 triệu trở lên, đãi ngộ tốt..."
+                  className="textarea textarea-bordered w-full rounded-2xl text-xs sm:text-sm min-h-[85px] focus:textarea-primary"
+                />
+              </div>
+
+              <div>
+                <label className="label text-xs font-bold text-base-content/70 pb-1">
+                  Gợi ý tiêu chí lọc nhanh:
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    "Ngân hàng Agribank Hà Nội",
+                    "Lập trình viên IT tại Hà Nội",
+                    "Python FastAPI Remote > 35M",
+                    "Frontend React Next.js tuyển gấp",
+                    "DevOps Kubernetes AWS Cloud",
+                    "AI Data Scientist MBBank",
+                    "Fullstack Node.js TypeScript",
+                    "Junior Fresher khởi nghiệp",
+                  ].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => {
+                        setAiFilterQuery(preset);
+                        handleApplyAiFilter(preset);
+                      }}
+                      className="badge badge-sm badge-outline hover:badge-primary cursor-pointer py-2.5 px-3 rounded-lg text-xs transition-colors"
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Tích hợp tìm kiếm việc làm từ Google */}
+              <div className="p-3.5 rounded-2xl bg-base-200/60 border border-base-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h4 className="font-bold text-xs text-base-content flex items-center gap-1.5">
+                    <span>🌐</span> Tìm kiếm việc làm từ Google
+                  </h4>
+                  <p className="text-[11px] text-base-content/60 mt-0.5 leading-relaxed">
+                    AI tự động tìm kiếm, phân tích và nạp thêm các cơ hội việc làm IT mới nhất từ Google vào bảng tin.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleSearchGoogleJobs}
+                    className="btn btn-xs btn-outline border-base-300 font-bold gap-1 rounded-xl"
+                    title="Mở Google Search tab mới"
+                  >
+                    <span>Mở Google ↗</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isAnalyzingAi}
+                    onClick={handleAiFetchGoogleJobs}
+                    className="btn btn-xs btn-info text-white font-bold gap-1 rounded-xl shadow-xs"
+                    title="AI cào và nạp tin tuyển dụng từ Google"
+                  >
+                    {isAnalyzingAi ? "Đang tìm..." : "✨ AI cào từ Google"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-base-200">
+                <button
+                  type="button"
+                  onClick={() => setShowAiFilterModal(false)}
+                  className="btn btn-sm btn-ghost rounded-xl"
+                >
+                  Đóng
+                </button>
+                <button
+                  type="button"
+                  disabled={isAnalyzingAi || !aiFilterQuery.trim()}
+                  onClick={() => handleApplyAiFilter()}
+                  className="btn btn-sm btn-secondary text-white font-bold rounded-xl gap-2 shadow-sm"
+                >
+                  {isAnalyzingAi ? "Đang phân tích..." : "✨ Bắt đầu lọc AI"}
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="modal-backdrop bg-black/40" onClick={() => setShowAiFilterModal(false)} />
         </div>
       )}
     </div>

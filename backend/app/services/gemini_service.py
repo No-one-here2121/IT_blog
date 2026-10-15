@@ -1,3 +1,5 @@
+import base64
+import binascii
 import json
 import logging
 import re
@@ -53,17 +55,26 @@ class GeminiKeyInfo:
 
 
 class GeminiService:
+    api_url = "https://generativelanguage.googleapis.com/v1beta/interactions"
+    api_revision = "2026-05-20"
+    request_timeout = 60.0
+    speech_model = "gemini-3.8-flash-tts"
+    speech_request_timeout = 120.0
+
     def __init__(self):
-        self.model: str = settings.GEMINI_MODEL or "gemini-1.5-flash"
+        self.model: str = settings.GEMINI_MODEL or "gemini-3.1-flash-lite"
         self.keys_pool: List[GeminiKeyInfo] = []
         self.current_index: int = 0
-        
-        # Load initial keys from settings
-        initial_keys = settings.GEMINI_API_KEYS
-        if isinstance(initial_keys, list):
-            self.set_keys(initial_keys)
-        elif isinstance(initial_keys, str) and initial_keys:
-            self.set_keys([initial_keys])
+
+        # Load initial keys from settings without mutating the original settings list.
+        initial_keys = settings.GEMINI_API_KEYS or []
+        if isinstance(initial_keys, str):
+            initial_keys = [initial_keys] if initial_keys else []
+        else:
+            initial_keys = list(initial_keys)
+        if settings.GEMINI_API_KEY:
+            initial_keys.append(settings.GEMINI_API_KEY)
+        self.set_keys(initial_keys)
 
     def set_keys(self, keys: List[str]):
         """Replace or set the active pool of Gemini API keys."""
@@ -108,6 +119,184 @@ class GeminiService:
 
         return None
 
+    @staticmethod
+    def _extract_text_from_response(data: Any) -> Optional[str]:
+        """Support both legacy steps-based responses and newer candidate-based Gemini payloads."""
+        if not isinstance(data, dict):
+            return None
+
+        for container_name in ("steps", "candidates"):
+            container = data.get(container_name)
+            if not isinstance(container, list):
+                continue
+
+            for item in reversed(container):
+                if not isinstance(item, dict):
+                    continue
+
+                if container_name == "steps":
+                    if item.get("type") != "model_output":
+                        continue
+                    content = item.get("content", [])
+                else:
+                    content = item.get("content", {})
+                    if isinstance(content, dict):
+                        content = content.get("parts", [])
+
+                if isinstance(content, list):
+                    text_parts = []
+                    for block in content:
+                        if isinstance(block, dict):
+                            text = block.get("text")
+                            if text:
+                                text_parts.append(text)
+                            elif block.get("type") == "text":
+                                text_parts.append(block.get("text", ""))
+                    if text_parts:
+                        return "".join(text_parts)
+
+                if isinstance(content, dict):
+                    parts = content.get("parts", [])
+                    if isinstance(parts, list):
+                        text_parts = [part.get("text", "") for part in parts if isinstance(part, dict)]
+                        combined = "".join(text_parts)
+                        if combined:
+                            return combined
+
+        return None
+
+    @staticmethod
+    def _extract_audio_base64(data: Any) -> Optional[str]:
+        """Extract base64 audio from Gemini Interactions API response layouts.
+
+        The API returns an Interaction whose audio is stored in the ``steps``
+        array as content blocks of type ``audio`` (e.g.
+        ``{"type": "audio", "data": "BASE64_ENCODED", "mime_type": "..."}``),
+        while convenience properties like ``interaction.output_audio`` are
+        computed on top of those steps by the client SDKs.  This method
+        therefore scans both the legacy top-level fields AND the steps /
+        candidates containers (including nested parts), instead of only
+        looking for SDK-level fields in the raw HTTP response.
+        """
+        if not isinstance(data, dict):
+            return None
+
+        # 1. Legacy / SDK-level convenience fields
+        for key in ("output_audio", "outputAudio", "audio"):
+            payload = GeminiService._looks_like_audio(data.get(key))
+            if payload:
+                return str(payload)
+
+        # 2. Walk everything, in priority order:
+        #    - steps / candidates containers (documented layout)
+        #    - blocks typed "audio" (content blocks with data/mime_type)
+        #    - any dict whose keys look like an audio payload
+        #    as a last resort, a deep recursive scan
+        for container_key in ("steps", "candidates"):
+            if not isinstance(data.get(container_key), list):
+                continue
+            for item in data[container_key]:
+                if not isinstance(item, dict):
+                    continue
+                payload = GeminiService._try_extract_item_audio(item)
+                if payload:
+                    return str(payload)
+
+        # 3. Deep recursive fallback
+        return GeminiService._deep_find_audio(data)
+
+    @staticmethod
+    def _looks_like_audio(value: Any) -> Optional[str]:
+        """Return a payload string if the value looks like base64 audio."""
+        if isinstance(value, str):
+            return value if value.strip() else None
+        if not isinstance(value, dict):
+            return None
+        for nested_key in ("data", "base64", "audio_data"):
+            payload = value.get(nested_key)
+            if isinstance(payload, str) and payload.strip():
+                return payload
+        if value.get("mime_type") and value.get("data"):
+            return str(value.get("data"))
+        nested = value.get("content")
+        if isinstance(nested, dict):
+            for deep_key in ("data", "base64"):
+                payload = nested.get(deep_key)
+                if isinstance(payload, str) and payload.strip():
+                    return payload
+        return None
+
+    @staticmethod
+    def _try_extract_item_audio(item: Dict[str, Any]) -> Optional[str]:
+        """Audio inside a step/candidate object (e.g. steps[].content[])."""
+        if not isinstance(item, dict):
+            return None
+
+        for key in ("output_audio", "outputAudio", "audio", "inline_data", "inlineData"):
+            payload = GeminiService._looks_like_audio(item.get(key))
+            if payload:
+                return str(payload)
+
+        # Content blocks: [{"type": "audio", "data": "...", "mime_type": "audio/wav"}]
+        content = item.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                payload = GeminiService._looks_like_audio(block)
+                if payload:
+                    return str(payload)
+                mime = str(block.get("mime_type") or block.get("mimeType") or "")
+                block_type = str(block.get("type") or "")
+                if block_type in ("audio", "output_audio") or mime.startswith("audio/"):
+                    for nested_key in ("data", "base64", "audio_data"):
+                        payload = block.get(nested_key)
+                        if isinstance(payload, str) and payload.strip():
+                            return str(payload)
+        elif isinstance(content, dict):
+            payload = GeminiService._looks_like_audio(content)
+            if payload:
+                return str(payload)
+
+        # Candidates-style parts: candidates[].content[].parts[]
+        parts = item.get("parts")
+        if isinstance(parts, list):
+            for part in parts:
+                if not isinstance(part, dict):
+                    continue
+                payload = GeminiService._looks_like_audio(part)
+                if payload:
+                    return str(payload)
+                mime = str(part.get("mime_type") or part.get("mimeType") or "")
+                if mime.startswith("audio/"):
+                    for nested_key in ("data", "base64", "audio_data"):
+                        payload = part.get(nested_key)
+                        if isinstance(payload, str) and payload.strip():
+                            return str(payload)
+        return None
+
+    @staticmethod
+    def _deep_find_audio(node: Any, depth: int = 0) -> Optional[str]:
+        """Last-resort recursive scan for audio payloads in the whole response."""
+        if depth > 16:
+            return None
+        if isinstance(node, dict):
+            # Skip non-audio-looking containers that frequently appear in
+            # Gemini responses (though a dict with data+audio mime is ok).
+            mime = str(node.get("mime_type") or node.get("mimeType") or "")
+            if mime.startswith("audio/") and "data" in node:
+                return str(node.get("data"))
+            for value in node.values():
+                payload = GeminiService._deep_find_audio(value, depth + 1)
+                if payload:
+                    return str(payload)
+        elif isinstance(node, list):
+            for value in node:
+                payload = GeminiService._deep_find_audio(value, depth + 1)
+                if payload:
+                    return str(payload)
+        return None
+
     def call_gemini(
         self,
         prompt: str,
@@ -122,24 +311,16 @@ class GeminiService:
             return None
 
         payload: Dict[str, Any] = {
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [{"text": prompt}]
-                }
-            ],
-            "generationConfig": {
-                "temperature": temperature
-            }
+            "model": self.model,
+            "input": prompt,
+            "generation_config": {"temperature": temperature},
         }
 
         if system_instruction:
-            payload["systemInstruction"] = {
-                "parts": [{"text": system_instruction}]
-            }
+            payload["system_instruction"] = system_instruction
 
         if json_mode:
-            payload["generationConfig"]["responseMimeType"] = "application/json"
+            payload["generation_config"]["response_mime_type"] = "application/json"
 
         # Try available keys in pool
         max_attempts = max(1, len(self.keys_pool))
@@ -150,22 +331,30 @@ class GeminiService:
 
             key_info.request_count += 1
             key_info.last_used_at = datetime.now(timezone.utc).isoformat()
-            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={key_info.key}"
+            headers = {
+                "x-goog-api-key": key_info.key,
+                "Content-Type": "application/json",
+                "Api-Revision": self.api_revision,
+            }
 
             try:
-                with httpx.Client(timeout=20.0) as client:
-                    resp = client.post(api_url, json=payload)
+                with httpx.Client(timeout=self.request_timeout) as client:
+                    resp = client.post(self.api_url, headers=headers, json=payload)
 
                 if resp.status_code == 200:
                     data = resp.json()
-                    candidates = data.get("candidates", [])
-                    if candidates and "content" in candidates[0]:
-                        parts = candidates[0]["content"].get("parts", [])
-                        if parts and "text" in parts[0]:
-                            key_info.success_count += 1
-                            key_info.status = "active"
-                            key_info.last_error = None
-                            return parts[0]["text"]
+                    text = self._extract_text_from_response(data)
+                    if text:
+                        key_info.success_count += 1
+                        key_info.status = "active"
+                        key_info.last_error = None
+                        return text
+                    key_info.failure_count += 1
+                    key_info.last_error = "Gemini response did not contain text output"
+                    logger.warning(
+                        "Gemini returned no text output for key %s",
+                        key_info.masked_key,
+                    )
                     return None
 
                 # Handle Rate Limit (429)
@@ -200,27 +389,213 @@ class GeminiService:
 
         return None
 
+    def generate_speech(self, text: str) -> Optional[bytes]:
+        """Generate natural Vietnamese narration as WAV audio using Gemini TTS."""
+        if not self.keys_pool:
+            return None
+
+        payload = {
+            "model": self.speech_model,
+            "input": [
+                {
+                    "type": "user_input",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": text,
+                            "annotations": [
+                                {
+                                    "type": "speech_metadata",
+                                    "style": (
+                                        "Natural Vietnamese narration, warm and engaging, "
+                                        "clear pronunciation, steady moderate pace."
+                                    ),
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+            "response_format": {"type": "audio"},
+            "generation_config": {
+                "speech_config": [{"voice": "Kore"}],
+            },
+        }
+
+        max_attempts = max(1, len(self.keys_pool))
+        for _ in range(max_attempts):
+            key_info = self.get_next_key_info()
+            if not key_info:
+                break
+
+            key_info.request_count += 1
+            key_info.last_used_at = datetime.now(timezone.utc).isoformat()
+            headers = {
+                "x-goog-api-key": key_info.key,
+                "Content-Type": "application/json",
+                "Api-Revision": self.api_revision,
+            }
+
+            try:
+                with httpx.Client(timeout=self.speech_request_timeout) as client:
+                    resp = client.post(self.api_url, headers=headers, json=payload)
+
+                if resp.status_code == 200:
+                    response_data = resp.json()
+                    audio_data = self._extract_audio_base64(response_data)
+                    if not audio_data:
+                        key_info.failure_count += 1
+                        key_info.last_error = "Gemini response did not contain audio output"
+                        logger.warning(
+                            "Gemini returned no audio output for key %s. Response keys: %s",
+                            key_info.masked_key,
+                            sorted(response_data.keys()),
+                        )
+                        return None
+
+                    try:
+                        normalized = str(audio_data).strip()
+                        if normalized.lower().startswith("data:"):
+                            normalized = normalized.split(",", 1)[1]
+                        normalized = "".join(normalized.split())
+                        if not normalized:
+                            raise ValueError("audio payload was empty")
+                        audio_bytes = base64.b64decode(normalized, validate=False)
+                    except (binascii.Error, TypeError, ValueError) as exc:
+                        key_info.failure_count += 1
+                        key_info.last_error = f"Invalid audio data: {str(exc)[:100]}"
+                        logger.warning(
+                            "Gemini returned invalid audio data for key %s",
+                            key_info.masked_key,
+                        )
+                        return None
+
+                    key_info.success_count += 1
+                    key_info.status = "active"
+                    key_info.last_error = None
+                    return audio_bytes
+
+                if resp.status_code == 429:
+                    key_info.failure_count += 1
+                    key_info.status = "rate_limited"
+                    key_info.rate_limited_until = time.time() + 60
+                    key_info.last_error = "429 Quota Exceeded / Rate Limited"
+                    logger.warning(
+                        "Gemini TTS key %s rate limited. Rotating to next key...",
+                        key_info.masked_key,
+                    )
+                    continue
+
+                if resp.status_code in [400, 403]:
+                    err_msg = resp.text
+                    if "API_KEY_INVALID" in err_msg or "PERMISSION_DENIED" in err_msg:
+                        key_info.failure_count += 1
+                        key_info.status = "invalid"
+                        key_info.last_error = f"{resp.status_code} Invalid API Key"
+                        logger.error(
+                            "Gemini TTS key %s is invalid. Rotating...",
+                            key_info.masked_key,
+                        )
+                        continue
+
+                key_info.failure_count += 1
+                key_info.last_error = f"HTTP {resp.status_code}: {resp.text[:100]}"
+                logger.warning(
+                    "Gemini TTS failed for key %s with HTTP %s",
+                    key_info.masked_key,
+                    resp.status_code,
+                )
+            except (httpx.HTTPError, TypeError, ValueError) as exc:
+                key_info.failure_count += 1
+                key_info.last_error = f"Gemini TTS request failed: {str(exc)[:100]}"
+                logger.warning(
+                    "Gemini TTS request failed for key %s: %s",
+                    key_info.masked_key,
+                    exc,
+                )
+
+        return None
+
+    def generate_vietnamese_tts(self, text: str) -> Optional[bytes]:
+        """Generate high-quality native Vietnamese audio using Google TTS service as reliable fallback."""
+        import urllib.parse
+        clean_text = re.sub(r"\s+", " ", text).strip()
+        if not clean_text:
+            return None
+
+        # Split text into chunks <= 160 characters (Google TTS character limit is ~200)
+        chunks = []
+        sentences = re.split(r"(?<=[.!?;\n])\s+", clean_text)
+        for sent in sentences:
+            sent = sent.strip()
+            if not sent:
+                continue
+            if len(sent) <= 160:
+                chunks.append(sent)
+            else:
+                words = sent.split(" ")
+                current = []
+                current_len = 0
+                for w in words:
+                    if current_len + len(w) + 1 > 160:
+                        chunks.append(" ".join(current))
+                        current = [w]
+                        current_len = len(w)
+                    else:
+                        current.append(w)
+                        current_len += len(w) + 1
+                if current:
+                    chunks.append(" ".join(current))
+
+        if not chunks:
+            return None
+
+        chunks = chunks[:120]  # Support up to ~20 minutes of speech
+        audio_data = bytearray()
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Referer": "https://translate.google.com/",
+        }
+
+        with httpx.Client(timeout=15.0, headers=headers) as client:
+            for chunk in chunks:
+                try:
+                    url = f"https://translate.google.com/translate_tts?ie=UTF-8&q={urllib.parse.quote(chunk)}&tl=vi&client=tw-ob"
+                    resp = client.get(url)
+                    if resp.status_code == 200 and resp.content:
+                        audio_data.extend(resp.content)
+                except Exception as exc:
+                    logger.warning("TTS chunk fetch error: %s", exc)
+                    continue
+
+        return bytes(audio_data) if len(audio_data) > 0 else None
+
     def test_key(self, api_key: str) -> Dict[str, Any]:
         """Test a specific API key against Google Gemini API."""
         clean_k = api_key.strip()
         if not clean_k:
-            return {"valid": False, "message": "API key không được để trống"}
+            return {"valid": False, "message": "API key kh?ng du?c d? tr?ng"}
 
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={clean_k}"
+        headers = {
+            "x-goog-api-key": clean_k,
+            "Content-Type": "application/json",
+            "Api-Revision": self.api_revision,
+        }
         payload = {
-            "contents": [{"parts": [{"text": "Hello, respond with 'OK' if you can read this."}]}]
+            "model": self.model,
+            "input": "Hello, respond with 'OK' if you can read this.",
         }
         try:
-            with httpx.Client(timeout=10.0) as client:
-                resp = client.post(api_url, json=payload)
+            with httpx.Client(timeout=self.request_timeout) as client:
+                resp = client.post(self.api_url, headers=headers, json=payload)
             if resp.status_code == 200:
-                return {"valid": True, "message": f"Kết nối Gemini thành công! (Mô hình: {self.model})"}
+                return {"valid": True, "message": f"K?t n?i Gemini th?nh c?ng! (M? h?nh: {self.model})"}
             elif resp.status_code == 429:
-                return {"valid": True, "rate_limited": True, "message": "Key hợp lệ nhưng đang bị giới hạn tốc độ (Rate Limit 429)."}
+                return {"valid": True, "rate_limited": True, "message": "Key h?p l? nhung dang b? gi?i h?n t?c d? (Rate Limit 429)."}
             else:
-                return {"valid": False, "message": f"Lỗi xác thực ({resp.status_code}): {resp.text[:150]}"}
+                return {"valid": False, "message": f"L?i x?c th?c ({resp.status_code}): {resp.text[:150]}"}
         except Exception as e:
-            return {"valid": False, "message": f"Lỗi kết nối tới máy chủ Google Gemini: {str(e)}"}
+            return {"valid": False, "message": f"L?i k?t n?i t?i m?y ch? Google Gemini: {str(e)}"}
 
     # =========================================================================
     # Specialized AI Modules
@@ -231,21 +606,21 @@ class GeminiService:
         Automated content moderation using Gemini AI with fallback.
         """
         system_prompt = (
-            "Bạn là trợ lý AI chuyên kiểm duyệt nội dung cho nền tảng blog kỹ thuật công nghệ thông tin (IT Blog). "
-            "Nhiệm vụ của bạn là đánh giá tính an toàn, tính chuyên môn và chất lượng của bài viết. "
-            "Hãy trả về kết quả dưới định dạng JSON duy nhất với các trường:\n"
+            "B?n l? tr? l? AI chuy?n ki?m duy?t n?i dung cho n?n t?ng blog k? thu?t c?ng ngh? th?ng tin (IT Blog). "
+            "Nhi?m v? c?a b?n l? d?nh gi? t?nh an to?n, t?nh chuy?n m?n v? ch?t lu?ng c?a b?i vi?t. "
+            "H?y tr? v? k?t qu? du?i d?nh d?ng JSON duy nh?t v?i c?c tru?ng:\n"
             "{\n"
-            "  \"is_safe\": boolean (true nếu không chứa nội dung cấm),\n"
-            "  \"spam_score\": float (0.0 đến 1.0, cao nghĩa là spam quảng cáo/cờ bạc),\n"
-            "  \"toxicity_score\": float (0.0 đến 1.0, cao nghĩa là độc hại/chửi bới/lừa đảo),\n"
-            "  \"is_tech_related\": boolean (true nếu liên quan đến lập trình, IT, phần mềm, công nghệ),\n"
-            "  \"quality_score\": float (0.0 đến 1.0, đánh giá độ mạch lạc và giá trị kỹ thuật),\n"
+            "  \"is_safe\": boolean (true n?u kh?ng ch?a n?i dung c?m),\n"
+            "  \"spam_score\": float (0.0 d?n 1.0, cao nghia l? spam qu?ng c?o/c? b?c),\n"
+            "  \"toxicity_score\": float (0.0 d?n 1.0, cao nghia l? d?c h?i/ch?i b?i/l?a d?o),\n"
+            "  \"is_tech_related\": boolean (true n?u li?n quan d?n l?p tr?nh, IT, ph?n m?m, c?ng ngh?),\n"
+            "  \"quality_score\": float (0.0 d?n 1.0, d?nh gi? d? m?ch l?c v? gi? tr? k? thu?t),\n"
             "  \"verdict\": string (\"approved\" | \"flagged\" | \"rejected\"),\n"
-            "  \"reasons\": [danh sách các chuỗi tiếng Việt giải thích lý do nếu có vi phạm hoặc cần lưu ý]\n"
+            "  \"reasons\": [danh s?ch c?c chu?i ti?ng Vi?t gi?i th?ch l? do n?u c? vi ph?m ho?c c?n luu ?]\n"
             "}"
         )
 
-        user_prompt = f"Tiêu đề: {title}\n\nNội dung:\n{content[:4000]}"
+        user_prompt = f"Ti?u d?: {title}\n\nN?i dung:\n{content[:4000]}"
         gemini_response = self.call_gemini(user_prompt, system_instruction=system_prompt, json_mode=True)
 
         if gemini_response:
@@ -271,18 +646,18 @@ class GeminiService:
         AI Post Optimizer: Generate engaging titles, SEO metadata, and tag suggestions.
         """
         system_prompt = (
-            "Bạn là chuyên gia Content Marketing & SEO kỹ thuật dành cho lập trình viên. "
-            "Hãy phân tích bài viết và trả về JSON chuẩn gồm:\n"
+            "B?n l? chuy?n gia Content Marketing & SEO k? thu?t d?nh cho l?p tr?nh vi?n. "
+            "H?y ph?n t?ch b?i vi?t v? tr? v? JSON chu?n g?m:\n"
             "{\n"
-            "  \"suggested_titles\": [3 tiêu đề hấp dẫn, thu hút người đọc CNTT],\n"
-            "  \"seo_title\": \"tiêu đề chuẩn SEO dưới 60 ký tự\",\n"
-            "  \"meta_description\": \"mô tả ngắn chuẩn SEO dưới 155 ký tự\",\n"
-            "  \"suggested_tags\": [3 đến 5 thẻ tag kỹ thuật tiếng Anh hoặc tiếng Việt chuẩn],\n"
-            "  \"suggested_category\": \"Frontend\" | \"Backend\" | \"DevOps\" | \"Database\" | \"AI\" | \"Mobile\" | \"Bảo mật\"\n"
+            "  \"suggested_titles\": [3 ti?u d? h?p d?n, thu h?t ngu?i d?c CNTT],\n"
+            "  \"seo_title\": \"ti?u d? chu?n SEO du?i 60 k? t?\",\n"
+            "  \"meta_description\": \"m? t? ng?n chu?n SEO du?i 155 k? t?\",\n"
+            "  \"suggested_tags\": [3 d?n 5 th? tag k? thu?t ti?ng Anh ho?c ti?ng Vi?t chu?n],\n"
+            "  \"suggested_category\": \"Frontend\" | \"Backend\" | \"DevOps\" | \"Database\" | \"AI\" | \"Mobile\" | \"B?o m?t\"\n"
             "}"
         )
 
-        user_prompt = f"Tiêu đề ban đầu: {title}\n\nNội dung bài viết:\n{content[:3000]}"
+        user_prompt = f"Ti?u d? ban d?u: {title}\n\nN?i dung b?i vi?t:\n{content[:3000]}"
         gemini_response = self.call_gemini(user_prompt, system_instruction=system_prompt, json_mode=True)
 
         if gemini_response:
@@ -306,15 +681,15 @@ class GeminiService:
         Context-aware code assistant: Explain, Debug, Optimize, or Refactor code snippet.
         """
         system_prompt = (
-            "Bạn là một Senior Tech Lead & Chuyên gia Kỹ thuật Phần mềm. "
-            "Hãy trả về JSON gồm:\n"
+            "B?n l? m?t Senior Tech Lead & Chuy?n gia K? thu?t Ph?n m?m. "
+            "H?y tr? v? JSON g?m:\n"
             "{\n"
-            "  \"explanation\": \"phân tích chi tiết bằng tiếng Việt\",\n"
-            "  \"improved_code\": \"đoạn mã đã được debug/tối ưu/tái cấu trúc\",\n"
-            "  \"key_takeaways\": [3 điểm cốt lõi developer cần lưu ý]\n"
+            "  \"explanation\": \"ph?n t?ch chi ti?t b?ng ti?ng Vi?t\",\n"
+            "  \"improved_code\": \"do?n m? d? du?c debug/t?i uu/t?i c?u tr?c\",\n"
+            "  \"key_takeaways\": [3 di?m c?t l?i developer c?n luu ?]\n"
             "}"
         )
-        user_prompt = f"Hành động yêu cầu: {action}\nNgôn ngữ: {language}\nĐoạn mã:\n```{language}\n{snippet}\n```"
+        user_prompt = f"H?nh d?ng y?u c?u: {action}\nNg?n ng?: {language}\n?o?n m?:\n```{language}\n{snippet}\n```"
         gemini_response = self.call_gemini(user_prompt, system_instruction=system_prompt, json_mode=True)
 
         if gemini_response:
@@ -335,36 +710,36 @@ class GeminiService:
     def ask_article(self, article_title: str, article_content: str, question: str, context: Optional[str] = None) -> str:
         """Answer reader questions based on article content."""
         system_prompt = (
-            "Bạn là trợ lý giải đáp kỹ thuật của nền tảng IT Blog. "
-            "Hãy trả lời câu hỏi của người dùng dựa trên nội dung bài viết kỹ thuật được cung cấp. "
-            "Trả lời ngắn gọn, chuẩn xác, thân thiện và cung cấp ví dụ nếu cần."
+            "B?n l? tr? l? gi?i d?p k? thu?t c?a n?n t?ng IT Blog. "
+            "H?y tr? l?i c?u h?i c?a ngu?i d?ng d?a tr?n n?i dung b?i vi?t k? thu?t du?c cung c?p. "
+            "Tr? l?i ng?n g?n, chu?n x?c, th?n thi?n v? cung c?p v? d? n?u c?n."
         )
         user_prompt = (
-            f"Bài viết: {article_title}\n"
-            f"Ngữ cảnh trích đoạn: {context or 'Toàn bài viết'}\n"
-            f"Nội dung tóm lược: {article_content[:3000]}\n\n"
-            f"Câu hỏi của độc giả: {question}"
+            f"B?i vi?t: {article_title}\n"
+            f"Ng? c?nh tr?ch do?n: {context or 'To?n b?i vi?t'}\n"
+            f"N?i dung t?m lu?c: {article_content[:3000]}\n\n"
+            f"C?u h?i c?a d?c gi?: {question}"
         )
         ans = self.call_gemini(user_prompt, system_instruction=system_prompt)
         if ans:
             return ans.strip()
 
         return (
-            f"Dựa trên bài viết '{article_title}': Vấn đề bạn hỏi '{question}' "
-            "đã được tác giả giải thích và phân tích chi tiết trong bài viết. Phương pháp tốt nhất là tuân thủ cấu trúc chuẩn, "
-            "kiểm thử tự động và tham khảo tài liệu chính thức của công nghệ đang sử dụng."
+            f"D?a tr?n b?i vi?t '{article_title}': V?n d? b?n h?i '{question}' "
+            "d? du?c t?c gi? gi?i th?ch v? ph?n t?ch chi ti?t trong b?i vi?t. Phuong ph?p t?t nh?t l? tu?n th? c?u tr?c chu?n, "
+            "ki?m th? t? d?ng v? tham kh?o t?i li?u ch?nh th?c c?a c?ng ngh? dang s? d?ng."
         )
 
     def summarize_article(self, article_title: str, article_content: str) -> Dict[str, Any]:
         """Summarize technical post into core key takeaways."""
         system_prompt = (
-            "Hãy tóm tắt bài viết kỹ thuật công nghệ thông tin dưới định dạng JSON:\n"
+            "H?y t?m t?t b?i vi?t k? thu?t c?ng ngh? th?ng tin du?i d?nh d?ng JSON:\n"
             "{\n"
-            "  \"summary\": \"tóm tắt 2-3 câu ngắn gọn toàn bộ bài viết\",\n"
-            "  \"key_points\": [3 luận điểm kỹ thuật quan trọng nhất]\n"
+            "  \"summary\": \"t?m t?t 2-3 c?u ng?n g?n to?n b? b?i vi?t\",\n"
+            "  \"key_points\": [3 lu?n di?m k? thu?t quan tr?ng nh?t]\n"
             "}"
         )
-        user_prompt = f"Tiêu đề: {article_title}\n\nNội dung:\n{article_content[:3500]}"
+        user_prompt = f"Ti?u d?: {article_title}\n\nN?i dung:\n{article_content[:3500]}"
         gemini_response = self.call_gemini(user_prompt, system_instruction=system_prompt, json_mode=True)
 
         if gemini_response:
@@ -378,33 +753,33 @@ class GeminiService:
                 pass
 
         return {
-            "summary": f"Bài viết '{article_title}' cung cấp phân tích chi tiết về kiến trúc và kỹ thuật thực chiến trong dự án.",
+            "summary": f"B?i vi?t '{article_title}' cung c?p ph?n t?ch chi ti?t v? ki?n tr?c v? k? thu?t th?c chi?n trong d? ?n.",
             "key_points": [
-                f"Tổng quan công nghệ: {article_title}",
-                "Thiết lập môi trường và cấu trúc dự án chuẩn Clean Architecture",
-                "Tối ưu hiệu năng, bảo mật và khả năng mở rộng hệ thống"
+                f"T?ng quan c?ng ngh?: {article_title}",
+                "Thi?t l?p m?i tru?ng v? c?u tr?c d? ?n chu?n Clean Architecture",
+                "T?i uu hi?u nang, b?o m?t v? kh? nang m? r?ng h? th?ng"
             ]
         }
 
     def generate_bot_comment(self, post_title: str, post_content: str, tech_stack: Optional[str] = None) -> str:
         """Generate an insightful discussion starter from AI TechBot."""
         system_prompt = (
-            "Bạn là 'AI TechBot' - Trợ lý kỹ thuật tự động trên diễn đàn IT Blog. "
-            "Nhiệm vụ của bạn là đọc bài viết và viết 1 bình luận mang tính xây dựng, "
-            "nêu bật 1 mẹo thực hành tốt nhất (best practice), chia sẻ kinh nghiệm tránh lỗi "
-            "và đặt 1 câu hỏi mở để kích thích cộng đồng thảo luận. Giữ bình luận trong khoảng 3-5 câu."
+            "B?n l? 'AI TechBot' - Tr? l? k? thu?t t? d?ng tr?n di?n d?n IT Blog. "
+            "Nhi?m v? c?a b?n l? d?c b?i vi?t v? vi?t 1 b?nh lu?n mang t?nh x?y d?ng, "
+            "n?u b?t 1 m?o th?c h?nh t?t nh?t (best practice), chia s? kinh nghi?m tr?nh l?i "
+            "v? d?t 1 c?u h?i m? d? k?ch th?ch c?ng d?ng th?o lu?n. Gi? b?nh lu?n trong kho?ng 3-5 c?u."
         )
-        user_prompt = f"Bài viết: {post_title}\nCông nghệ: {tech_stack or 'Công nghệ phần mềm'}\nNội dung: {post_content[:2000]}"
+        user_prompt = f"B?i vi?t: {post_title}\nC?ng ngh?: {tech_stack or 'C?ng ngh? ph?n m?m'}\nN?i dung: {post_content[:2000]}"
         ans = self.call_gemini(user_prompt, system_instruction=system_prompt)
         if ans:
-            return f"🤖 **[AI TechBot Phản hồi]**: {ans.strip()}"
+            return f"?? **[AI TechBot Ph?n h?i]**: {ans.strip()}"
 
         # Heuristic fallback
         return (
-            f"🤖 **[AI TechBot Phản hồi]**: Chào bạn! Về chủ đề **{post_title}**, "
-            f"mẹo thực hành tốt nhất là luôn tuân thủ nguyên tắc Single Responsibility, "
-            f"kiểm thử tự động các edge cases và tham khảo tài liệu chính thức của {tech_stack or 'thư viện'}. "
-            f"Độc giả có thắc mắc gì về cấu trúc này hãy đặt câu hỏi bên dưới nhé!"
+            f"?? **[AI TechBot Ph?n h?i]**: Ch?o b?n! V? ch? d? **{post_title}**, "
+            f"m?o th?c h?nh t?t nh?t l? lu?n tu?n th? nguy?n t?c Single Responsibility, "
+            f"ki?m th? t? d?ng c?c edge cases v? tham kh?o t?i li?u ch?nh th?c c?a {tech_stack or 'thu vi?n'}. "
+            f"??c gi? c? th?c m?c g? v? c?u tr?c n?y h?y d?t c?u h?i b?n du?i nh?!"
         )
 
     # =========================================================================
@@ -413,16 +788,16 @@ class GeminiService:
 
     def _heuristic_moderation(self, title: str, content: str) -> Dict[str, Any]:
         text = (title + " " + content).lower()
-        spam_keywords = ["casino", "cá cược", "bet88", "lô đề", "tiền ảo lừa đảo", "click here to win", "vay nhanh online"]
+        spam_keywords = ["casino", "c? cu?c", "bet88", "l? d?", "ti?n ?o l?a d?o", "click here to win", "vay nhanh online"]
         is_spam = any(k in text for k in spam_keywords)
         spam_score = 0.95 if is_spam else (0.1 if len(content) < 50 else 0.02)
 
-        toxic_keywords = ["đồ ngu", "lừa đảo", "chết tiệt", "scam", "chửi bới", "racist"]
+        toxic_keywords = ["d? ngu", "l?a d?o", "ch?t ti?t", "scam", "ch?i b?i", "racist"]
         is_toxic = any(k in text for k in toxic_keywords)
         toxicity_score = 0.9 if is_toxic else 0.01
 
         tech_keywords = [
-            "code", "lập trình", "python", "javascript", "react", "fastapi", "docker", 
+            "code", "l?p tr?nh", "python", "javascript", "react", "fastapi", "docker", 
             "database", "postgresql", "sql", "api", "backend", "frontend", "devops",
             "git", "aws", "cloud", "bug", "algorithm", "architecture", "microservice",
             "linux", "system", "web", "html", "css", "node", "ci/cd", "server"
@@ -432,11 +807,11 @@ class GeminiService:
 
         reasons = []
         if is_spam:
-            reasons.append("Phát hiện từ khóa nghi vấn spam thương mại/cá cược.")
+            reasons.append("Ph?t hi?n t? kh?a nghi v?n spam thuong m?i/c? cu?c.")
         if is_toxic:
-            reasons.append("Phát hiện từ ngữ không chuẩn mực hoặc có tính chất thóa mạ.")
+            reasons.append("Ph?t hi?n t? ng? kh?ng chu?n m?c ho?c c? t?nh ch?t th?a m?.")
         if not is_tech_related:
-            reasons.append("Nội dung chưa phản ánh rõ chủ đề Công nghệ Thông tin / Lập trình.")
+            reasons.append("N?i dung chua ph?n ?nh r? ch? d? C?ng ngh? Th?ng tin / L?p tr?nh.")
 
         length_factor = min(len(content) / 500.0, 1.0)
         tech_factor = min(tech_matches / 5.0, 1.0)
@@ -465,9 +840,9 @@ class GeminiService:
     def _heuristic_optimization(self, title: str, content: str) -> Dict[str, Any]:
         text = (title + " " + content).lower()
         suggested_titles = [
-            f"Làm chủ {title}: Hướng dẫn từ Cơ bản đến Thực chiến 2026",
-            f"Tại sao bạn nên áp dụng {title} trong Kiến trúc Phần mềm Hiện đại?",
-            f"Top 5 Bí quyết Tối ưu {title} mà Developer cần biết"
+            f"L?m ch? {title}: Hu?ng d?n t? Co b?n d?n Th?c chi?n 2026",
+            f"T?i sao b?n n?n ?p d?ng {title} trong Ki?n tr?c Ph?n m?m Hi?n d?i?",
+            f"Top 5 B? quy?t T?i uu {title} m? Developer c?n bi?t"
         ]
 
         if any(k in text for k in ["docker", "k8s", "kubernetes", "ci/cd", "linux", "aws"]):
@@ -487,10 +862,10 @@ class GeminiService:
             if c.lower() in text:
                 tags.append(c)
         if not tags:
-            tags = ["Công nghệ", "Lập trình", "Kinh nghiệm"]
+            tags = ["C?ng ngh?", "L?p tr?nh", "Kinh nghi?m"]
 
-        seo_title = f"{title[:50]} | IT Blog Nền tảng Tri thức"
-        meta_desc = f"Khám phá phân tích chi tiết về {title}. Hướng dẫn thực chiến, tối ưu hóa và kinh nghiệm lập trình từ cộng đồng IT Blog."[:155]
+        seo_title = f"{title[:50]} | IT Blog N?n t?ng Tri th?c"
+        meta_desc = f"Kh?m ph? ph?n t?ch chi ti?t v? {title}. Hu?ng d?n th?c chi?n, t?i uu h?a v? kinh nghi?m l?p tr?nh t? c?ng d?ng IT Blog."[:155]
 
         return {
             "suggested_titles": suggested_titles,
@@ -504,55 +879,55 @@ class GeminiService:
         lang = language.upper()
         if action == "debug":
             explanation = (
-                f"Phân tích lỗi tiềm ẩn cho đoạn mã {lang}:\n"
-                "1. Kiểm tra việc xử lý ngoại lệ (Exception / Error handling) và giá trị None/Null.\n"
-                "2. Đảm bảo việc giải phóng tài nguyên hoặc connection pool được đóng đúng cách.\n"
-                "3. Kiểm tra ranh giới dữ liệu (boundary check) và kiểu dữ liệu đầu vào."
+                f"Ph?n t?ch l?i ti?m ?n cho do?n m? {lang}:\n"
+                "1. Ki?m tra vi?c x? l? ngo?i l? (Exception / Error handling) v? gi? tr? None/Null.\n"
+                "2. ??m b?o vi?c gi?i ph?ng t?i nguy?n ho?c connection pool du?c d?ng d?ng c?ch.\n"
+                "3. Ki?m tra ranh gi?i d? li?u (boundary check) v? ki?u d? li?u d?u v?o."
             )
-            improved_code = f"# [Optimized & Safe {lang} Code]\ntry:\n    # Xử lý an toàn với validation\n    {snippet}\nexcept Exception as err:\n    logger.error(f'Lỗi thực thi: {{err}}')\n    raise"
+            improved_code = f"# [Optimized & Safe {lang} Code]\ntry:\n    # X? l? an to?n v?i validation\n    {snippet}\nexcept Exception as err:\n    logger.error(f'L?i th?c thi: {{err}}')\n    raise"
             takeaways = [
-                "Bổ sung validation chặt chẽ cho tham số",
-                "Sử dụng try-catch hoặc structured logging",
-                "Tránh block luồng chính (I/O blocking)"
+                "B? sung validation ch?t ch? cho tham s?",
+                "S? d?ng try-catch ho?c structured logging",
+                "Tr?nh block lu?ng ch?nh (I/O blocking)"
             ]
         elif action == "optimize":
             explanation = (
-                f"Đề xuất tối ưu hóa hiệu năng ({lang}):\n"
-                "1. Giảm độ phức tạp thời gian từ O(N^2) xuống O(N) thông qua hash map / dictionary lookup.\n"
-                "2. Tránh truy vấn N+1 nếu tương tác với database (sử dụng eager loading / join).\n"
-                "3. Sử dụng bộ nhớ đệm (caching with Redis/in-memory) cho các tính toán trùng lặp."
+                f"?? xu?t t?i uu h?a hi?u nang ({lang}):\n"
+                "1. Gi?m d? ph?c t?p th?i gian t? O(N^2) xu?ng O(N) th?ng qua hash map / dictionary lookup.\n"
+                "2. Tr?nh truy v?n N+1 n?u tuong t?c v?i database (s? d?ng eager loading / join).\n"
+                "3. S? d?ng b? nh? d?m (caching with Redis/in-memory) cho c?c t?nh to?n tr?ng l?p."
             )
-            improved_code = f"# Optimized Version\n{snippet}\n# Gợi ý: Dùng vectorization, caching hoặc async/await"
+            improved_code = f"# Optimized Version\n{snippet}\n# G?i ?: D?ng vectorization, caching ho?c async/await"
             takeaways = [
-                "Độ phức tạp O(1) truy xuất",
-                "Tối ưu cấp phát bộ nhớ RAM",
-                "Tận dụng Async I/O cho network operations"
+                "?? ph?c t?p O(1) truy xu?t",
+                "T?i uu c?p ph?t b? nh? RAM",
+                "T?n d?ng Async I/O cho network operations"
             ]
         elif action == "refactor":
             explanation = (
-                f"Gợi ý tái cấu trúc mã nguồn ({lang}) theo Clean Code & SOLID:\n"
-                "1. Tách hàm thành các single-responsibility unit nhỏ gọn (< 20 dòng).\n"
-                "2. Đặt tên biến và hàm tường minh theo ngữ cảnh domain nghiệp vụ.\n"
-                "3. Sử dụng Type Hinting (typing) và Dependency Injection."
+                f"G?i ? t?i c?u tr?c m? ngu?n ({lang}) theo Clean Code & SOLID:\n"
+                "1. T?ch h?m th?nh c?c single-responsibility unit nh? g?n (< 20 d?ng).\n"
+                "2. ??t t?n bi?n v? h?m tu?ng minh theo ng? c?nh domain nghi?p v?.\n"
+                "3. S? d?ng Type Hinting (typing) v? Dependency Injection."
             )
             improved_code = f"# Refactored with Clean Architecture\n{snippet}"
             takeaways = [
-                "Áp dụng Single Responsibility Principle",
-                "Kiểu dữ liệu rõ ràng (Type hints)",
-                "Dễ dàng viết Unit Test (High testability)"
+                "?p d?ng Single Responsibility Principle",
+                "Ki?u d? li?u r? r?ng (Type hints)",
+                "D? d?ng vi?t Unit Test (High testability)"
             ]
         else:
             explanation = (
-                f"Giải thích cơ chế hoạt động của đoạn mã {lang}:\n"
-                f"- Đoạn mã gồm {len(snippet.splitlines())} dòng xử lý logic.\n"
-                "- Khởi tạo cấu trúc dữ liệu, duyệt và chuyển đổi dữ liệu qua các pipeline xử lý.\n"
-                "- Trả về kết quả phù hợp cho luồng nghiệp vụ tiếp theo."
+                f"Gi?i th?ch co ch? ho?t d?ng c?a do?n m? {lang}:\n"
+                f"- ?o?n m? g?m {len(snippet.splitlines())} d?ng x? l? logic.\n"
+                "- Kh?i t?o c?u tr?c d? li?u, duy?t v? chuy?n d?i d? li?u qua c?c pipeline x? l?.\n"
+                "- Tr? v? k?t qu? ph? h?p cho lu?ng nghi?p v? ti?p theo."
             )
             improved_code = snippet
             takeaways = [
-                "Cấu trúc thuật toán chuẩn",
-                "Thích hợp ứng dụng trong kiến trúc Microservices / REST API",
-                "Thời gian phản hồi dự kiến < 5ms"
+                "C?u tr?c thu?t to?n chu?n",
+                "Th?ch h?p ?ng d?ng trong ki?n tr?c Microservices / REST API",
+                "Th?i gian ph?n h?i d? ki?n < 5ms"
             ]
 
         return {

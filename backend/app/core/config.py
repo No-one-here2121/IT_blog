@@ -3,11 +3,51 @@ from pydantic import AnyHttpUrl, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import json
 import os
+from pathlib import Path
+
+
+def load_env_files_from_project() -> None:
+    """Load environment values from the repo-level and backend/database .env files.
+    This keeps local development compatible when keys are stored outside backend/.env.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    env_paths = [
+        repo_root / ".env",
+        repo_root / "backend" / ".env",
+        repo_root / "database" / ".env",
+    ]
+
+    for env_path in env_paths:
+        if not env_path.exists():
+            continue
+
+        with env_path.open("r", encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"\'')
+                if not key:
+                    continue
+
+                current = os.environ.get(key)
+                if current is None or not str(current).strip():
+                    os.environ[key] = value
+
+
+load_env_files_from_project()
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env"),
+        env_file=[
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), ".env"),
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env"),
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "database", ".env"),
+        ],
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore"
@@ -17,8 +57,8 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
 
-    # Database
-    DATABASE_URL: str = "postgresql://postgres:postgres123@localhost:5432/it_blog_db"
+    # Database (PostgreSQL). Matches the local pgAdmin database "it_blog" with password 123456.
+    DATABASE_URL: str = "postgresql://postgres:123456@localhost:5432/it_blog"
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -61,7 +101,8 @@ class Settings(BaseSettings):
 
     # Google Gemini AI Settings (Multi-key pool)
     GEMINI_API_KEYS: Union[List[str], str] = []
-    GEMINI_MODEL: str = "gemini-1.5-flash"
+    GEMINI_API_KEY: Optional[str] = None
+    GEMINI_MODEL: str = "gemini-3.1-flash-lite"
     # OAuth 2.0 Credentials (Google, GitHub, Facebook)
     GOOGLE_CLIENT_ID: Optional[str] = None
     GOOGLE_CLIENT_SECRET: Optional[str] = None

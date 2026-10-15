@@ -1,3 +1,4 @@
+import base64
 import pytest
 from fastapi.testclient import TestClient
 from app.services.gemini_service import GeminiService, GeminiKeyInfo, gemini_service
@@ -45,6 +46,141 @@ def test_gemini_service_key_pool():
     assert svc.add_key("AIzaSyKeyFour44444444444") is False
 
 
+def test_call_gemini_uses_interactions_api(monkeypatch):
+    request = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "steps": [
+                    {
+                        "type": "model_output",
+                        "content": [{"type": "text", "text": "AI learns patterns."}],
+                    }
+                ]
+            }
+
+    class FakeClient:
+        def __init__(self, timeout):
+            assert timeout == 60.0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, headers, json):
+            request.update(url=url, headers=headers, json=json)
+            return FakeResponse()
+
+    monkeypatch.setattr("app.services.gemini_service.httpx.Client", FakeClient)
+    svc = GeminiService()
+    svc.model = "gemini-3.1-flash-lite"
+    svc.set_keys(["test-api-key"])
+
+    result = svc.call_gemini(
+        "Explain how AI works",
+        system_instruction="Be concise.",
+        json_mode=True,
+        temperature=0.4,
+    )
+
+    assert result == "AI learns patterns."
+    assert request["url"] == "https://generativelanguage.googleapis.com/v1beta/interactions"
+    assert request["headers"] == {
+        "x-goog-api-key": "test-api-key",
+        "Content-Type": "application/json",
+        "Api-Revision": "2026-05-20",
+    }
+    assert request["json"] == {
+        "model": "gemini-3.1-flash-lite",
+        "input": "Explain how AI works",
+        "system_instruction": "Be concise.",
+        "generation_config": {
+            "temperature": 0.4,
+            "response_mime_type": "application/json",
+        },
+    }
+
+
+def test_generate_speech_uses_gemini_tts_interactions_api(monkeypatch):
+    request = {}
+    audio = b"RIFF\x00\x00\x00\x00WAVE"
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"output_audio": {"data": base64.b64encode(audio).decode("ascii")}}
+
+    class FakeClient:
+        def __init__(self, timeout):
+            assert timeout == 120.0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, headers, json):
+            request.update(url=url, headers=headers, json=json)
+            return FakeResponse()
+
+    monkeypatch.setattr("app.services.gemini_service.httpx.Client", FakeClient)
+    svc = GeminiService()
+    svc.set_keys(["test-api-key"])
+
+    result = svc.generate_speech("Xin chào, đây là bài viết công nghệ.")
+
+    assert result == audio
+    assert request["url"] == "https://generativelanguage.googleapis.com/v1beta/interactions"
+    assert request["headers"]["x-goog-api-key"] == "test-api-key"
+    assert request["json"]["model"] == "gemini-3.8-flash-tts"
+    assert request["json"]["response_format"] == {"type": "audio"}
+    assert request["json"]["generation_config"]["speech_config"] == [{"voice": "Kore"}]
+    assert request["json"]["input"][0]["content"][0]["text"] == "Xin chào, đây là bài viết công nghệ."
+
+
+def test_test_key_uses_interactions_api(monkeypatch):
+    request = {}
+
+    class FakeResponse:
+        status_code = 200
+
+    class FakeClient:
+        def __init__(self, timeout):
+            assert timeout == 60.0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, headers, json):
+            request.update(url=url, headers=headers, json=json)
+            return FakeResponse()
+
+    monkeypatch.setattr("app.services.gemini_service.httpx.Client", FakeClient)
+    svc = GeminiService()
+    svc.model = "gemini-3.1-flash-lite"
+
+    result = svc.test_key("test-api-key")
+
+    assert result["valid"] is True
+    assert request["url"] == "https://generativelanguage.googleapis.com/v1beta/interactions"
+    assert request["headers"]["x-goog-api-key"] == "test-api-key"
+    assert request["headers"]["Api-Revision"] == "2026-05-20"
+    assert request["json"]["model"] == "gemini-3.1-flash-lite"
+    assert request["json"]["input"] == "Hello, respond with 'OK' if you can read this."
+
+
 def test_gemini_key_endpoints(client: TestClient, test_user_token: str):
     headers = {"Authorization": f"Bearer {test_user_token}"}
 
@@ -73,6 +209,97 @@ def test_gemini_key_endpoints(client: TestClient, test_user_token: str):
     test_data = test_resp.json()
     assert "valid" in test_data
     assert "message" in test_data
+
+
+def test_generate_speech_accepts_base64_with_whitespace_and_data_uri(monkeypatch):
+    raw_audio = b"RIFF\x00\x00\x00\x00WAVE"
+    encoded = "data:audio/wav;base64, " + "\n".join([
+        base64.b64encode(raw_audio).decode("ascii")[:20],
+        base64.b64encode(raw_audio).decode("ascii")[20:40],
+        base64.b64encode(raw_audio).decode("ascii")[40:],
+    ])
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"output_audio": {"data": encoded}}
+
+    class FakeClient:
+        def __init__(self, timeout):
+            assert timeout == 120.0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, headers, json):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.services.gemini_service.httpx.Client", FakeClient)
+    svc = GeminiService()
+    svc.set_keys(["test-api-key"])
+
+    result = svc.generate_speech("Xin chào")
+
+    assert result == raw_audio
+
+
+def test_read_article_returns_gemini_wav(client: TestClient, db_session, test_user, monkeypatch):
+    from app.models.post import Post, PostStatus
+
+    post = Post(
+        title="Bài viết AI",
+        slug="bai-viet-ai-doc",
+        content="<p>Nội dung <strong>bài viết</strong>.</p>",
+        excerpt="Mô tả bài viết",
+        status=PostStatus.APPROVED.value,
+        author_id=test_user.id,
+    )
+    db_session.add(post)
+    db_session.commit()
+    db_session.refresh(post)
+    monkeypatch.setattr(gemini_service, "keys_pool", [object()])
+    monkeypatch.setattr(gemini_service, "generate_speech", lambda text: b"RIFF-audio")
+
+    response = client.post("/api/v1/ai/read-article", json={"post_id": post.id})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "audio/wav"
+    assert response.content == b"RIFF-audio"
+
+
+def test_read_article_hides_unpublished_post_from_anonymous_user(
+    client: TestClient, db_session, test_user, monkeypatch
+):
+    from app.models.post import Post, PostStatus
+
+    post = Post(
+        title="Bản nháp",
+        slug="ban-nhap-khong-cong-khai",
+        content="Nội dung bản nháp",
+        status=PostStatus.DRAFT.value,
+        author_id=test_user.id,
+    )
+    db_session.add(post)
+    db_session.commit()
+    db_session.refresh(post)
+    monkeypatch.setattr(gemini_service, "keys_pool", [object()])
+    called = False
+
+    def unexpected_speech(_text):
+        nonlocal called
+        called = True
+        return b"RIFF-audio"
+
+    monkeypatch.setattr(gemini_service, "generate_speech", unexpected_speech)
+    response = client.post("/api/v1/ai/read-article", json={"post_id": post.id})
+
+    assert response.status_code == 404
+    assert called is False
 
 
 def test_ai_moderation_and_optimization_with_gemini(client: TestClient):

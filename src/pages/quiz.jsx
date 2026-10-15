@@ -25,6 +25,16 @@ export default function QuizPage({ params = {}, onNavigate }) {
   // Trang thai bat dau lam bai: Chi hien thi cau hoi khi nguoi dung bam vao de tai hoac bam "Bat dau"
   const [isExamStarted, setIsExamStarted] = useState(Boolean(courseId || postId));
 
+  useEffect(() => {
+    if (courseId || postId) {
+      setIsExamStarted(true);
+      setQuestions([]);
+      setAnswers({});
+      setSubmitted(false);
+      setFilterWrongOnly(false);
+    }
+  }, [courseId, postId]);
+
   const [allPoolQuestions, setAllPoolQuestions] = useState([]);
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
@@ -66,7 +76,7 @@ export default function QuizPage({ params = {}, onNavigate }) {
   const [newCorrectIndex, setNewCorrectIndex] = useState(0);
   const [newExplanation, setNewExplanation] = useState("");
   const [newLanguage, setNewLanguage] = useState("React");
-  const [newDifficulty, setNewDifficulty] = useState("intermediate");
+  const [newDifficulty, setNewDifficulty] = useState("medium");
   const [isSubmittingQuestion, setIsSubmittingQuestion] = useState(false);
 
   const [showAiModal, setShowAiModal] = useState(false);
@@ -100,15 +110,20 @@ export default function QuizPage({ params = {}, onNavigate }) {
       randomize: false,
     };
     if (courseId) queryParams.course_id = courseId;
-    if (postId) queryParams.post_id = postId;
-    if (selectedTopic && selectedTopic !== "all") queryParams.language = selectedTopic;
+    if (postId) {
+      queryParams.post_id = postId;
+    } else if (selectedTopic && selectedTopic !== "all") {
+      queryParams.language = selectedTopic;
+    }
 
     api.quiz.getQuestions(queryParams)
       .then((res) => {
         if (ignore) return;
         let list = Array.isArray(res) ? res : (res?.questions || []);
         if (!list || list.length === 0) {
-          if (selectedTopic === "all") {
+          if (postId) {
+            list = [];
+          } else if (selectedTopic === "all") {
             list = DEFAULT_QUIZ_QUESTIONS;
           } else {
             list = DEFAULT_QUIZ_QUESTIONS.filter(
@@ -116,20 +131,39 @@ export default function QuizPage({ params = {}, onNavigate }) {
             );
           }
         }
-        setAllPoolQuestions(list);
+        const normalized = (list || []).map((q, idx) => ({
+          ...q,
+          id: q.id != null && String(q.id).trim() !== "" ? String(q.id) : `pool_${idx + 1}`
+        }));
+        setAllPoolQuestions(normalized);
+
+        // Nếu đang load câu hỏi theo postId, câu hỏi mới có thể vừa được tạo.
+        // Refresh topics để cập nhật số lượng câu hỏi trong ngân hàng.
+        if (postId && normalized.length > 0) {
+          api.quiz.getTopics()
+            .then((topicRes) => {
+              if (!ignore && Array.isArray(topicRes) && topicRes.length > 0) {
+                setTopics(topicRes);
+              }
+            })
+            .catch(() => {});
+        }
       })
       .catch((err) => {
         if (ignore) return;
         console.warn("Quiz questions fetch error, using local fallback data:", err);
-        if (selectedTopic === "all") {
-          setAllPoolQuestions(DEFAULT_QUIZ_QUESTIONS);
-        } else {
-          setAllPoolQuestions(
-            DEFAULT_QUIZ_QUESTIONS.filter(
+        const list = postId
+          ? []
+          : selectedTopic === "all"
+          ? DEFAULT_QUIZ_QUESTIONS
+          : DEFAULT_QUIZ_QUESTIONS.filter(
               (q) => (q.language || "").toLowerCase().includes(selectedTopic.toLowerCase())
-            )
-          );
-        }
+            );
+        const normalized = (list || []).map((q, idx) => ({
+          ...q,
+          id: q.id != null && String(q.id).trim() !== "" ? String(q.id) : `fallback_${idx + 1}`
+        }));
+        setAllPoolQuestions(normalized);
       })
       .finally(() => {
         if (!ignore) setLoading(false);
@@ -160,19 +194,26 @@ export default function QuizPage({ params = {}, onNavigate }) {
     const shuffled = [...filtered].sort(() => 0.5 - Math.random());
 
     let finalSlice = shuffled;
-    if (selectedCount !== "all") {
+    if (postId || courseId) {
+      finalSlice = shuffled;
+    } else if (selectedCount !== "all") {
       const targetCount = Number(selectedCount) || 10;
       finalSlice = shuffled.slice(0, targetCount);
     }
 
-    setQuestions(finalSlice);
+    const examQuestions = finalSlice.map((q, idx) => ({
+      ...q,
+      id: q.id != null && String(q.id).trim() !== "" ? String(q.id) : `exam_${idx + 1}`
+    }));
+
+    setQuestions(examQuestions);
     setAnswers({});
     setSubmitted(false);
     setFilterWrongOnly(false);
 
     const allottedSeconds = Math.max(180, finalSlice.length * 60);
     setTimeLeft(allottedSeconds);
-  }, [allPoolQuestions, selectedCount, selectedDifficulty]);
+  }, [allPoolQuestions, selectedCount, selectedDifficulty, postId, courseId]);
 
   useEffect(() => {
     if (isExamStarted && allPoolQuestions.length > 0 && questions.length === 0) {
@@ -220,7 +261,9 @@ export default function QuizPage({ params = {}, onNavigate }) {
 
   const pickAnswer = (qid, optionIdx) => {
     if (submitted) return;
-    setAnswers((prev) => ({ ...prev, [qid]: optionIdx }));
+    if (qid == null) return;
+    const key = String(qid);
+    setAnswers((prev) => ({ ...prev, [key]: optionIdx }));
   };
 
   const handleScoreSubmit = async () => {
@@ -228,7 +271,7 @@ export default function QuizPage({ params = {}, onNavigate }) {
     setTimerActive(false);
 
     const calculatedScore = questions.reduce(
-      (acc, q) => acc + (answers[q.id] === q.answer_index ? 1 : 0),
+      (acc, q) => acc + (answers[String(q.id)] === (q.answer_index ?? q.correct_index) ? 1 : 0),
       0
     );
 
@@ -258,6 +301,16 @@ export default function QuizPage({ params = {}, onNavigate }) {
     } catch (e) {
       console.warn("Quiz submit sync fallback:", e);
     }
+
+    // Refresh topic counts — câu hỏi mới có thể đã được tạo trong session này
+    try {
+      const topicRes = await api.quiz.getTopics();
+      if (Array.isArray(topicRes) && topicRes.length > 0) {
+        setTopics(topicRes);
+      }
+    } catch {
+      // ignore
+    }
   };
 
   useEffect(() => {
@@ -277,7 +330,7 @@ export default function QuizPage({ params = {}, onNavigate }) {
   }, [isExamStarted, submitted, timerActive, timeLeft, loading]);
 
   const handleRetakeWrongQuestions = () => {
-    const wrongOnes = questions.filter((q) => answers[q.id] !== q.answer_index);
+    const wrongOnes = questions.filter((q) => answers[String(q.id)] !== (q.answer_index ?? q.correct_index));
     if (wrongOnes.length === 0) return;
     setQuestions([...wrongOnes]);
     setAnswers({});
@@ -316,8 +369,8 @@ export default function QuizPage({ params = {}, onNavigate }) {
       "### Chi Tiết Từng Câu Hỏi & Lời Giải Thích Kỹ Thuật",
       "",
       ...questions.map((q, idx) => {
-        const userAns = answers[q.id];
-        const isCorrect = userAns === q.answer_index;
+        const userAns = answers[String(q.id)];
+        const isCorrect = userAns === (q.answer_index ?? q.correct_index);
         const mark = isCorrect ? "✅ [ĐÚNG]" : "❌ [SAI]";
         const userChoice = userAns !== undefined ? q.options[userAns] : "Chưa trả lời";
         const correctChoice = q.options[q.answer_index];
@@ -360,37 +413,51 @@ export default function QuizPage({ params = {}, onNavigate }) {
       return;
     }
     setIsSubmittingQuestion(true);
+    const normalizedDifficulty = newDifficulty === "intermediate" ? "medium" : newDifficulty;
     const payload = {
       question: newQuestionText.trim(),
       code_snippet: newQuestionCode.trim() || undefined,
       options: newOptions.map((o) => o.trim()),
+      answer_index: newCorrectIndex,
       correct_index: newCorrectIndex,
       explanation: newExplanation.trim() || undefined,
       language: newLanguage,
-      difficulty: newDifficulty
+      difficulty: normalizedDifficulty
     };
 
     try {
-      await api.quiz.create(payload);
-    } catch {
-      // offline fallback
+      const res = await api.quiz.create(payload);
+      const createdId = res?.id || res?.question_id || Date.now();
+      const newQ = {
+        id: String(createdId),
+        ...payload,
+        answer_index: newCorrectIndex,
+        correct_index: newCorrectIndex,
+        correct_answer: payload.options[newCorrectIndex]
+      };
+
+      setQuestions((prev) => [newQ, ...prev]);
+      setAllPoolQuestions((prev) => [newQ, ...prev]);
+      addToast("Đã lưu câu hỏi trắc nghiệm vào cơ sở dữ liệu PostgreSQL (pgAdmin 4) thành công! 🧠", "success");
+      setShowCreateModal(false);
+      setNewQuestionText("");
+      setNewQuestionCode("");
+      setNewOptions(["", "", "", ""]);
+      setNewCorrectIndex(0);
+      setNewExplanation("");
+
+      // Đồng bộ lại số lượng câu hỏi của các chuyên đề từ Database
+      api.quiz.getTopics().then((resTopics) => {
+        if (Array.isArray(resTopics) && resTopics.length > 0) {
+          setTopics(resTopics);
+        }
+      }).catch(() => {});
+    } catch (err) {
+      console.error("Create quiz question error:", err);
+      addToast("Lỗi khi lưu câu hỏi vào cơ sở dữ liệu: " + (err.message || "Vui lòng kiểm tra kết nối CSDL"), "error");
+    } finally {
+      setIsSubmittingQuestion(false);
     }
-
-    const newQ = {
-      id: Date.now(),
-      ...payload,
-      correct_answer: payload.options[newCorrectIndex]
-    };
-
-    setQuestions((prev) => [newQ, ...prev]);
-    addToast("Đã thêm câu hỏi trắc nghiệm mới thành công! 🧠", "success");
-    setShowCreateModal(false);
-    setNewQuestionText("");
-    setNewQuestionCode("");
-    setNewOptions(["", "", "", ""]);
-    setNewCorrectIndex(0);
-    setNewExplanation("");
-    setIsSubmittingQuestion(false);
   };
 
   const handleGenerateAiQuiz = async (e) => {
@@ -407,12 +474,18 @@ export default function QuizPage({ params = {}, onNavigate }) {
       });
 
       if (res?.created && res.created.length > 0 && res.created[0].options?.length > 0) {
-        setQuestions(res.created);
+        setQuestions(res.created.map((q, idx) => ({
+          ...q,
+          id: q.id != null && String(q.id).trim() !== "" ? String(q.id) : `ai_${Date.now()}_${idx + 1}`
+        })));
       } else {
         const fresh = await api.quiz.getQuestions({ language: aiTopic, limit: Number(aiCount) });
         const freshList = Array.isArray(fresh) ? fresh : (fresh?.questions || []);
         if (freshList.length > 0) {
-          setQuestions(freshList);
+          setQuestions(freshList.map((q, idx) => ({
+            ...q,
+            id: q.id != null && String(q.id).trim() !== "" ? String(q.id) : `ai_${Date.now()}_${idx + 1}`
+          })));
         }
       }
       setAnswers({});
@@ -422,7 +495,14 @@ export default function QuizPage({ params = {}, onNavigate }) {
       setFilterWrongOnly(false);
       setShowAiModal(false);
       setIsExamStarted(true);
-      setAiAlert("Đã sinh thành công " + (res?.count || aiCount) + " câu hỏi về " + aiTopic + " bằng AI! Hãy thử sức ngay.");
+      setAiAlert("Đã sinh và lưu thành công " + (res?.count || aiCount) + " câu hỏi về " + aiTopic + " vào CSDL! Hãy thử sức ngay.");
+
+      // Đồng bộ lại số lượng câu hỏi của các chuyên đề từ Database
+      api.quiz.getTopics().then((resTopics) => {
+        if (Array.isArray(resTopics) && resTopics.length > 0) {
+          setTopics(resTopics);
+        }
+      }).catch(() => {});
     } catch (err) {
       console.warn("AI Quiz generation error:", err);
       setError("Không thể tạo đề thi bằng AI lúc này. Vui lòng thử lại sau.");
@@ -432,11 +512,11 @@ export default function QuizPage({ params = {}, onNavigate }) {
   };
 
   const score = questions.reduce(
-    (acc, q) => acc + (answers[q.id] === (q.answer_index ?? q.correct_index) ? 1 : 0),
+    (acc, q) => acc + (answers[String(q.id)] === (q.answer_index ?? q.correct_index) ? 1 : 0),
     0
   );
 
-  const wrongQuestions = questions.filter((q) => answers[q.id] !== (q.answer_index ?? q.correct_index));
+  const wrongQuestions = questions.filter((q) => answers[String(q.id)] !== (q.answer_index ?? q.correct_index));
 
   const displayedQuestions = filterWrongOnly && submitted ? wrongQuestions : questions;
   const currentTopicMeta = topics.find((t) => t.id === selectedTopic) || topics[0];
@@ -445,12 +525,39 @@ export default function QuizPage({ params = {}, onNavigate }) {
     <div className="w-full max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-6">
       {/* Nut quay lai trang chu hoac quay lai danh sach de tai */}
       <div className="flex items-center justify-between mb-4">
-        <button
-          onClick={() => onNavigate && onNavigate("home")}
-          className="btn btn-ghost btn-sm gap-1.5 text-base-content/80 hover:text-base-content font-semibold"
-        >
-          ← Về trang chủ
-        </button>
+        <div className="flex items-center gap-2">
+          {postId ? (
+            <button
+              onClick={() => onNavigate && onNavigate("post_detail", { postId })}
+              className="btn btn-primary btn-sm gap-1.5 text-white font-bold shadow-xs rounded-xl"
+            >
+              ← Quay lại bài viết
+            </button>
+          ) : courseId ? (
+            <button
+              onClick={() => onNavigate && onNavigate("courses", { courseId })}
+              className="btn btn-primary btn-sm gap-1.5 text-white font-bold shadow-xs rounded-xl"
+            >
+              ← Quay lại khóa học
+            </button>
+          ) : (
+            <button
+              onClick={() => onNavigate && onNavigate("home")}
+              className="btn btn-ghost btn-sm gap-1.5 text-base-content/80 hover:text-base-content font-semibold"
+            >
+              ← Về trang chủ
+            </button>
+          )}
+
+          {(postId || courseId) && (
+            <button
+              onClick={() => onNavigate && onNavigate("home")}
+              className="btn btn-ghost btn-sm gap-1.5 text-base-content/60 hover:text-base-content font-semibold text-xs"
+            >
+              Về trang chủ
+            </button>
+          )}
+        </div>
 
         {isExamStarted && (
           <button
@@ -684,16 +791,26 @@ export default function QuizPage({ params = {}, onNavigate }) {
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-base-content">
-                      {title ? ("Trắc nghiệm: " + title) : currentTopicMeta?.title || "Ngân hàng Trắc nghiệm IT"}
+                      {postId
+                        ? (title ? "Trắc nghiệm bài học: " + title : "Trắc nghiệm kiến thức bài viết")
+                        : title
+                        ? "Trắc nghiệm: " + title
+                        : currentTopicMeta?.title || "Ngân hàng Trắc nghiệm IT"}
                     </h1>
-                    {currentTopicMeta?.badge && (
+                    {postId ? (
+                      <span className="badge badge-primary text-white font-bold text-xs">
+                        📖 Khớp nội dung bài viết
+                      </span>
+                    ) : currentTopicMeta?.badge ? (
                       <span className="badge badge-primary text-white font-bold text-xs">
                         {currentTopicMeta.badge}
                       </span>
-                    )}
+                    ) : null}
                   </div>
                   <p className="text-xs sm:text-sm text-base-content/70 mt-1 max-w-2xl leading-relaxed">
-                    {currentTopicMeta?.description || "Hệ thống câu hỏi tuyển chọn thực tế từ các kỹ sư công nghệ cao cấp."}
+                    {postId
+                      ? "Bộ câu hỏi kiểm tra mức độ nắm bắt kiến thức được tạo tự động khớp với nội dung bài viết bạn đang học."
+                      : currentTopicMeta?.description || "Hệ thống câu hỏi tuyển chọn thực tế từ các kỹ sư công nghệ cao cấp."}
                   </p>
                 </div>
               </div>
@@ -934,14 +1051,16 @@ export default function QuizPage({ params = {}, onNavigate }) {
             <div className="lg:col-span-8 space-y-4 min-w-0">
               <div className="space-y-4">
                 {displayedQuestions.map((q, qi) => {
-                  const chosen = answers[q.id];
+                  const qKey = String(q.id);
+                  const chosen = answers[qKey];
+                  const correctIdx = q.answer_index ?? q.correct_index;
                   return (
                     <div
                       key={q.id}
                       id={"question-" + q.id}
                       className={"scroll-mt-24 rounded-3xl border p-5 sm:p-6 shadow-xs transition-all " + (
                         submitted
-                          ? chosen === q.answer_index
+                          ? chosen === correctIdx
                             ? "border-success/60 bg-success/5"
                             : "border-error/60 bg-error/5"
                           : "border-base-300 bg-base-100"
@@ -973,7 +1092,7 @@ export default function QuizPage({ params = {}, onNavigate }) {
                       <div className="grid gap-2.5">
                         {(q.options || []).map((opt, oi) => {
                           const chosenThis = chosen === oi;
-                          const answerThis = q.answer_index === oi;
+                          const answerThis = correctIdx === oi;
                           let cls =
                             "border-base-300 bg-base-100 hover:border-primary/50 hover:bg-base-200/50";
                           if (submitted) {
@@ -1105,8 +1224,9 @@ export default function QuizPage({ params = {}, onNavigate }) {
                   </p>
                   <div className="grid grid-cols-5 gap-2">
                     {displayedQuestions.map((q, qi) => {
-                      const isAnswered = answers[q.id] !== undefined;
-                      const isCorrect = submitted && answers[q.id] === q.answer_index;
+                      const qKey = String(q.id);
+                      const isAnswered = answers[qKey] !== undefined;
+                      const isCorrect = submitted && answers[qKey] === (q.answer_index ?? q.correct_index);
                       const isWrong = submitted && isAnswered && !isCorrect;
 
                       let btnCls = "bg-base-200 text-base-content/70 hover:bg-base-300";
@@ -1374,12 +1494,14 @@ export default function QuizPage({ params = {}, onNavigate }) {
                     onChange={(e) => setNewLanguage(e.target.value)}
                     className="select select-bordered select-sm w-full text-xs rounded-xl"
                   >
-                    <option value="React">React 19</option>
-                    <option value="FastAPI">FastAPI / Python</option>
-                    <option value="Docker">Docker / DevOps</option>
-                    <option value="PostgreSQL">PostgreSQL</option>
-                    <option value="Security">Bảo mật Web</option>
-                    <option value="System Design">System Design</option>
+                    <option value="React">React 19 & Frontend</option>
+                    <option value="FastAPI">FastAPI & Backend</option>
+                    <option value="PostgreSQL">PostgreSQL & Database</option>
+                    <option value="DevOps">DevOps, Docker & K8s</option>
+                    <option value="Python">Python Core & Async</option>
+                    <option value="Security">Bảo mật Web & Ứng dụng</option>
+                    <option value="Architecture">Kiến trúc Hệ thống (System Design)</option>
+                    <option value="Fullstack">Fullstack Engineering</option>
                   </select>
                 </div>
                 <div>
@@ -1392,7 +1514,7 @@ export default function QuizPage({ params = {}, onNavigate }) {
                     className="select select-bordered select-sm w-full text-xs rounded-xl"
                   >
                     <option value="easy">Cơ bản (Easy)</option>
-                    <option value="intermediate">Trung bình (Medium)</option>
+                    <option value="medium">Trung bình (Medium)</option>
                     <option value="hard">Nâng cao (Hard)</option>
                   </select>
                 </div>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useBlog } from "../context/BlogContext";
 import { useToast } from "../context/ToastContext";
@@ -11,26 +11,33 @@ import { Compass, HelpCircle, Share2, ArrowUp, Sparkles, Clock, Eye } from "../c
 
 export default function PostDetailPage({ postId, params = {}, onNavigate, onEditPost }) {
   const { currentUser, requireAuth, toggleFollow, isAdmin, isModerator } = useAuth();
-  const { posts, getAuthor, toggleLike, toggleBookmark, addComment, deleteComment, deletePost, incrementViews, syncPostComments } = useBlog();
+  const { posts, getAuthor, toggleLike, toggleBookmark, addComment, deleteComment, deletePost, incrementViews, syncPostComments, approvePost, rejectPost } = useBlog();
   const { addToast } = useToast();
+  const canModerate = Boolean(isAdmin || isModerator || currentUser?.role === "admin" || currentUser?.role === "moderator");
 
   const [commentText, setCommentText] = useState("");
   const [commentSearch, setCommentSearch] = useState("");
 
   const postInContext = posts.find((p) => String(p.id) === String(postId) || String(p.slug) === String(postId));
   const [directPost, setDirectPost] = useState(null);
-  const [loadingDirectPost, setLoadingDirectPost] = useState(!postInContext);
+  const [loadingDirectPost, setLoadingDirectPost] = useState(true);
   const post = useMemo(() => {
+    // Ưu tiên dữ liệu tươi từ DB (directPost) thay vì cache localStorage cũ,
+    // tránh lệch tiêu đề/nội dung như bài /posts/4.
     const base = directPost || postInContext;
     if (!base) return null;
     return {
+      ...postInContext,
       ...base,
-      content: directPost?.content || postInContext?.content || base.content,
-      comments: (postInContext?.comments && postInContext.comments.length > 0) ? postInContext.comments : (directPost?.comments || []),
-      comments_count: postInContext?.comments_count ?? directPost?.comments_count ?? (postInContext?.comments?.length || directPost?.comments?.length || 0),
-      likes: postInContext?.likes ?? directPost?.likes ?? [],
-      likes_count: postInContext?.likes_count ?? directPost?.likes_count ?? 0,
-      bookmarks: postInContext?.bookmarks ?? directPost?.bookmarks ?? []
+      content: directPost?.content || base.content,
+      title: directPost?.title || postInContext?.title || base.title,
+      excerpt: directPost?.excerpt ?? postInContext?.excerpt ?? base.excerpt,
+      coverImage: directPost?.coverImage || directPost?.cover_image || postInContext?.coverImage || base.coverImage,
+      comments: (directPost?.comments && directPost.comments.length > 0) ? directPost.comments : (postInContext?.comments || []),
+      comments_count: directPost?.comments_count ?? postInContext?.comments_count ?? (postInContext?.comments?.length || directPost?.comments?.length || 0),
+      likes: directPost?.likes ?? postInContext?.likes ?? [],
+      likes_count: directPost?.likes_count ?? postInContext?.likes_count ?? 0,
+      bookmarks: directPost?.bookmarks ?? postInContext?.bookmarks ?? []
     };
   }, [directPost, postInContext]);
 
@@ -122,7 +129,12 @@ export default function PostDetailPage({ postId, params = {}, onNavigate, onEdit
     }
   };
   const [fontSizeLevel, setFontSizeLevel] = useState("base"); // 'sm' | 'base' | 'lg' | 'xl'
-  const [speechState, setSpeechState] = useState("idle"); // 'idle' | 'playing' | 'paused'
+  const [speechState, setSpeechState] = useState("idle"); // idle | loading | playing | paused
+  const [speechMode, setSpeechMode] = useState("audio"); // 'audio' | 'browser'
+  const speechAudioRef = useRef(null);
+  const speechUrlRef = useRef(null);
+  const speechControllerRef = useRef(null);
+  const speechModeRef = useRef("audio");
   const [isZenMode, setIsZenMode] = useState(false);
   const [commentSortOrder, setCommentSortOrder] = useState("newest"); // 'newest' | 'top' | 'oldest'
 
@@ -154,48 +166,207 @@ export default function PostDetailPage({ postId, params = {}, onNavigate, onEdit
 
   // Dọn dẹp giọng đọc khi rời trang
   useEffect(() => {
+    const audio = speechAudioRef.current;
     return () => {
+      speechControllerRef.current?.abort();
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         window.speechSynthesis.cancel();
       }
+      audio?.pause();
+      if (speechUrlRef.current) URL.revokeObjectURL(speechUrlRef.current);
     };
   }, []);
 
-  // Trợ lý đọc giọng nói (TTS)
-  const handleToggleSpeech = () => {
+  // Trích xuất văn bản thuần sạch để đọc dự phòng
+  const getReadableArticleText = () => {
+    if (!post) return "";
+    const parts = [];
+    if (post.title) parts.push(post.title);
+    if (post.excerpt) parts.push(post.excerpt);
+    if (post.content) {
+      try {
+        const doc = new DOMParser().parseFromString(post.content, "text/html");
+        parts.push(doc.body.textContent || "");
+      } catch {
+        parts.push(post.content);
+      }
+    }
+    const raw = parts.join(". ");
+    return raw
+      .replace(/[#*`_~\[\]()>-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  };
+
+  // Đọc bài viết bằng Web Speech API của trình duyệt (Chỉ sử dụng khi máy có giọng đọc tiếng Việt)
+  const playBrowserSpeech = (text) => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-      addToast("Trình duyệt không hỗ trợ Web Speech API.", "warning");
+      addToast("Trình duyệt không hỗ trợ tổng hợp giọng nói.", "error");
+      setSpeechState("idle");
       return;
     }
+
+    const voices = window.speechSynthesis.getVoices() || [];
+    const viVoice = voices.find((v) => v.lang.startsWith("vi") || v.lang.includes("VN")) || null;
+    if (!viVoice) {
+      setSpeechState("idle");
+      addToast("Máy tính chưa cài gói giọng đọc tiếng Việt. Vui lòng bật backend để nghe giọng đọc AI tiếng Việt chuẩn.", "warning");
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    speechModeRef.current = "browser";
+    setSpeechMode("browser");
+
+    // Tách thành các đoạn câu nhỏ để phát mượt mà, tránh ngắt tiếng trên trình duyệt Chromium
+    const sentences = text
+      .split(/(?<=[.!?\n])\s+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+
+    if (sentences.length === 0) {
+      addToast("Bài viết không có nội dung văn bản để đọc.", "warning");
+      setSpeechState("idle");
+      return;
+    }
+
+    setSpeechState("playing");
+
+    sentences.forEach((sentence, index) => {
+      const utterance = new SpeechSynthesisUtterance(sentence);
+      utterance.lang = "vi-VN";
+      utterance.voice = viVoice;
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+
+      if (index === sentences.length - 1) {
+        utterance.onend = () => {
+          setSpeechState("idle");
+          speechModeRef.current = "audio";
+          setSpeechMode("audio");
+        };
+      }
+
+      utterance.onerror = (e) => {
+        if (e.error !== "canceled" && e.error !== "interrupted") {
+          setSpeechState("idle");
+          speechModeRef.current = "audio";
+          setSpeechMode("audio");
+        }
+      };
+
+      window.speechSynthesis.speak(utterance);
+    });
+
+    addToast("Đang đọc bài viết bằng giọng tiếng Việt của trình duyệt.", "info");
+  };
+
+  const handleToggleSpeech = async () => {
+    if (speechState === "loading") {
+      speechControllerRef.current?.abort();
+      speechControllerRef.current = null;
+      setSpeechState("idle");
+      return;
+    }
+
+    // Điều khiển khi đang phát bằng Web Speech API
+    if (speechModeRef.current === "browser") {
+      if (speechState === "playing") {
+        if (typeof window !== "undefined" && "speechSynthesis" in window) {
+          window.speechSynthesis.pause();
+        }
+        setSpeechState("paused");
+        addToast("Đã tạm dừng đọc bài viết.", "info");
+        return;
+      }
+      if (speechState === "paused") {
+        if (typeof window !== "undefined" && "speechSynthesis" in window) {
+          window.speechSynthesis.resume();
+        }
+        setSpeechState("playing");
+        return;
+      }
+    }
+
+    // Điều khiển khi đang phát bằng Audio element
     if (speechState === "playing") {
-      window.speechSynthesis.pause();
+      speechAudioRef.current?.pause();
       setSpeechState("paused");
       addToast("Đã tạm dừng đọc bài viết.", "info");
       return;
     }
     if (speechState === "paused") {
-      window.speechSynthesis.resume();
-      setSpeechState("playing");
-      addToast("Tiếp tục đọc bài viết...", "info");
+      try {
+        await speechAudioRef.current?.play();
+        setSpeechState("playing");
+      } catch {
+        addToast("Không thể phát âm thanh. Hãy bấm nút phát trên trình phát audio.", "warning");
+      }
       return;
     }
-    window.speechSynthesis.cancel();
-    const cleanContent = (post?.content || "").replace(/[#*`_~[\]()>-]/g, " ").slice(0, 1500);
-    const speechText = `${post?.title || ""}. ${post?.excerpt || ""}. ${cleanContent}`;
-    const utterance = new SpeechSynthesisUtterance(speechText);
-    utterance.lang = "vi-VN";
-    utterance.rate = 0.95;
-    utterance.onend = () => setSpeechState("idle");
-    utterance.onerror = () => setSpeechState("idle");
-    window.speechSynthesis.speak(utterance);
-    setSpeechState("playing");
-    addToast("Đang phát đọc bài viết bằng giọng nói! 🔊", "success");
+    if (!post?.id) return;
+
+    const controller = new AbortController();
+    speechControllerRef.current = controller;
+    setSpeechState("loading");
+    try {
+      const audioBlob = await api.ai.readArticle(post.id, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+
+      if (speechUrlRef.current) URL.revokeObjectURL(speechUrlRef.current);
+      const audioUrl = URL.createObjectURL(audioBlob);
+      speechUrlRef.current = audioUrl;
+      speechAudioRef.current.src = audioUrl;
+      speechAudioRef.current.load();
+      speechModeRef.current = "audio";
+      setSpeechMode("audio");
+
+      try {
+        await speechAudioRef.current.play();
+        setSpeechState("playing");
+        addToast("Đang đọc bài bằng giọng AI tiếng Việt.", "success");
+      } catch {
+        setSpeechState("paused");
+        addToast("Giọng AI đã sẵn sàng. Bấm nút phát trên trình nghe audio để bắt đầu.", "info");
+      }
+    } catch {
+      if (!controller.signal.aborted) {
+        // Kiểm tra xem trình duyệt có giọng đọc tiếng Việt không
+        const text = getReadableArticleText();
+        const voices = (typeof window !== "undefined" && "speechSynthesis" in window) ? window.speechSynthesis.getVoices() || [] : [];
+        const viVoice = voices.find((v) => v.lang.startsWith("vi") || v.lang.includes("VN")) || null;
+
+        if (text && viVoice) {
+          playBrowserSpeech(text);
+        } else {
+          setSpeechState("idle");
+          addToast("Không thể kết nối máy chủ đọc bài. Hãy bật backend (run_backend.bat) để nghe giọng đọc tiếng Việt chuẩn.", "error");
+        }
+      }
+    } finally {
+      if (speechControllerRef.current === controller) {
+        speechControllerRef.current = null;
+      }
+    }
   };
 
   const handleStopSpeech = () => {
+    speechControllerRef.current?.abort();
+    speechControllerRef.current = null;
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
+    speechAudioRef.current?.pause();
+    if (speechAudioRef.current) {
+      speechAudioRef.current.currentTime = 0;
+      speechAudioRef.current.removeAttribute("src");
+    }
+    if (speechUrlRef.current) {
+      URL.revokeObjectURL(speechUrlRef.current);
+      speechUrlRef.current = null;
+    }
+    speechModeRef.current = "audio";
+    setSpeechMode("audio");
     setSpeechState("idle");
     addToast("Đã dừng đọc bài viết.", "info");
   };
@@ -243,8 +414,8 @@ export default function PostDetailPage({ postId, params = {}, onNavigate, onEdit
       syncPostComments(postId);
     }
 
-    // Nếu chưa có bài viết trong bộ nhớ (độc giả mở đường link trực tiếp /posts/:id)
-    if (!directPost || String(directPost.id) !== String(postId) || !directPost.content) {
+    // Luôn fetch tươi từ DB để đồng bộ tiêu đề/nội dung, tránh đọc cache localStorage cũ.
+    {
       setTimeout(() => setLoadingDirectPost(true), 0);
       api.posts.get(postId, { track_view: "false" })
         .then((fetched) => {
@@ -1038,6 +1209,54 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
         <div className="min-w-0 order-1 lg:order-1">
           {/* Bài viết chính */}
           <article className="bg-base-100 rounded-2xl border border-base-300 p-6 sm:p-10 shadow-sm">
+        {/* Banner cảnh báo bài viết chờ duyệt từ QTV & Kiểm duyệt viên */}
+        {post.status === "pending" && (
+          <div className="mb-6 p-4 sm:p-5 rounded-2xl bg-amber-500/10 border-2 border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-800 dark:text-amber-200 animate-fade-in shadow-xs">
+            <div className="flex items-start sm:items-center gap-3">
+              <span className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-300 flex items-center justify-center text-xl font-bold shrink-0">
+                ⏳
+              </span>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-extrabold text-sm sm:text-base">BÀI VIẾT ĐANG CHỜ DUYỆT</span>
+                  <span className="badge badge-warning badge-xs font-bold uppercase tracking-wider">Chờ QTV duyệt</span>
+                </div>
+                <p className="text-xs text-amber-700/90 dark:text-amber-300/90 mt-0.5">
+                  Bài viết này cần được <strong>Quản trị viên (QTV)</strong> hoặc <strong>Kiểm duyệt viên</strong> phê duyệt trước khi hiển thị công khai lên bảng tin.
+                </p>
+              </div>
+            </div>
+
+            {/* Nút thao tác nhanh cho QTV / Kiểm duyệt viên */}
+            {canModerate && (
+              <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await approvePost(post.id);
+                    if (directPost) setDirectPost((prev) => ({ ...prev, status: "approved" }));
+                    addToast("Đã phê duyệt và xuất bản bài viết thành công! 🎉", "success");
+                  }}
+                  className="btn btn-sm btn-success text-white font-bold gap-1 shadow-xs"
+                >
+                  ✓ Phê duyệt bài viết
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await rejectPost(post.id);
+                    if (directPost) setDirectPost((prev) => ({ ...prev, status: "rejected" }));
+                    addToast("Đã từ chối bài viết! 🔴", "warning");
+                  }}
+                  className="btn btn-sm btn-ghost text-error hover:bg-error/10 font-bold border border-error/30"
+                >
+                  ✕ Từ chối
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Category, Tags, Tech Stack & Verification Badges */}
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <span className="badge badge-primary font-bold text-xs">{post.category}</span>
@@ -1290,23 +1509,56 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
               className={`btn btn-xs rounded-xl gap-1.5 transition-all ${
                 speechState === "playing"
                   ? "btn-secondary text-white font-bold animate-pulse"
-                  : speechState === "paused"
+                  : speechState === "paused" || speechState === "loading"
                   ? "btn-warning text-amber-950 font-bold"
                   : "btn-outline btn-ghost"
               }`}
-              title="Nghe bài viết bằng giọng đọc tự động tiếng Việt"
+              title="Nghe bài viết bằng giọng AI tiếng Việt"
             >
-              <span>{speechState === "playing" ? "🔊 Đang đọc..." : speechState === "paused" ? "⏸️ Tiếp tục" : "🎙️ Nghe bài viết"}</span>
+              <span>
+                {speechState === "loading"
+                  ? "⏳ Đang tạo giọng AI..."
+                  : speechState === "playing"
+                    ? "🔊 Đang đọc..."
+                    : speechState === "paused"
+                      ? "▶️ Tiếp tục"
+                      : "🎧 AI đọc bài"}
+              </span>
             </button>
+            {speechMode === "browser" && speechState !== "idle" && (
+              <span className="badge badge-sm badge-secondary badge-outline text-[11px] font-medium animate-pulse gap-1">
+                🎙️ Trình duyệt đọc
+              </span>
+            )}
+            <audio
+              ref={speechAudioRef}
+              controls
+              preload="metadata"
+              className={speechState === "idle" || speechState === "loading" || speechMode === "browser" ? "hidden" : "h-8 w-44"}
+              aria-label="Trình phát giọng đọc AI"
+              onEnded={() => {
+                setSpeechState("idle");
+                if (speechUrlRef.current) URL.revokeObjectURL(speechUrlRef.current);
+                speechUrlRef.current = null;
+              }}
+              onPause={() => {
+                if (speechAudioRef.current?.currentTime > 0 && !speechAudioRef.current.ended) {
+                  setSpeechState("paused");
+                }
+              }}
+              onPlay={() => setSpeechState("playing")}
+            />
             {speechState !== "idle" && (
-              <button
-                type="button"
-                onClick={handleStopSpeech}
-                className="btn btn-xs btn-circle btn-ghost text-error"
-                title="Dừng đọc bài viết"
-              >
-                ⏹️
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={handleStopSpeech}
+                  className="btn btn-xs btn-circle btn-ghost text-error"
+                  title="Dừng đọc bài viết"
+                >
+                  ⏹️
+                </button>
+              </>
             )}
 
             {/* In bài viết / Xuất PDF */}
@@ -1726,8 +1978,8 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
             </div>
 
             {/* Sắp xếp */}
-            <div className="flex items-center gap-1">
-              <span className="text-base-content/60 font-semibold hidden md:inline">Sắp xếp:</span>
+            <div className="flex items-center gap-1.5 shrink-0 whitespace-nowrap">
+              <span className="text-base-content/60 font-semibold hidden md:inline whitespace-nowrap">Sắp xếp:</span>
               <select
                 value={commentSortOrder}
                 onChange={(e) => setCommentSortOrder(e.target.value)}
@@ -2495,4 +2747,3 @@ tags: [${(post.tags || []).map((t) => `"${t}"`).join(", ")}]
     </div>
   );
 }
-

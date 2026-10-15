@@ -265,17 +265,12 @@ def create_post(
             db.flush()
         category_id = cat.id
 
-    valid_statuses = {s.value for s in PostStatus}
-    if post_in.status:
-        clean_status = post_in.status.lower()
-        if clean_status not in valid_statuses:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Trạng thái bài viết không hợp lệ."
-            )
-        post_status = clean_status
+    # Bài viết mới đăng luôn ở trạng thái PENDING để Quản trị viên (QTV) và Kiểm duyệt viên duyệt
+    clean_status = (post_in.status or "").lower().strip()
+    if clean_status == PostStatus.DRAFT.value:
+        post_status = PostStatus.DRAFT.value
     else:
-        post_status = PostStatus.APPROVED.value
+        post_status = PostStatus.PENDING.value
 
     new_post = Post(
         title=post_in.title.strip(),
@@ -317,6 +312,13 @@ def create_post(
 
     db.commit()
     db.refresh(new_post)
+
+    # Tự động sinh bộ câu hỏi trắc nghiệm khớp với nội dung bài viết vừa đăng
+    try:
+        from app.services.quiz_generator import ensure_post_quiz_questions
+        ensure_post_quiz_questions(db, new_post, count=5, user_id=current_user.id)
+    except Exception as e:
+        logger.warning(f"Could not auto-generate quiz questions for new post #{new_post.id}: {e}")
 
     return PostResponse.model_validate(new_post)
 
@@ -459,6 +461,13 @@ def update_post(
     db.add(post)
     db.commit()
     db.refresh(post)
+
+    # Đảm bảo bài viết luôn có câu hỏi trắc nghiệm khớp nội dung
+    try:
+        from app.services.quiz_generator import ensure_post_quiz_questions
+        ensure_post_quiz_questions(db, post, count=5, user_id=current_user.id)
+    except Exception as e:
+        logger.warning(f"Could not ensure quiz questions for updated post #{post.id}: {e}")
 
     return PostResponse.model_validate(post)
 

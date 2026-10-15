@@ -1,7 +1,10 @@
+import re
 from typing import List, Optional
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
+from bs4 import BeautifulSoup
 from app.core.database import get_db
 from app.models.post import Post, PostStatus
 from app.models.user import User
@@ -14,6 +17,7 @@ from app.schemas.ai import (
     ArticleAskResponse,
     ArticleSummarizeRequest,
     ArticleSummarizeResponse,
+    ArticleSpeechRequest,
     AIModerationRequest,
     AIModerationResponse,
     AIOptimizeRequest,
@@ -147,6 +151,70 @@ def summarize_article(
     )
 
 
+@router.post("/read-article")
+def read_article(
+    req: ArticleSpeechRequest,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional)
+):
+    """Generate downloadable/playable WAV narration for a published article."""
+    post = db.query(Post).filter(Post.id == req.post_id).first()
+    if not post:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bài viết không tồn tại")
+
+    now = datetime.now(timezone.utc)
+    is_author_or_admin = current_user and (
+        current_user.id == post.author_id or
+        current_user.is_superuser or
+        any(r.name in ["admin", "moderator"] for r in current_user.roles)
+    )
+
+    scheduled_at = post.scheduled_at
+    if scheduled_at and scheduled_at.tzinfo is None:
+        scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
+
+    is_published = (
+        post.status == PostStatus.APPROVED.value and
+        (scheduled_at is None or scheduled_at <= now)
+    )
+    if not is_published and not is_author_or_admin:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bài viết không tồn tại")
+
+    article_content = BeautifulSoup(post.content or "", "html.parser").get_text(" ", strip=True)
+    article_content = re.sub(r"[#*`_~\[\]()>-]", " ", article_content)
+    article_content = re.sub(r"\s+", " ", article_content).strip()
+    speech_text = ". ".join(
+        part for part in (post.title, post.excerpt, article_content) if part
+    )
+    if not article_content:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Bài viết chưa có nội dung để đọc.",
+        )
+    # 1. Thu tao giong doc Gemini neu co key trong pool
+    audio = None
+    media_type = "audio/wav"
+    if gemini_service.keys_pool:
+        audio = gemini_service.generate_speech(speech_text)
+
+    # 2. Tu dong chuyen tiep sang bo tao giong doc Tieng Viet chuan neu Gemini chua co key hoac gap loi quota
+    if not audio:
+        audio = gemini_service.generate_vietnamese_tts(speech_text)
+        media_type = "audio/mpeg"
+
+    if not audio:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Không thể tạo giọng đọc bài viết lúc này. Hãy thử lại sau.",
+        )
+
+    return Response(
+        content=audio,
+        media_type=media_type,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @router.post("/moderate", response_model=AIModerationResponse)
 def moderate_content(req: AIModerationRequest):
     """
@@ -208,6 +276,25 @@ def update_gemini_keys(
     Requires active user authentication.
     """
     clean_keys = [k.strip() for k in req.keys if k and k.strip()]
+    if not clean_keys:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Vui lòng nhập ít nhất một Gemini API Key hợp lệ.",
+        )
+    # Validate cơ bản: chấp nhận cả key cũ 'AIza...' và key Auth mới 'AQ....' (AI Studio từ 2026 chỉ tạo key AQ.)
+    # Chỉ chặn key quá ngắn (dán thiếu / copy lỗi)
+    too_short = [k for k in clean_keys if len(k) < 20]
+    if too_short:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Key quá ngắn (chỉ {len(too_short[0])} ký tự, có thể bạn copy thiếu). Key Gemini từ https://aistudio.google.com/apikey thường dài 30-70 ký tự, bắt đầu bằng 'AIza...' (key cũ) hoặc 'AQ.' (key Auth mới).",
+        )
+    wrong_prefix = [k for k in clean_keys if not (k.startswith("AIza") or k.startswith("AQ."))]
+    if wrong_prefix:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Key '{wrong_prefix[0][:10]}...' không đúng định dạng Gemini (phải bắt đầu bằng 'AIza...' hoặc 'AQ.'). Hãy vào https://aistudio.google.com/apikey → Create API key rồi copy toàn bộ key.",
+        )
     gemini_service.set_keys(clean_keys)
 
     keys_status = [GeminiKeyStatus(**k) for k in gemini_service.get_keys_status()]
