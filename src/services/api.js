@@ -817,6 +817,7 @@ export const api = {
   // IT Quiz & Knowledge Testing
   quiz: {
     getTopics: () => request("/quiz/topics"),
+    getPostQuizzes: () => request("/quiz/post-quizzes"),
     getQuestions: (params = {}) => {
       const query = new URLSearchParams();
       if (params.course_id || params.courseId) query.append("course_id", params.course_id || params.courseId);

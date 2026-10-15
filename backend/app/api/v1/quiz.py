@@ -226,6 +226,35 @@ def get_quiz_topics(db: Session = Depends(get_db)):
     return topics
 
 
+@router.get("/post-quizzes", response_model=List[Dict[str, Any]])
+def get_post_quizzes(db: Session = Depends(get_db)):
+    """
+    Lấy danh sách các bài viết đã có bộ đề trắc nghiệm trong CSDL,
+    kèm thông tin bài viết và số lượng câu hỏi để hiển thị trên trang Ngân hàng trắc nghiệm.
+    """
+    rows = (
+        db.query(Post, func.count(QuizQuestionPost.question_id).label("question_count"))
+        .join(QuizQuestionPost, QuizQuestionPost.post_id == Post.id)
+        .group_by(Post.id)
+        .having(func.count(QuizQuestionPost.question_id) > 0)
+        .order_by(Post.id.desc())
+        .all()
+    )
+    result = []
+    for post, count in rows:
+        result.append({
+            "post_id": post.id,
+            "title": post.title,
+            "slug": post.slug,
+            "category_name": post.category.name if post.category else "IT",
+            "cover_image": post.cover_image,
+            "question_count": count,
+            "author_name": (post.author.name or post.author.username) if post.author else "IT Blog",
+            "created_at": post.created_at.isoformat() if post.created_at else None,
+        })
+    return result
+
+
 @router.get("/questions", response_model=Dict[str, List[QuizQuestionResponse]])
 def get_quiz_questions(
     course_id: Optional[int] = Query(None, description="Lọc theo ID khóa học"),

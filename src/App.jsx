@@ -117,7 +117,11 @@ export function parseRouteFromLocation() {
   // - Các tab tính năng chính
   if (rawPath === "/roadmaps") return { page: "roadmaps", postId: "post_001", authorId: null, tab: "my_posts", section: "terms" };
   if (rawPath === "/courses") return { page: "courses", postId: "post_001", authorId: null, tab: "my_posts", section: "terms" };
-  if (rawPath === "/quiz") return { page: "quiz", postId: "post_001", authorId: null, tab: "my_posts", section: "terms" };
+  if (rawPath === "/quiz") {
+    const pId = searchParams.get("postId") || searchParams.get("post_id") || null;
+    const cId = searchParams.get("courseId") || searchParams.get("course_id") || null;
+    return { page: "quiz", postId: pId, courseId: cId, title: searchParams.get("title") || null, authorId: null, tab: "my_posts", section: "terms" };
+  }
   if (rawPath === "/jobs") return { page: "jobs", postId: "post_001", authorId: null, tab: "my_posts", section: "terms" };
   if (rawPath === "/events") return { page: "events", postId: "post_001", authorId: null, tab: "my_posts", section: "terms" };
   if (rawPath === "/leaderboard") return { page: "leaderboard", postId: "post_001", authorId: null, tab: "my_posts", section: "terms" };

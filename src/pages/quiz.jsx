@@ -16,8 +16,12 @@ export default function QuizPage({ params = {}, onNavigate }) {
   const { addToast } = useToast();
   const { courseId, postId, title } = params;
 
-  // Topics & Questions Data States
+  // Topics, Post Quizzes & Questions Data States
   const [topics, setTopics] = useState(DEFAULT_QUIZ_TOPICS);
+  const [postQuizzes, setPostQuizzes] = useState([]);
+  const [activePostId, setActivePostId] = useState(postId || null);
+  const [activeCourseId, setActiveCourseId] = useState(courseId || null);
+  const [activeTitle, setActiveTitle] = useState(title || "");
   const [selectedTopic, setSelectedTopic] = useState("all");
   const [selectedCount, setSelectedCount] = useState(10); // 5, 10, 15, 20, "all"
   const [selectedDifficulty, setSelectedDifficulty] = useState("all"); // "all", "easy", "medium", "hard"
@@ -26,6 +30,9 @@ export default function QuizPage({ params = {}, onNavigate }) {
   const [isExamStarted, setIsExamStarted] = useState(Boolean(courseId || postId));
 
   useEffect(() => {
+    if (postId) setActivePostId(postId);
+    if (courseId) setActiveCourseId(courseId);
+    if (title) setActiveTitle(title);
     if (courseId || postId) {
       setIsExamStarted(true);
       setQuestions([]);
@@ -33,7 +40,7 @@ export default function QuizPage({ params = {}, onNavigate }) {
       setSubmitted(false);
       setFilterWrongOnly(false);
     }
-  }, [courseId, postId]);
+  }, [courseId, postId, title]);
 
   const [allPoolQuestions, setAllPoolQuestions] = useState([]);
   const [questions, setQuestions] = useState([]);
@@ -88,8 +95,8 @@ export default function QuizPage({ params = {}, onNavigate }) {
 
 
 
-  // 1. Tai danh sach chuyen de kem so luong cau hoi tu backend
-  useEffect(() => {
+  // 1. Tai danh sach chuyen de va cac de thi theo bai viet tu backend
+  const loadTopics = useCallback(() => {
     api.quiz
       .getTopics()
       .then((res) => {
@@ -102,6 +109,28 @@ export default function QuizPage({ params = {}, onNavigate }) {
       });
   }, []);
 
+  const loadPostQuizzes = useCallback(() => {
+    api.quiz
+      .getPostQuizzes()
+      .then((res) => {
+        if (Array.isArray(res)) {
+          setPostQuizzes(res);
+        }
+      })
+      .catch((e) => {
+        console.warn("Could not fetch post quizzes:", e);
+      });
+  }, []);
+
+  useEffect(() => {
+    loadTopics();
+    loadPostQuizzes();
+  }, [loadTopics, loadPostQuizzes]);
+
+  const effectivePostId = activePostId || postId;
+  const effectiveCourseId = activeCourseId || courseId;
+  const effectiveTitle = activeTitle || title;
+
   // 2. Tai toan bo cau hoi cua chu de da chon tu backend hoac fallback
   useEffect(() => {
     let ignore = false;
@@ -109,9 +138,9 @@ export default function QuizPage({ params = {}, onNavigate }) {
       limit: 200,
       randomize: false,
     };
-    if (courseId) queryParams.course_id = courseId;
-    if (postId) {
-      queryParams.post_id = postId;
+    if (effectiveCourseId) queryParams.course_id = effectiveCourseId;
+    if (effectivePostId) {
+      queryParams.post_id = effectivePostId;
     } else if (selectedTopic && selectedTopic !== "all") {
       queryParams.language = selectedTopic;
     }
@@ -121,7 +150,7 @@ export default function QuizPage({ params = {}, onNavigate }) {
         if (ignore) return;
         let list = Array.isArray(res) ? res : (res?.questions || []);
         if (!list || list.length === 0) {
-          if (postId) {
+          if (effectivePostId) {
             list = [];
           } else if (selectedTopic === "all") {
             list = DEFAULT_QUIZ_QUESTIONS;
@@ -138,21 +167,16 @@ export default function QuizPage({ params = {}, onNavigate }) {
         setAllPoolQuestions(normalized);
 
         // Nếu đang load câu hỏi theo postId, câu hỏi mới có thể vừa được tạo.
-        // Refresh topics để cập nhật số lượng câu hỏi trong ngân hàng.
-        if (postId && normalized.length > 0) {
-          api.quiz.getTopics()
-            .then((topicRes) => {
-              if (!ignore && Array.isArray(topicRes) && topicRes.length > 0) {
-                setTopics(topicRes);
-              }
-            })
-            .catch(() => {});
+        // Refresh topics và postQuizzes để cập nhật danh sách ngay lập tức.
+        if (effectivePostId && normalized.length > 0) {
+          loadTopics();
+          loadPostQuizzes();
         }
       })
       .catch((err) => {
         if (ignore) return;
         console.warn("Quiz questions fetch error, using local fallback data:", err);
-        const list = postId
+        const list = effectivePostId
           ? []
           : selectedTopic === "all"
           ? DEFAULT_QUIZ_QUESTIONS
@@ -172,7 +196,7 @@ export default function QuizPage({ params = {}, onNavigate }) {
     return () => {
       ignore = true;
     };
-  }, [courseId, postId, selectedTopic]);
+  }, [effectiveCourseId, effectivePostId, selectedTopic, loadTopics, loadPostQuizzes]);
 
   // 3. Chuan bi bo cau hoi
   const prepareExamQuestions = useCallback(() => {
@@ -191,10 +215,14 @@ export default function QuizPage({ params = {}, onNavigate }) {
       }
     }
 
-    const shuffled = [...filtered].sort(() => 0.5 - Math.random());
+    // Với bài thi theo bài viết hoặc khóa học: KHÔNG xáo trộn ngẫu nhiên để tất cả user làm chung 1 đề thống nhất
+    const isFixedExam = Boolean(effectivePostId || effectiveCourseId);
+    const shuffled = isFixedExam
+      ? [...filtered]
+      : [...filtered].sort(() => 0.5 - Math.random());
 
     let finalSlice = shuffled;
-    if (postId || courseId) {
+    if (isFixedExam) {
       finalSlice = shuffled;
     } else if (selectedCount !== "all") {
       const targetCount = Number(selectedCount) || 10;
@@ -213,7 +241,7 @@ export default function QuizPage({ params = {}, onNavigate }) {
 
     const allottedSeconds = Math.max(180, finalSlice.length * 60);
     setTimeLeft(allottedSeconds);
-  }, [allPoolQuestions, selectedCount, selectedDifficulty, postId, courseId]);
+  }, [allPoolQuestions, selectedCount, selectedDifficulty, effectivePostId, effectiveCourseId]);
 
   useEffect(() => {
     if (isExamStarted && allPoolQuestions.length > 0 && questions.length === 0) {
@@ -226,6 +254,9 @@ export default function QuizPage({ params = {}, onNavigate }) {
 
   const handleStartExam = (topicId) => {
     requireAuth(() => {
+      setActivePostId(null);
+      setActiveCourseId(null);
+      setActiveTitle("");
       if (topicId) {
         setSelectedTopic(topicId);
       }
@@ -236,11 +267,31 @@ export default function QuizPage({ params = {}, onNavigate }) {
     }, "Vui lòng đăng nhập để bắt đầu làm bài thi trắc nghiệm và lưu kết quả!");
   };
 
+  const handleStartPostExam = (pq) => {
+    requireAuth(() => {
+      setActivePostId(pq.post_id);
+      setActiveCourseId(null);
+      setActiveTitle(pq.title);
+      setIsExamStarted(true);
+      setTimerActive(true);
+      setQuestions([]);
+      setAnswers({});
+      setSubmitted(false);
+      setFilterWrongOnly(false);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }, "Vui lòng đăng nhập để bắt đầu làm bài thi trắc nghiệm và lưu kết quả!");
+  };
+
   const handleExitToTopics = () => {
+    setActivePostId(null);
+    setActiveCourseId(null);
+    setActiveTitle("");
     setIsExamStarted(false);
     setTimerActive(false);
     setSubmitted(false);
     setAnswers({});
+    loadPostQuizzes();
+    loadTopics();
   };
 
   const handleShuffleQuestions = () => {
@@ -278,7 +329,7 @@ export default function QuizPage({ params = {}, onNavigate }) {
     const activeTopicObj = topics.find((t) => t.id === selectedTopic);
     const newRecord = {
       id: Date.now(),
-      topic: title || activeTopicObj?.title || "Kiến thức IT",
+      topic: effectiveTitle || title || activeTopicObj?.title || "Kiến thức IT",
       score: calculatedScore,
       total: questions.length,
       percentage: Math.round((calculatedScore / (questions.length || 1)) * 100),
@@ -302,15 +353,9 @@ export default function QuizPage({ params = {}, onNavigate }) {
       console.warn("Quiz submit sync fallback:", e);
     }
 
-    // Refresh topic counts — câu hỏi mới có thể đã được tạo trong session này
-    try {
-      const topicRes = await api.quiz.getTopics();
-      if (Array.isArray(topicRes) && topicRes.length > 0) {
-        setTopics(topicRes);
-      }
-    } catch {
-      // ignore
-    }
+    // Refresh topic & post quiz counts — câu hỏi mới có thể đã được tạo trong session này
+    loadTopics();
+    loadPostQuizzes();
   };
 
   useEffect(() => {
@@ -682,6 +727,66 @@ export default function QuizPage({ params = {}, onNavigate }) {
             </div>
           </div>
 
+          {/* Danh Sách Bộ Đề Trắc Nghiệm Theo Bài Viết Đã Tạo */}
+          {postQuizzes && postQuizzes.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                <h2 className="text-base font-extrabold text-base-content flex items-center gap-2">
+                  <span className="p-1 rounded-lg bg-primary/10 text-primary">📖</span>
+                  <span>Bộ Đề Trắc Nghiệm Theo Bài Viết:</span>
+                  <span className="badge badge-sm badge-primary text-white font-bold">
+                    {postQuizzes.length} đề thi
+                  </span>
+                </h2>
+                <span className="text-xs text-base-content/60">
+                  Tất cả thành viên đều làm chung 1 đề thi chuẩn hóa của từng bài viết
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {postQuizzes.map((pq) => (
+                  <div
+                    key={pq.post_id}
+                    className="p-5 rounded-3xl border border-base-300 bg-base-100 hover:border-primary/50 hover:shadow-md transition-all flex flex-col justify-between gap-4 group"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="badge badge-sm badge-outline text-primary font-bold">
+                          {pq.category_name || "Kiến thức"}
+                        </span>
+                        <span className="badge badge-neutral text-white font-bold text-xs">
+                          {pq.question_count} câu trắc nghiệm
+                        </span>
+                      </div>
+                      <h3 className="font-extrabold text-base text-base-content group-hover:text-primary transition-colors line-clamp-2">
+                        {pq.title}
+                      </h3>
+                      <p className="text-xs text-base-content/60 mt-1 flex items-center gap-2">
+                        <span>✍️ {pq.author_name}</span>
+                        <span>•</span>
+                        <span className="text-success font-semibold">Khớp 100% nội dung</span>
+                      </p>
+                    </div>
+
+                    <div className="pt-3 border-t border-base-200 flex items-center justify-between">
+                      <span className="text-[11px] text-base-content/50 font-medium">
+                        ⏱️ ~10 phút • Đề cố định
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleStartPostExam(pq)}
+                        className="btn btn-sm btn-primary text-white rounded-xl font-bold gap-1 shadow-xs hover:scale-105 transition-transform"
+                      >
+                        <span>Làm bài ngay</span>
+                        <span>→</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Danh Sach Cac De Tai Chuyen De (Topic Cards Grid) */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -791,15 +896,15 @@ export default function QuizPage({ params = {}, onNavigate }) {
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-base-content">
-                      {postId
-                        ? (title ? "Trắc nghiệm bài học: " + title : "Trắc nghiệm kiến thức bài viết")
-                        : title
-                        ? "Trắc nghiệm: " + title
+                      {effectivePostId
+                        ? (effectiveTitle ? "Trắc nghiệm bài học: " + effectiveTitle : "Trắc nghiệm kiến thức bài viết")
+                        : effectiveTitle
+                        ? "Trắc nghiệm: " + effectiveTitle
                         : currentTopicMeta?.title || "Ngân hàng Trắc nghiệm IT"}
                     </h1>
-                    {postId ? (
+                    {effectivePostId ? (
                       <span className="badge badge-primary text-white font-bold text-xs">
-                        📖 Khớp nội dung bài viết
+                        📖 Đề thi chuẩn hóa theo bài viết
                       </span>
                     ) : currentTopicMeta?.badge ? (
                       <span className="badge badge-primary text-white font-bold text-xs">
@@ -808,8 +913,8 @@ export default function QuizPage({ params = {}, onNavigate }) {
                     ) : null}
                   </div>
                   <p className="text-xs sm:text-sm text-base-content/70 mt-1 max-w-2xl leading-relaxed">
-                    {postId
-                      ? "Bộ câu hỏi kiểm tra mức độ nắm bắt kiến thức được tạo tự động khớp với nội dung bài viết bạn đang học."
+                    {effectivePostId
+                      ? "Bộ câu hỏi kiểm tra mức độ nắm bắt kiến thức được tạo cố định khớp với nội dung bài viết. Tất cả người học đều làm chung 1 đề thi."
                       : currentTopicMeta?.description || "Hệ thống câu hỏi tuyển chọn thực tế từ các kỹ sư công nghệ cao cấp."}
                   </p>
                 </div>
