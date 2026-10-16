@@ -96,15 +96,10 @@ def test_call_gemini_uses_interactions_api(monkeypatch):
         "Content-Type": "application/json",
         "Api-Revision": "2026-05-20",
     }
-    assert request["json"] == {
-        "model": "gemini-3.1-flash-lite",
-        "input": "Explain how AI works",
-        "system_instruction": "Be concise.",
-        "generation_config": {
-            "temperature": 0.4,
-            "response_mime_type": "application/json",
-        },
-    }
+    assert request["json"]["model"] == "gemini-3.1-flash-lite"
+    assert request["json"]["input"] == "Explain how AI works"
+    assert "Be concise." in request["json"]["system_instruction"]
+    assert request["json"]["generation_config"] == {"temperature": 0.4}
 
 
 def test_generate_speech_uses_gemini_tts_interactions_api(monkeypatch):

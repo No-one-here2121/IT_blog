@@ -2,7 +2,7 @@ import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { useEffect, useState, useCallback } from "react";
 import api from "../services/api";
-import { DEFAULT_QUIZ_TOPICS, DEFAULT_QUIZ_QUESTIONS } from "../data/quizBank";
+import { DEFAULT_QUIZ_TOPICS, DEFAULT_QUIZ_QUESTIONS, TOPIC_ALIASES, DEFAULT_POST_QUIZZES } from "../data/quizBank";
 
 /**
  * Trang Ngan hang Trac nghiem Kien thuc IT chuyen sau
@@ -14,15 +14,19 @@ import { DEFAULT_QUIZ_TOPICS, DEFAULT_QUIZ_QUESTIONS } from "../data/quizBank";
 export default function QuizPage({ params = {}, onNavigate }) {
   const { currentUser, requireAuth, isAdmin } = useAuth();
   const { addToast } = useToast();
-  const { courseId, postId, title } = params;
+  const rawPostId = params.postId || params.post_id || params.quizParams?.postId || params.quizParams?.post_id;
+  const rawCourseId = params.courseId || params.course_id || params.quizParams?.courseId || params.quizParams?.course_id;
+  const title = params.title || params.quizParams?.title || "";
 
   // Validate that postId and courseId are valid positive numbers (ignore fake strings like "post_001")
-  const cleanPostId = (postId && !isNaN(Number(postId)) && Number(postId) > 0) ? Number(postId) : null;
-  const cleanCourseId = (courseId && !isNaN(Number(courseId)) && Number(courseId) > 0) ? Number(courseId) : null;
+  const cleanPostId = (rawPostId && !isNaN(Number(rawPostId)) && Number(rawPostId) > 0) ? Number(rawPostId) : null;
+  const cleanCourseId = (rawCourseId && !isNaN(Number(rawCourseId)) && Number(rawCourseId) > 0) ? Number(rawCourseId) : null;
+  const postId = cleanPostId;
+  const courseId = cleanCourseId;
 
   // Topics, Post Quizzes & Questions Data States
   const [topics, setTopics] = useState(DEFAULT_QUIZ_TOPICS);
-  const [postQuizzes, setPostQuizzes] = useState([]);
+  const [postQuizzes, setPostQuizzes] = useState(DEFAULT_POST_QUIZZES);
   const [aiQuizzes, setAiQuizzes] = useState([]);
   const [activePostId, setActivePostId] = useState(cleanPostId);
   const [activeCourseId, setActiveCourseId] = useState(cleanCourseId);
@@ -120,12 +124,15 @@ export default function QuizPage({ params = {}, onNavigate }) {
     api.quiz
       .getPostQuizzes()
       .then((res) => {
-        if (Array.isArray(res)) {
+        if (Array.isArray(res) && res.length > 0) {
           setPostQuizzes(res);
+        } else {
+          setPostQuizzes(DEFAULT_POST_QUIZZES);
         }
       })
       .catch((e) => {
-        console.warn("Could not fetch post quizzes:", e);
+        console.warn("Could not fetch post quizzes, using synced defaults:", e);
+        setPostQuizzes(DEFAULT_POST_QUIZZES);
       });
   }, []);
 
@@ -182,13 +189,23 @@ export default function QuizPage({ params = {}, onNavigate }) {
         let list = Array.isArray(res) ? res : (res?.questions || []);
         if (!list || list.length === 0) {
           if (effectivePostId) {
-            list = [];
+            list = DEFAULT_QUIZ_QUESTIONS.filter((q) => {
+              return Array.isArray(q.post_ids) && q.post_ids.includes(Number(effectivePostId));
+            });
+            if (list.length === 0) {
+              const matchedPq = DEFAULT_POST_QUIZZES.find((pq) => Number(pq.post_id) === Number(effectivePostId));
+              if (matchedPq?.question_ids) {
+                list = DEFAULT_QUIZ_QUESTIONS.filter((q) => matchedPq.question_ids.includes(Number(q.id)));
+              }
+            }
           } else if (selectedTopic === "all") {
             list = DEFAULT_QUIZ_QUESTIONS;
           } else {
-            list = DEFAULT_QUIZ_QUESTIONS.filter(
-              (q) => (q.language || "").toLowerCase().includes(selectedTopic.toLowerCase())
-            );
+            const aliases = TOPIC_ALIASES[selectedTopic] || [selectedTopic.toLowerCase()];
+            list = DEFAULT_QUIZ_QUESTIONS.filter((q) => {
+              const lang = (q.language || "").toLowerCase();
+              return aliases.some((a) => lang.includes(a));
+            });
             if (list.length === 0) list = DEFAULT_QUIZ_QUESTIONS;
           }
         }
@@ -214,12 +231,26 @@ export default function QuizPage({ params = {}, onNavigate }) {
       .catch((err) => {
         if (ignore) return;
         console.warn("Quiz questions fetch error, using local fallback data:", err);
-        let list = effectivePostId ? [] : DEFAULT_QUIZ_QUESTIONS;
-        if (!effectivePostId && selectedTopic && selectedTopic !== "all") {
-          const matched = DEFAULT_QUIZ_QUESTIONS.filter(
-            (q) => (q.language || "").toLowerCase().includes(selectedTopic.toLowerCase())
-          );
-          if (matched.length > 0) list = matched;
+        let list = [];
+        if (effectivePostId) {
+          list = DEFAULT_QUIZ_QUESTIONS.filter((q) => {
+            return Array.isArray(q.post_ids) && q.post_ids.includes(Number(effectivePostId));
+          });
+          if (list.length === 0) {
+            const matchedPq = DEFAULT_POST_QUIZZES.find((pq) => Number(pq.post_id) === Number(effectivePostId));
+            if (matchedPq?.question_ids) {
+              list = DEFAULT_QUIZ_QUESTIONS.filter((q) => matchedPq.question_ids.includes(Number(q.id)));
+            }
+          }
+        } else if (selectedTopic && selectedTopic !== "all") {
+          const aliases = TOPIC_ALIASES[selectedTopic] || [selectedTopic.toLowerCase()];
+          const matched = DEFAULT_QUIZ_QUESTIONS.filter((q) => {
+            const lang = (q.language || "").toLowerCase();
+            return aliases.some((a) => lang.includes(a));
+          });
+          list = matched.length > 0 ? matched : DEFAULT_QUIZ_QUESTIONS;
+        } else {
+          list = DEFAULT_QUIZ_QUESTIONS;
         }
         const normalized = (list || []).map((q, idx) => ({
           ...q,
@@ -588,6 +619,10 @@ export default function QuizPage({ params = {}, onNavigate }) {
 
   const handleGenerateAiQuiz = async (e) => {
     if (e) e.preventDefault();
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền tạo đề trắc nghiệm bằng AI!", "error");
+      return;
+    }
     setIsGenerating(true);
     setError("");
     try {
@@ -718,31 +753,37 @@ export default function QuizPage({ params = {}, onNavigate }) {
                   Ngân hàng Trắc nghiệm & Kiểm tra Năng lực IT
                 </h1>
                 <p className="text-xs sm:text-sm text-base-content/70 mt-1.5 max-w-3xl leading-relaxed">
-                  Hệ thống hơn 90 câu hỏi trắc nghiệm chuyên sâu chia theo từng đề tài công nghệ thực tế.
+                  Hệ thống hơn {topics.find((t) => t.id === "all")?.question_count || 180} câu hỏi trắc nghiệm chuyên sâu chia theo từng đề tài công nghệ thực tế.
                   Chọn đề tài bạn muốn ôn tập, số lượng câu hỏi và bắt đầu thử sức ngay!
                 </p>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 self-start md:self-center shrink-0">
+              {isAdmin && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateModal(true)}
+                    className="btn btn-sm btn-outline btn-primary font-bold gap-1.5 rounded-xl shadow-xs cursor-pointer"
+                  >
+                    <span>➕</span>
+                    <span>Thêm câu hỏi trắc nghiệm</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowAiModal(true)}
+                    className="btn btn-sm btn-primary text-white font-bold gap-1.5 shadow-md hover:scale-105 transition-all rounded-xl cursor-pointer"
+                  >
+                    <span>⚡</span>
+                    <span>Tạo đề bằng AI</span>
+                  </button>
+                </>
+              )}
               <button
                 type="button"
-                onClick={() => requireAuth(() => setShowCreateModal(true), "Vui lòng đăng nhập để thêm câu hỏi trắc nghiệm!")}
-                className="btn btn-sm btn-outline btn-primary font-bold gap-1.5 rounded-xl shadow-xs cursor-pointer"
-              >
-                <span>➕</span>
-                <span>Thêm câu hỏi trắc nghiệm</span>
-              </button>
-              <button
-                onClick={() => requireAuth(() => setShowAiModal(true), "Vui lòng đăng nhập để tạo đề thi bằng AI!")}
-                className="btn btn-sm btn-primary text-white font-bold gap-1.5 shadow-md hover:scale-105 transition-all rounded-xl"
-              >
-                <span>⚡</span>
-                <span>Tạo đề bằng AI</span>
-              </button>
-              <button
                 onClick={() => setShowHistoryModal(true)}
-                className="btn btn-sm btn-outline btn-ghost gap-1.5 rounded-xl font-semibold"
+                className="btn btn-sm btn-outline btn-ghost gap-1.5 rounded-xl font-semibold cursor-pointer"
               >
                 <span>📜</span>
                 <span>Lịch sử thi ({quizHistory.length})</span>
@@ -1539,7 +1580,7 @@ export default function QuizPage({ params = {}, onNavigate }) {
       )}
 
       {/* Modal Tao de thi bang AI */}
-      {showAiModal && (
+      {isAdmin && showAiModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in"
           onClick={(e) => {

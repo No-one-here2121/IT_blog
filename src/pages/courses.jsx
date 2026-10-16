@@ -6,6 +6,23 @@ import api from "../services/api";
 const INITIAL_COURSES = [
   {
     id: 1,
+    title: "Full stack",
+    slug: "full-stack",
+    description: "giúp học sinh hình dung It cơ bản",
+    level: "beginner",
+    cover_image: "https://th.bing.com/th/id/OIP.rM8t0CGxBDN6eaJGgJyJwAHaEc?w=262&h=180&c=7&r=0&o=7&dpr=1.3&pid=1.7&rm=3",
+    instructor_name: "Quản Trị Viên IT Blog",
+    category_name: "Fullstack",
+    total_lessons: 1,
+    enrolled_students: 1,
+    is_enrolled: false,
+    user_progress_percent: 0,
+    lessons: [
+      { id: 1, title: "HTML", duration_minutes: 25, video_url: "https://www.youtube.com/watch?v=S0SAw6FZeCU", is_completed: false }
+    ]
+  },
+  {
+    id: 2,
     title: "Khóa học FastAPI & Microservices Masterclass 2026",
     slug: "fastapi-microservices-masterclass",
     description: "Xây dựng hệ thống RESTful API chuẩn Enterprise, tích hợp xác thực JWT, Redis Caching, PostgreSQL ORM SQLAlchemy 2.0 và Docker.",
@@ -14,17 +31,17 @@ const INITIAL_COURSES = [
     instructor_name: "Nguyễn Văn Tuấn (Tech Lead)",
     category_name: "Backend",
     total_lessons: 3,
-    enrolled_students: 142,
+    enrolled_students: 1,
     is_enrolled: false,
     user_progress_percent: 0,
     lessons: [
-      { id: 11, title: "Bài 1: Kiến trúc Dependency Injection & Lifespan trong FastAPI", duration_minutes: 25, is_completed: false },
-      { id: 12, title: "Bài 2: Tối ưu kết nối Async SQLAlchemy 2.0 & Connection Pooling", duration_minutes: 35, is_completed: false },
-      { id: 13, title: "Bài 3: Triển khai Caching với Redis và Rate Limiter", duration_minutes: 30, is_completed: false }
+      { id: 2, title: "Bài 1: Kiến trúc Dependency Injection & Lifespan trong FastAPI", duration_minutes: 25, is_completed: false },
+      { id: 3, title: "Bài 2: Tối ưu kết nối Async SQLAlchemy 2.0 & Connection Pooling", duration_minutes: 35, is_completed: false },
+      { id: 4, title: "Bài 3: Triển khai Caching với Redis và Rate Limiter", duration_minutes: 30, is_completed: false }
     ]
   },
   {
-    id: 2,
+    id: 3,
     title: "Khóa học Lập trình React 19 & Next.js Thực chiến",
     slug: "react-19-nextjs-thuc-chien",
     description: "Làm chủ Server Actions, Server Components, Zustand state management và Tailwind CSS để xây dựng web application hiệu năng cao.",
@@ -33,16 +50,16 @@ const INITIAL_COURSES = [
     instructor_name: "Trần Mai Anh (Senior Frontend)",
     category_name: "Frontend",
     total_lessons: 2,
-    enrolled_students: 215,
+    enrolled_students: 0,
     is_enrolled: false,
     user_progress_percent: 0,
     lessons: [
-      { id: 21, title: "Bài 1: Nền tảng React 19, Hooks và State Management", duration_minutes: 30, is_completed: false },
-      { id: 22, title: "Bài 2: Tối ưu render, memoization và Responsive Tailwind", duration_minutes: 40, is_completed: false }
+      { id: 5, title: "Bài 1: Nền tảng React 19, Hooks và State Management", duration_minutes: 30, is_completed: false },
+      { id: 6, title: "Bài 2: Tối ưu render, memoization và Responsive Tailwind", duration_minutes: 40, is_completed: false }
     ]
   },
   {
-    id: 3,
+    id: 4,
     title: "Khóa học DevOps Thực chiến: Docker, Kubernetes & CI/CD",
     slug: "devops-docker-k8s-cicd",
     description: "Tự động hóa triển khai sản phẩm lên Kubernetes Cluster, quản lý bí mật bảo mật và xây dựng pipeline kiểm thử tự động với GitHub Actions.",
@@ -51,12 +68,12 @@ const INITIAL_COURSES = [
     instructor_name: "Lê Hoàng Long (DevOps Architect)",
     category_name: "DevOps",
     total_lessons: 2,
-    enrolled_students: 89,
+    enrolled_students: 1,
     is_enrolled: false,
     user_progress_percent: 0,
     lessons: [
-      { id: 31, title: "Bài 1: Docker Multi-Stage Build tối ưu hoá dung lượng", duration_minutes: 25, video_url: "https://www.youtube.com/watch?v=hBYkWQvPVkY", is_completed: false },
-      { id: 32, title: "Bài 2: Thiết lập K8s Deployment, Service và HPA", duration_minutes: 45, video_url: "https://www.youtube.com/watch?v=DUZEw07g0Gs", is_completed: false }
+      { id: 7, title: "Bài 1: Docker Multi-Stage Build tối ưu hoá dung lượng", duration_minutes: 25, video_url: "https://www.youtube.com/watch?v=hBYkWQvPVkY", is_completed: false },
+      { id: 8, title: "Bài 2: Thiết lập K8s Deployment, Service và HPA", duration_minutes: 45, video_url: "https://www.youtube.com/watch?v=DUZEw07g0Gs", is_completed: false }
     ]
   }
 ];
@@ -292,8 +309,47 @@ spec:
             memory: "128Mi"`,
     challenge: "Thiết lập một HPA (HorizontalPodAutoscaler) tự động scale từ 3 pods lên tối đa 10 pods khi CPU vượt ngưỡng 75%.",
     tips: "Luôn khai báo resources.requests và resources.limits; nếu không có requests, HPA sẽ không thể tính toán được tỷ lệ phần trăm CPU sử dụng."
+  },
+  1: {
+    video_url: "https://www.youtube.com/embed/S0SAw6FZeCU",
+    objectives: [
+      "Nắm vững các thẻ HTML ngữ nghĩa (semantic tags): header, nav, section, article, footer.",
+      "Xây dựng cấu trúc trang web chuẩn SEO và thân thiện với thiết bị di động.",
+      "Hiểu cách trình duyệt phân tích và render cây cấu trúc DOM (Document Object Model)."
+    ],
+    content: "HTML là nền tảng cốt lõi của mọi ứng dụng Web. Bài học này hướng dẫn bạn cách xây dựng cấu trúc website bài bản, chuẩn SEO, sử dụng thẻ ngữ nghĩa và kết hợp với CSS/JS hiện đại.",
+    code: `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Khóa học Full stack - Bài 1</title>
+</head>
+<body>
+  <header>
+    <h1>Chào mừng đến với Khóa học Full stack</h1>
+  </header>
+  <main>
+    <article>
+      <h2>Khái niệm Web & Cấu trúc HTML</h2>
+      <p>HTML định nghĩa nội dung và cấu trúc ngữ nghĩa của trang web.</p>
+    </article>
+  </main>
+</body>
+</html>`,
+    challenge: "Hãy tự tạo một trang giới thiệu bản thân (Portfolio) đơn giản bằng các thẻ HTML ngữ nghĩa Semantic.",
+    tips: "Luôn khai báo thẻ meta viewport để website hiển thị responsive tốt trên các kích thước màn hình điện thoại di động."
   }
 };
+
+// Ánh xạ ID bài học khớp chuẩn Database PostgreSQL
+LESSON_DETAILS[2] = LESSON_DETAILS[11];
+LESSON_DETAILS[3] = LESSON_DETAILS[12];
+LESSON_DETAILS[4] = LESSON_DETAILS[13];
+LESSON_DETAILS[5] = LESSON_DETAILS[21];
+LESSON_DETAILS[6] = LESSON_DETAILS[22];
+LESSON_DETAILS[7] = LESSON_DETAILS[31];
+LESSON_DETAILS[8] = LESSON_DETAILS[32];
 
 export const formatEmbedVideoUrl = (url) => {
   if (!url || typeof url !== "string") return "";
@@ -415,8 +471,14 @@ const mergeCoursesWithStorage = (courseList, userId) => {
     const completedCount = lessons.filter((l) => l.is_completed).length;
     const progress = lessons.length > 0 ? Math.round((completedCount / lessons.length) * 100) : (c.user_progress_percent || 0);
 
+    const baseCount = typeof c.enrolled_students === "number"
+      ? c.enrolled_students
+      : (typeof c.enrolled_count === "number" ? c.enrolled_count : 0);
+    const enrolledStudents = (!c.is_enrolled && isEnrolled && baseCount === 0) ? 1 : baseCount;
+
     return {
       ...c,
+      enrolled_students: enrolledStudents,
       is_enrolled: isEnrolled,
       lessons,
       user_progress_percent: isEnrolled ? progress : (c.user_progress_percent || 0)
@@ -879,8 +941,8 @@ export default function CoursesPage({ onNavigate, params }) {
 
   const handleSaveEditCourse = async (e) => {
     e.preventDefault();
-    if (!isAdmin && currentUser?.id !== editingCourse?.instructor_id) {
-      addToast("Bạn không có quyền chỉnh sửa khóa học này!", "error");
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền chỉnh sửa khóa học!", "error");
       return;
     }
     if (!editTitle.trim() || !editDesc.trim()) {
@@ -965,8 +1027,8 @@ export default function CoursesPage({ onNavigate, params }) {
   };
 
   const handleDeleteCourse = async (course) => {
-    if (!isAdmin && currentUser?.id !== course.instructor_id) {
-      addToast("Bạn không có quyền xóa khóa học này!", "error");
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền xóa khóa học!", "error");
       return;
     }
     if (!window.confirm(`Bạn có chắc chắn muốn xóa khóa học "${course.title}"? Thao tác này sẽ xóa toàn bộ bài học và tiến độ liên quan!`)) {
@@ -1186,13 +1248,15 @@ export default function CoursesPage({ onNavigate, params }) {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => requireAuth(() => setShowCreateCourseModal(true), "Vui lòng đăng nhập để tạo khóa học mới!")}
-          className="btn btn-sm btn-primary text-white font-bold rounded-xl gap-1.5 shadow-sm shrink-0 cursor-pointer"
-        >
-          <span>+</span> Tạo khóa học mới
-        </button>
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => requireAuth(() => setShowCreateCourseModal(true), "Vui lòng đăng nhập để tạo khóa học mới!")}
+            className="btn btn-sm btn-primary text-white font-bold rounded-xl gap-1.5 shadow-sm shrink-0 cursor-pointer"
+          >
+            <span>+</span> Tạo khóa học mới
+          </button>
+        )}
       </div>
 
       {/* Search & Filter Bar */}
@@ -1355,7 +1419,7 @@ export default function CoursesPage({ onNavigate, params }) {
               >
                 Giáo trình
               </button>
-              {(isAdmin || currentUser?.id === c.instructor_id) && (
+              {isAdmin && (
                 <>
                   <button
                     type="button"
@@ -1484,7 +1548,7 @@ export default function CoursesPage({ onNavigate, params }) {
               <h4 className="font-bold text-base-content text-sm uppercase tracking-wider text-base-content/80">
                 Danh sách bài học & Tiến độ
               </h4>
-              {(isAdmin || currentUser?.id === selectedCourse.instructor_id) && (
+              {isAdmin && (
                 <div className="flex items-center gap-2">
                   <button
                     type="button"

@@ -265,10 +265,17 @@ def create_post(
             db.flush()
         category_id = cat.id
 
-    # Bài viết mới đăng luôn ở trạng thái PENDING để Quản trị viên (QTV) và Kiểm duyệt viên duyệt
+    is_admin = bool(current_user and (
+        getattr(current_user, "is_superuser", False) or
+        any(getattr(r, "name", "") in ["admin", "moderator"] for r in getattr(current_user, "roles", []))
+    ))
+
+    # Bài viết mới đăng mặc định PENDING, trừ khi draft hoặc do Admin/Moderator chủ động duyệt thẳng 'approved'
     clean_status = (post_in.status or "").lower().strip()
     if clean_status == PostStatus.DRAFT.value:
         post_status = PostStatus.DRAFT.value
+    elif clean_status == PostStatus.APPROVED.value and is_admin:
+        post_status = PostStatus.APPROVED.value
     else:
         post_status = PostStatus.PENDING.value
 
@@ -396,8 +403,14 @@ def update_post(
                 detail="Trạng thái bài viết không hợp lệ."
             )
         post.status = new_status
-        if new_status == PostStatus.APPROVED.value and not post.published_at:
-            post.published_at = datetime.now(timezone.utc)
+        if new_status == PostStatus.APPROVED.value:
+            if not post.published_at:
+                post.published_at = datetime.now(timezone.utc)
+            try:
+                from app.services.quiz_generator import ensure_post_quiz_questions
+                ensure_post_quiz_questions(db, post, count=5, user_id=current_user.id)
+            except Exception as e:
+                logger.warning(f"Could not auto-generate quiz questions for approved post #{post.id}: {e}")
 
     if post_in.category_id is not None:
         if post_in.category_id > 0:

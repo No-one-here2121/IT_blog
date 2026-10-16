@@ -62,7 +62,7 @@ class GeminiService:
     speech_request_timeout = 120.0
 
     def __init__(self):
-        self.model: str = settings.GEMINI_MODEL or "gemini-3.1-flash-lite"
+        self.model: str = settings.GEMINI_MODEL or "gemini-2.5-flash"
         self.keys_pool: List[GeminiKeyInfo] = []
         self.current_index: int = 0
 
@@ -310,17 +310,24 @@ class GeminiService:
         if not self.keys_pool:
             return None
 
+        resolved_instruction = system_instruction or ""
+        if json_mode:
+            json_guideline = " Hãy trả về dữ liệu đúng định dạng JSON hợp lệ thuần túy. Tuyệt đối không bọc trong markdown và không giải thích ngoài JSON."
+            resolved_instruction = f"{resolved_instruction.strip()}{json_guideline}".strip()
+
+        candidate_models = [self.model]
+        for alt in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-3.1-flash-lite"]:
+            if alt not in candidate_models:
+                candidate_models.append(alt)
+
         payload: Dict[str, Any] = {
             "model": self.model,
             "input": prompt,
             "generation_config": {"temperature": temperature},
         }
 
-        if system_instruction:
-            payload["system_instruction"] = system_instruction
-
-        if json_mode:
-            payload["generation_config"]["response_mime_type"] = "application/json"
+        if resolved_instruction:
+            payload["system_instruction"] = resolved_instruction
 
         # Try available keys in pool
         max_attempts = max(1, len(self.keys_pool))
@@ -338,10 +345,20 @@ class GeminiService:
             }
 
             try:
+                resp = None
                 with httpx.Client(timeout=self.request_timeout) as client:
-                    resp = client.post(self.api_url, headers=headers, json=payload)
+                    for model_candidate in candidate_models:
+                        payload["model"] = model_candidate
+                        resp = client.post(self.api_url, headers=headers, json=payload)
+                        if resp.status_code == 200:
+                            self.model = model_candidate
+                            break
+                        elif resp.status_code == 503 or "model" in resp.text.lower():
+                            continue
+                        else:
+                            break
 
-                if resp.status_code == 200:
+                if resp is not None and resp.status_code == 200:
                     data = resp.json()
                     text = self._extract_text_from_response(data)
                     if text:
@@ -574,7 +591,7 @@ class GeminiService:
         """Test a specific API key against Google Gemini API."""
         clean_k = api_key.strip()
         if not clean_k:
-            return {"valid": False, "message": "API key kh?ng du?c d? tr?ng"}
+            return {"valid": False, "message": "API key không được để trống"}
 
         headers = {
             "x-goog-api-key": clean_k,
@@ -589,13 +606,13 @@ class GeminiService:
             with httpx.Client(timeout=self.request_timeout) as client:
                 resp = client.post(self.api_url, headers=headers, json=payload)
             if resp.status_code == 200:
-                return {"valid": True, "message": f"K?t n?i Gemini th?nh c?ng! (M? h?nh: {self.model})"}
+                return {"valid": True, "message": f"Kết nối Gemini thành công! (Mô hình: {self.model})"}
             elif resp.status_code == 429:
-                return {"valid": True, "rate_limited": True, "message": "Key h?p l? nhung dang b? gi?i h?n t?c d? (Rate Limit 429)."}
+                return {"valid": True, "rate_limited": True, "message": "Key hợp lệ nhưng đang bị giới hạn tốc độ (Rate Limit 429)."}
             else:
-                return {"valid": False, "message": f"L?i x?c th?c ({resp.status_code}): {resp.text[:150]}"}
+                return {"valid": False, "message": f"Lỗi xác thực ({resp.status_code}): {resp.text[:150]}"}
         except Exception as e:
-            return {"valid": False, "message": f"L?i k?t n?i t?i m?y ch? Google Gemini: {str(e)}"}
+            return {"valid": False, "message": f"Lỗi kết nối tới máy chủ Google Gemini: {str(e)}"}
 
     # =========================================================================
     # Specialized AI Modules
@@ -606,21 +623,21 @@ class GeminiService:
         Automated content moderation using Gemini AI with fallback.
         """
         system_prompt = (
-            "B?n l? tr? l? AI chuy?n ki?m duy?t n?i dung cho n?n t?ng blog k? thu?t c?ng ngh? th?ng tin (IT Blog). "
-            "Nhi?m v? c?a b?n l? d?nh gi? t?nh an to?n, t?nh chuy?n m?n v? ch?t lu?ng c?a b?i vi?t. "
-            "H?y tr? v? k?t qu? du?i d?nh d?ng JSON duy nh?t v?i c?c tru?ng:\n"
+            "Bạn là trợ lý AI chuyên kiểm duyệt nội dung cho nền tảng blog kỹ thuật công nghệ thông tin (IT Blog). "
+            "Nhiệm vụ của bạn là đánh giá tính an toàn, tính chuyên môn và chất lượng của bài viết. "
+            "Hãy trả về kết quả dưới định dạng JSON duy nhất với các trường:\n"
             "{\n"
-            "  \"is_safe\": boolean (true n?u kh?ng ch?a n?i dung c?m),\n"
-            "  \"spam_score\": float (0.0 d?n 1.0, cao nghia l? spam qu?ng c?o/c? b?c),\n"
-            "  \"toxicity_score\": float (0.0 d?n 1.0, cao nghia l? d?c h?i/ch?i b?i/l?a d?o),\n"
-            "  \"is_tech_related\": boolean (true n?u li?n quan d?n l?p tr?nh, IT, ph?n m?m, c?ng ngh?),\n"
-            "  \"quality_score\": float (0.0 d?n 1.0, d?nh gi? d? m?ch l?c v? gi? tr? k? thu?t),\n"
+            "  \"is_safe\": boolean (true nếu không chứa nội dung cấm),\n"
+            "  \"spam_score\": float (0.0 đến 1.0, cao nghĩa là spam quảng cáo/cờ bạc),\n"
+            "  \"toxicity_score\": float (0.0 đến 1.0, cao nghĩa là độc hại/chửi bới/lừa đảo),\n"
+            "  \"is_tech_related\": boolean (true nếu liên quan đến lập trình, IT, phần mềm, công nghệ),\n"
+            "  \"quality_score\": float (0.0 đến 1.0, đánh giá độ mạch lạc và giá trị kỹ thuật),\n"
             "  \"verdict\": string (\"approved\" | \"flagged\" | \"rejected\"),\n"
-            "  \"reasons\": [danh s?ch c?c chu?i ti?ng Vi?t gi?i th?ch l? do n?u c? vi ph?m ho?c c?n luu ?]\n"
+            "  \"reasons\": [danh sách các chuỗi tiếng Việt giải thích lý do nếu có vi phạm hoặc cần lưu ý]\n"
             "}"
         )
 
-        user_prompt = f"Ti?u d?: {title}\n\nN?i dung:\n{content[:4000]}"
+        user_prompt = f"Tiêu đề: {title}\n\nNội dung:\n{content[:4000]}"
         gemini_response = self.call_gemini(user_prompt, system_instruction=system_prompt, json_mode=True)
 
         if gemini_response:
@@ -646,18 +663,18 @@ class GeminiService:
         AI Post Optimizer: Generate engaging titles, SEO metadata, and tag suggestions.
         """
         system_prompt = (
-            "B?n l? chuy?n gia Content Marketing & SEO k? thu?t d?nh cho l?p tr?nh vi?n. "
-            "H?y ph?n t?ch b?i vi?t v? tr? v? JSON chu?n g?m:\n"
+            "Bạn là chuyên gia Content Marketing & SEO kỹ thuật dành cho lập trình viên. "
+            "Hãy phân tích bài viết và trả về JSON chuẩn gồm:\n"
             "{\n"
-            "  \"suggested_titles\": [3 ti?u d? h?p d?n, thu h?t ngu?i d?c CNTT],\n"
-            "  \"seo_title\": \"ti?u d? chu?n SEO du?i 60 k? t?\",\n"
-            "  \"meta_description\": \"m? t? ng?n chu?n SEO du?i 155 k? t?\",\n"
-            "  \"suggested_tags\": [3 d?n 5 th? tag k? thu?t ti?ng Anh ho?c ti?ng Vi?t chu?n],\n"
-            "  \"suggested_category\": \"Frontend\" | \"Backend\" | \"DevOps\" | \"Database\" | \"AI\" | \"Mobile\" | \"B?o m?t\"\n"
+            "  \"suggested_titles\": [3 tiêu đề hấp dẫn, thu hút người đọc CNTT],\n"
+            "  \"seo_title\": \"tiêu đề chuẩn SEO dưới 60 ký tự\",\n"
+            "  \"meta_description\": \"mô tả ngắn chuẩn SEO dưới 155 ký tự\",\n"
+            "  \"suggested_tags\": [3 đến 5 thẻ tag kỹ thuật tiếng Anh hoặc tiếng Việt chuẩn],\n"
+            "  \"suggested_category\": \"Frontend\" | \"Backend\" | \"DevOps\" | \"Database\" | \"AI\" | \"Mobile\" | \"Bảo mật\"\n"
             "}"
         )
 
-        user_prompt = f"Ti?u d? ban d?u: {title}\n\nN?i dung b?i vi?t:\n{content[:3000]}"
+        user_prompt = f"Tiêu đề ban đầu: {title}\n\nNội dung bài viết:\n{content[:3000]}"
         gemini_response = self.call_gemini(user_prompt, system_instruction=system_prompt, json_mode=True)
 
         if gemini_response:
@@ -681,15 +698,15 @@ class GeminiService:
         Context-aware code assistant: Explain, Debug, Optimize, or Refactor code snippet.
         """
         system_prompt = (
-            "B?n l? m?t Senior Tech Lead & Chuy?n gia K? thu?t Ph?n m?m. "
-            "H?y tr? v? JSON g?m:\n"
+            "Bạn là một Senior Tech Lead & Chuyên gia Kỹ thuật Phần mềm. "
+            "Hãy trả về JSON gồm:\n"
             "{\n"
-            "  \"explanation\": \"ph?n t?ch chi ti?t b?ng ti?ng Vi?t\",\n"
-            "  \"improved_code\": \"do?n m? d? du?c debug/t?i uu/t?i c?u tr?c\",\n"
-            "  \"key_takeaways\": [3 di?m c?t l?i developer c?n luu ?]\n"
+            "  \"explanation\": \"phân tích chi tiết bằng tiếng Việt\",\n"
+            "  \"improved_code\": \"đoạn mã đã được debug/tối ưu/tái cấu trúc\",\n"
+            "  \"key_takeaways\": [3 điểm cốt lõi developer cần lưu ý]\n"
             "}"
         )
-        user_prompt = f"H?nh d?ng y?u c?u: {action}\nNg?n ng?: {language}\n?o?n m?:\n```{language}\n{snippet}\n```"
+        user_prompt = f"Hành động yêu cầu: {action}\nNgôn ngữ: {language}\nĐoạn mã:\n```{language}\n{snippet}\n```"
         gemini_response = self.call_gemini(user_prompt, system_instruction=system_prompt, json_mode=True)
 
         if gemini_response:
@@ -710,36 +727,36 @@ class GeminiService:
     def ask_article(self, article_title: str, article_content: str, question: str, context: Optional[str] = None) -> str:
         """Answer reader questions based on article content."""
         system_prompt = (
-            "B?n l? tr? l? gi?i d?p k? thu?t c?a n?n t?ng IT Blog. "
-            "H?y tr? l?i c?u h?i c?a ngu?i d?ng d?a tr?n n?i dung b?i vi?t k? thu?t du?c cung c?p. "
-            "Tr? l?i ng?n g?n, chu?n x?c, th?n thi?n v? cung c?p v? d? n?u c?n."
+            "Bạn là trợ lý giải đáp kỹ thuật của nền tảng IT Blog. "
+            "Hãy trả lời câu hỏi của người dùng dựa trên nội dung bài viết kỹ thuật được cung cấp. "
+            "Trả lời ngắn gọn, chuẩn xác, thân thiện và cung cấp ví dụ nếu cần."
         )
         user_prompt = (
-            f"B?i vi?t: {article_title}\n"
-            f"Ng? c?nh tr?ch do?n: {context or 'To?n b?i vi?t'}\n"
-            f"N?i dung t?m lu?c: {article_content[:3000]}\n\n"
-            f"C?u h?i c?a d?c gi?: {question}"
+            f"Bài viết: {article_title}\n"
+            f"Ngữ cảnh trích đoạn: {context or 'Toàn bài viết'}\n"
+            f"Nội dung tóm lược: {article_content[:3000]}\n\n"
+            f"Câu hỏi của độc giả: {question}"
         )
         ans = self.call_gemini(user_prompt, system_instruction=system_prompt)
         if ans:
             return ans.strip()
 
         return (
-            f"D?a tr?n b?i vi?t '{article_title}': V?n d? b?n h?i '{question}' "
-            "d? du?c t?c gi? gi?i th?ch v? ph?n t?ch chi ti?t trong b?i vi?t. Phuong ph?p t?t nh?t l? tu?n th? c?u tr?c chu?n, "
-            "ki?m th? t? d?ng v? tham kh?o t?i li?u ch?nh th?c c?a c?ng ngh? dang s? d?ng."
+            f"Dựa trên bài viết '{article_title}': Vấn đề bạn hỏi '{question}' "
+            "đã được tác giả giải thích và phân tích chi tiết trong bài viết. Phương pháp tốt nhất là tuân thủ cấu trúc chuẩn, "
+            "kiểm thử tự động và tham khảo tài liệu chính thức của công nghệ đang sử dụng."
         )
 
     def summarize_article(self, article_title: str, article_content: str) -> Dict[str, Any]:
         """Summarize technical post into core key takeaways."""
         system_prompt = (
-            "H?y t?m t?t b?i vi?t k? thu?t c?ng ngh? th?ng tin du?i d?nh d?ng JSON:\n"
+            "Hãy tóm tắt bài viết kỹ thuật công nghệ thông tin dưới định dạng JSON:\n"
             "{\n"
-            "  \"summary\": \"t?m t?t 2-3 c?u ng?n g?n to?n b? b?i vi?t\",\n"
-            "  \"key_points\": [3 lu?n di?m k? thu?t quan tr?ng nh?t]\n"
+            "  \"summary\": \"tóm tắt 2-3 câu ngắn gọn toàn bộ bài viết\",\n"
+            "  \"key_points\": [3 luận điểm kỹ thuật quan trọng nhất]\n"
             "}"
         )
-        user_prompt = f"Ti?u d?: {article_title}\n\nN?i dung:\n{article_content[:3500]}"
+        user_prompt = f"Tiêu đề: {article_title}\n\nNội dung:\n{article_content[:3500]}"
         gemini_response = self.call_gemini(user_prompt, system_instruction=system_prompt, json_mode=True)
 
         if gemini_response:
@@ -753,33 +770,33 @@ class GeminiService:
                 pass
 
         return {
-            "summary": f"B?i vi?t '{article_title}' cung c?p ph?n t?ch chi ti?t v? ki?n tr?c v? k? thu?t th?c chi?n trong d? ?n.",
+            "summary": f"Bài viết '{article_title}' cung cấp phân tích chi tiết về kiến trúc và kỹ thuật thực chiến trong dự án.",
             "key_points": [
-                f"T?ng quan c?ng ngh?: {article_title}",
-                "Thi?t l?p m?i tru?ng v? c?u tr?c d? ?n chu?n Clean Architecture",
-                "T?i uu hi?u nang, b?o m?t v? kh? nang m? r?ng h? th?ng"
+                f"Tổng quan công nghệ: {article_title}",
+                "Thiết lập môi trường và cấu trúc dự án chuẩn Clean Architecture",
+                "Tối ưu hiệu năng, bảo mật và khả năng mở rộng hệ thống"
             ]
         }
 
     def generate_bot_comment(self, post_title: str, post_content: str, tech_stack: Optional[str] = None) -> str:
         """Generate an insightful discussion starter from AI TechBot."""
         system_prompt = (
-            "B?n l? 'AI TechBot' - Tr? l? k? thu?t t? d?ng tr?n di?n d?n IT Blog. "
-            "Nhi?m v? c?a b?n l? d?c b?i vi?t v? vi?t 1 b?nh lu?n mang t?nh x?y d?ng, "
-            "n?u b?t 1 m?o th?c h?nh t?t nh?t (best practice), chia s? kinh nghi?m tr?nh l?i "
-            "v? d?t 1 c?u h?i m? d? k?ch th?ch c?ng d?ng th?o lu?n. Gi? b?nh lu?n trong kho?ng 3-5 c?u."
+            "Bạn là 'AI TechBot' - Trợ lý kỹ thuật tự động trên diễn đàn IT Blog. "
+            "Nhiệm vụ của bạn là đọc bài viết và viết 1 bình luận mang tính xây dựng, "
+            "nêu bật 1 mẹo thực hành tốt nhất (best practice), chia sẻ kinh nghiệm tránh lỗi "
+            "và đặt 1 câu hỏi mở để kích thích cộng đồng thảo luận. Giữ bình luận trong khoảng 3-5 câu."
         )
-        user_prompt = f"B?i vi?t: {post_title}\nC?ng ngh?: {tech_stack or 'C?ng ngh? ph?n m?m'}\nN?i dung: {post_content[:2000]}"
+        user_prompt = f"Bài viết: {post_title}\nCông nghệ: {tech_stack or 'Công nghệ phần mềm'}\nNội dung: {post_content[:2000]}"
         ans = self.call_gemini(user_prompt, system_instruction=system_prompt)
         if ans:
-            return f"?? **[AI TechBot Ph?n h?i]**: {ans.strip()}"
+            return f"🤖 **[AI TechBot Phản hồi]**: {ans.strip()}"
 
         # Heuristic fallback
         return (
-            f"?? **[AI TechBot Ph?n h?i]**: Ch?o b?n! V? ch? d? **{post_title}**, "
-            f"m?o th?c h?nh t?t nh?t l? lu?n tu?n th? nguy?n t?c Single Responsibility, "
-            f"ki?m th? t? d?ng c?c edge cases v? tham kh?o t?i li?u ch?nh th?c c?a {tech_stack or 'thu vi?n'}. "
-            f"??c gi? c? th?c m?c g? v? c?u tr?c n?y h?y d?t c?u h?i b?n du?i nh?!"
+            f"🤖 **[AI TechBot Phản hồi]**: Chào bạn! Về chủ đề **{post_title}**, "
+            f"mẹo thực hành tốt nhất là luôn tuân thủ nguyên tắc Single Responsibility, "
+            f"kiểm thử tự động các edge cases và tham khảo tài liệu chính thức của {tech_stack or 'thư viện'}. "
+            f"Độc giả có thắc mắc gì về cấu trúc này hãy đặt câu hỏi bên dưới nhé!"
         )
 
     # =========================================================================
@@ -788,16 +805,16 @@ class GeminiService:
 
     def _heuristic_moderation(self, title: str, content: str) -> Dict[str, Any]:
         text = (title + " " + content).lower()
-        spam_keywords = ["casino", "c? cu?c", "bet88", "l? d?", "ti?n ?o l?a d?o", "click here to win", "vay nhanh online"]
+        spam_keywords = ["casino", "cá cược", "bet88", "lô đề", "tiền ảo lừa đảo", "click here to win", "vay nhanh online"]
         is_spam = any(k in text for k in spam_keywords)
         spam_score = 0.95 if is_spam else (0.1 if len(content) < 50 else 0.02)
 
-        toxic_keywords = ["d? ngu", "l?a d?o", "ch?t ti?t", "scam", "ch?i b?i", "racist"]
+        toxic_keywords = ["đồ ngu", "lừa đảo", "chết tiệt", "scam", "chửi bới", "racist"]
         is_toxic = any(k in text for k in toxic_keywords)
         toxicity_score = 0.9 if is_toxic else 0.01
 
         tech_keywords = [
-            "code", "l?p tr?nh", "python", "javascript", "react", "fastapi", "docker", 
+            "code", "lập trình", "python", "javascript", "react", "fastapi", "docker", 
             "database", "postgresql", "sql", "api", "backend", "frontend", "devops",
             "git", "aws", "cloud", "bug", "algorithm", "architecture", "microservice",
             "linux", "system", "web", "html", "css", "node", "ci/cd", "server"
@@ -807,11 +824,11 @@ class GeminiService:
 
         reasons = []
         if is_spam:
-            reasons.append("Ph?t hi?n t? kh?a nghi v?n spam thuong m?i/c? cu?c.")
+            reasons.append("Phát hiện từ khóa nghi vấn spam thương mại/cá cược.")
         if is_toxic:
-            reasons.append("Ph?t hi?n t? ng? kh?ng chu?n m?c ho?c c? t?nh ch?t th?a m?.")
+            reasons.append("Phát hiện từ ngữ không chuẩn mực hoặc có tính chất thóa mạ.")
         if not is_tech_related:
-            reasons.append("N?i dung chua ph?n ?nh r? ch? d? C?ng ngh? Th?ng tin / L?p tr?nh.")
+            reasons.append("Nội dung chưa phản ánh rõ chủ đề Công nghệ Thông tin / Lập trình.")
 
         length_factor = min(len(content) / 500.0, 1.0)
         tech_factor = min(tech_matches / 5.0, 1.0)
@@ -840,9 +857,9 @@ class GeminiService:
     def _heuristic_optimization(self, title: str, content: str) -> Dict[str, Any]:
         text = (title + " " + content).lower()
         suggested_titles = [
-            f"L?m ch? {title}: Hu?ng d?n t? Co b?n d?n Th?c chi?n 2026",
-            f"T?i sao b?n n?n ?p d?ng {title} trong Ki?n tr?c Ph?n m?m Hi?n d?i?",
-            f"Top 5 B? quy?t T?i uu {title} m? Developer c?n bi?t"
+            f"Làm chủ {title}: Hướng dẫn từ Cơ bản đến Thực chiến 2026",
+            f"Tại sao bạn nên áp dụng {title} trong Kiến trúc Phần mềm Hiện đại?",
+            f"Top 5 Bí quyết Tối ưu {title} mà Developer cần biết"
         ]
 
         if any(k in text for k in ["docker", "k8s", "kubernetes", "ci/cd", "linux", "aws"]):
@@ -862,10 +879,10 @@ class GeminiService:
             if c.lower() in text:
                 tags.append(c)
         if not tags:
-            tags = ["C?ng ngh?", "L?p tr?nh", "Kinh nghi?m"]
+            tags = ["Công nghệ", "Lập trình", "Kinh nghiệm"]
 
-        seo_title = f"{title[:50]} | IT Blog N?n t?ng Tri th?c"
-        meta_desc = f"Kh?m ph? ph?n t?ch chi ti?t v? {title}. Hu?ng d?n th?c chi?n, t?i uu h?a v? kinh nghi?m l?p tr?nh t? c?ng d?ng IT Blog."[:155]
+        seo_title = f"{title[:50]} | IT Blog Nền tảng Tri thức"
+        meta_desc = f"Khám phá phân tích chi tiết về {title}. Hướng dẫn thực chiến, tối ưu hóa và kinh nghiệm lập trình từ cộng đồng IT Blog."[:155]
 
         return {
             "suggested_titles": suggested_titles,
@@ -879,55 +896,55 @@ class GeminiService:
         lang = language.upper()
         if action == "debug":
             explanation = (
-                f"Ph?n t?ch l?i ti?m ?n cho do?n m? {lang}:\n"
-                "1. Ki?m tra vi?c x? l? ngo?i l? (Exception / Error handling) v? gi? tr? None/Null.\n"
-                "2. ??m b?o vi?c gi?i ph?ng t?i nguy?n ho?c connection pool du?c d?ng d?ng c?ch.\n"
-                "3. Ki?m tra ranh gi?i d? li?u (boundary check) v? ki?u d? li?u d?u v?o."
+                f"Phân tích lỗi tiềm ẩn cho đoạn mã {lang}:\n"
+                "1. Kiểm tra việc xử lý ngoại lệ (Exception / Error handling) và giá trị None/Null.\n"
+                "2. Đảm bảo việc giải phóng tài nguyên hoặc connection pool được đóng đúng cách.\n"
+                "3. Kiểm tra ranh giới dữ liệu (boundary check) và kiểu dữ liệu đầu vào."
             )
-            improved_code = f"# [Optimized & Safe {lang} Code]\ntry:\n    # X? l? an to?n v?i validation\n    {snippet}\nexcept Exception as err:\n    logger.error(f'L?i th?c thi: {{err}}')\n    raise"
+            improved_code = f"# [Optimized & Safe {lang} Code]\ntry:\n    # Xử lý an toàn với validation\n    {snippet}\nexcept Exception as err:\n    logger.error(f'Lỗi thực thi: {{err}}')\n    raise"
             takeaways = [
-                "B? sung validation ch?t ch? cho tham s?",
-                "S? d?ng try-catch ho?c structured logging",
-                "Tr?nh block lu?ng ch?nh (I/O blocking)"
+                "Bổ sung validation chặt chẽ cho tham số",
+                "Sử dụng try-catch hoặc structured logging",
+                "Tránh block luồng chính (I/O blocking)"
             ]
         elif action == "optimize":
             explanation = (
-                f"?? xu?t t?i uu h?a hi?u nang ({lang}):\n"
-                "1. Gi?m d? ph?c t?p th?i gian t? O(N^2) xu?ng O(N) th?ng qua hash map / dictionary lookup.\n"
-                "2. Tr?nh truy v?n N+1 n?u tuong t?c v?i database (s? d?ng eager loading / join).\n"
-                "3. S? d?ng b? nh? d?m (caching with Redis/in-memory) cho c?c t?nh to?n tr?ng l?p."
+                f"Đề xuất tối ưu hóa hiệu năng ({lang}):\n"
+                "1. Giảm độ phức tạp thời gian từ O(N^2) xuống O(N) thông qua hash map / dictionary lookup.\n"
+                "2. Tránh truy vấn N+1 nếu tương tác với database (sử dụng eager loading / join).\n"
+                "3. Sử dụng bộ nhớ đệm (caching with Redis/in-memory) cho các tính toán trùng lặp."
             )
-            improved_code = f"# Optimized Version\n{snippet}\n# G?i ?: D?ng vectorization, caching ho?c async/await"
+            improved_code = f"# Optimized Version\n{snippet}\n# Gợi ý: Dùng vectorization, caching hoặc async/await"
             takeaways = [
-                "?? ph?c t?p O(1) truy xu?t",
-                "T?i uu c?p ph?t b? nh? RAM",
-                "T?n d?ng Async I/O cho network operations"
+                "Độ phức tạp O(1) truy xuất",
+                "Tối ưu cấp phát bộ nhớ RAM",
+                "Tận dụng Async I/O cho network operations"
             ]
         elif action == "refactor":
             explanation = (
-                f"G?i ? t?i c?u tr?c m? ngu?n ({lang}) theo Clean Code & SOLID:\n"
-                "1. T?ch h?m th?nh c?c single-responsibility unit nh? g?n (< 20 d?ng).\n"
-                "2. ??t t?n bi?n v? h?m tu?ng minh theo ng? c?nh domain nghi?p v?.\n"
-                "3. S? d?ng Type Hinting (typing) v? Dependency Injection."
+                f"Gợi ý tái cấu trúc mã nguồn ({lang}) theo Clean Code & SOLID:\n"
+                "1. Tách hàm thành các single-responsibility unit nhỏ gọn (< 20 dòng).\n"
+                "2. Đặt tên biến và hàm tường minh theo ngữ cảnh domain nghiệp vụ.\n"
+                "3. Sử dụng Type Hinting (typing) và Dependency Injection."
             )
             improved_code = f"# Refactored with Clean Architecture\n{snippet}"
             takeaways = [
-                "?p d?ng Single Responsibility Principle",
-                "Ki?u d? li?u r? r?ng (Type hints)",
-                "D? d?ng vi?t Unit Test (High testability)"
+                "Áp dụng Single Responsibility Principle",
+                "Kiểu dữ liệu rõ ràng (Type hints)",
+                "Dễ dàng viết Unit Test (High testability)"
             ]
         else:
             explanation = (
-                f"Gi?i th?ch co ch? ho?t d?ng c?a do?n m? {lang}:\n"
-                f"- ?o?n m? g?m {len(snippet.splitlines())} d?ng x? l? logic.\n"
-                "- Kh?i t?o c?u tr?c d? li?u, duy?t v? chuy?n d?i d? li?u qua c?c pipeline x? l?.\n"
-                "- Tr? v? k?t qu? ph? h?p cho lu?ng nghi?p v? ti?p theo."
+                f"Giải thích cơ chế hoạt động của đoạn mã {lang}:\n"
+                f"- Đoạn mã gồm {len(snippet.splitlines())} dòng xử lý logic.\n"
+                "- Khởi tạo cấu trúc dữ liệu, duyệt và chuyển đổi dữ liệu qua các pipeline xử lý.\n"
+                "- Trả về kết quả phù hợp cho luồng nghiệp vụ tiếp theo."
             )
             improved_code = snippet
             takeaways = [
-                "C?u tr?c thu?t to?n chu?n",
-                "Th?ch h?p ?ng d?ng trong ki?n tr?c Microservices / REST API",
-                "Th?i gian ph?n h?i d? ki?n < 5ms"
+                "Cấu trúc thuật toán chuẩn",
+                "Thích hợp ứng dụng trong kiến trúc Microservices / REST API",
+                "Thời gian phản hồi dự kiến < 5ms"
             ]
 
         return {

@@ -17,6 +17,7 @@ from app.schemas.course import (
     CourseDetailResponse,
     LessonCreate,
     LessonUpdate,
+    LessonPatchRequest,
     LessonResponse,
     EnrollmentResponse,
     LessonProgressToggle
@@ -35,6 +36,22 @@ def ensure_default_courses_seeded(db: Session):
         return
 
     defaults = [
+        {
+            "title": "Full stack",
+            "slug": "full-stack",
+            "description": "giúp học sinh hình dung It cơ bản",
+            "level": "beginner",
+            "category_name": "Fullstack",
+            "cover_image": "https://th.bing.com/th/id/OIP.rM8t0CGxBDN6eaJGgJyJwAHaEc?w=262&h=180&c=7&r=0&o=7&dpr=1.3&pid=1.7&rm=3",
+            "lessons": [
+                {
+                    "title": "HTML",
+                    "duration_minutes": 25,
+                    "video_url": "https://www.youtube.com/watch?v=S0SAw6FZeCU",
+                    "content": "Tổng quan kiến thức HTML, cấu trúc cây DOM và nền tảng xây dựng giao diện website cơ bản."
+                }
+            ]
+        },
         {
             "title": "Khóa học FastAPI & Microservices Masterclass 2026",
             "slug": "fastapi-microservices-masterclass",
@@ -166,7 +183,7 @@ def get_courses(
     if category_id:
         query = query.filter(Course.category_id == category_id)
 
-    courses = query.order_by(Course.created_at.desc()).all()
+    courses = query.order_by(Course.id.asc()).all()
     results = []
 
     # Pre-fetch enrollment counts across all courses
@@ -316,6 +333,7 @@ def get_course_detail(
     total = len(lesson_responses)
     completed = len(completed_lesson_ids)
     progress_pct = round((completed / total * 100), 1) if total > 0 else 0.0
+    enrolled_count = db.query(CourseEnrollment).filter(CourseEnrollment.course_id == course.id).count()
 
     return CourseDetailResponse(
         id=course.id,
@@ -329,6 +347,7 @@ def get_course_detail(
         lessons=lesson_responses,
         total_lessons=total,
         completed_lessons=completed,
+        enrolled_students=enrolled_count,
         user_progress_percent=progress_pct,
         is_enrolled=is_enrolled,
         created_at=course.created_at
@@ -343,7 +362,15 @@ def create_course(
 ):
     """
     Create a new course with lessons.
+    Chỉ Quản trị viên (Admin) mới có quyền tạo khóa học mới.
     """
+    is_admin = current_user.is_superuser or any(r.name in ["admin", "moderator"] for r in current_user.roles)
+    if not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chỉ Quản trị viên (Admin) mới có quyền tạo khóa học mới."
+        )
+
     clean_title = data.title.strip() if data.title else ""
     if not clean_title:
         raise HTTPException(
@@ -456,6 +483,7 @@ def create_course(
         lessons=lessons_res,
         total_lessons=len(lessons_res),
         completed_lessons=0,
+        enrolled_students=0,
         user_progress_percent=0.0,
         is_enrolled=False,
         created_at=course.created_at
@@ -478,8 +506,11 @@ def update_course(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khóa học không tồn tại")
 
     is_admin = current_user.is_superuser or any(r.name in ["admin", "moderator"] for r in current_user.roles)
-    if course.instructor_id != current_user.id and not is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Bạn không có quyền chỉnh sửa khóa học này.")
+    if not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chỉ Quản trị viên (Admin) mới có quyền chỉnh sửa khóa học."
+        )
 
     if data.title is not None:
         clean_title = data.title.strip()
@@ -614,6 +645,7 @@ def update_course(
     total = len(lesson_responses)
     completed = len(completed_lesson_ids)
     progress_pct = round((completed / total * 100), 1) if total > 0 else 0.0
+    enrolled_count = db.query(CourseEnrollment).filter(CourseEnrollment.course_id == course.id).count()
 
     return CourseDetailResponse(
         id=course.id,
@@ -627,6 +659,7 @@ def update_course(
         lessons=lesson_responses,
         total_lessons=total,
         completed_lessons=completed,
+        enrolled_students=enrolled_count,
         user_progress_percent=progress_pct,
         is_enrolled=is_enrolled,
         created_at=course.created_at
@@ -774,8 +807,8 @@ def delete_course(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khóa học không tồn tại")
 
     is_admin = current_user.is_superuser or any(r.name in ["admin", "moderator"] for r in current_user.roles)
-    if course.instructor_id != current_user.id and not is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Bạn không có quyền xóa khóa học này.")
+    if not is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Chỉ Quản trị viên (Admin) mới có quyền xóa khóa học.")
 
     db.query(CourseLessonProgress).filter(CourseLessonProgress.course_id == id).delete(synchronize_session=False)
     db.query(CourseEnrollment).filter(CourseEnrollment.course_id == id).delete(synchronize_session=False)
@@ -783,3 +816,46 @@ def delete_course(
     db.delete(course)
     db.commit()
     return None
+
+
+@router.patch("/lessons/{lesson_id}")
+def update_single_lesson(
+    lesson_id: int,
+    data: LessonPatchRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Cập nhật nhanh thông tin bài học (video_url, tiêu đề, nội dung, thời lượng).
+    Chỉ Quản trị viên (Admin) mới có quyền cập nhật bài học.
+    """
+    is_admin = current_user.is_superuser or any(r.name in ["admin", "moderator"] for r in current_user.roles)
+    if not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chỉ Quản trị viên (Admin) mới có quyền cập nhật bài học."
+        )
+
+    lesson = db.query(CourseLesson).filter(CourseLesson.id == lesson_id).first()
+    if not lesson:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Bài học không tồn tại.")
+
+    if data.video_url is not None:
+        lesson.video_url = data.video_url.strip() if data.video_url else None
+    if data.title is not None and data.title.strip():
+        lesson.title = data.title.strip()
+    if data.content is not None:
+        lesson.content = data.content
+    if data.duration_minutes is not None and data.duration_minutes > 0:
+        lesson.duration_minutes = data.duration_minutes
+
+    db.commit()
+    db.refresh(lesson)
+    return {
+        "ok": True,
+        "lesson_id": lesson.id,
+        "title": lesson.title,
+        "video_url": lesson.video_url,
+        "duration_minutes": lesson.duration_minutes
+    }
+

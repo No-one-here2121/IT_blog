@@ -143,15 +143,7 @@ export default function BrandIcon({
   const brand = BRAND_DATA[key];
 
   if (!brand) {
-    return (
-      <span
-        className={`inline-flex items-center justify-center font-bold text-xs uppercase px-1.5 py-0.5 rounded bg-base-200 border border-base-300 ${className}`}
-        style={{ minWidth: size, height: size, ...style }}
-        {...props}
-      >
-        {name.slice(0, 3)}
-      </span>
-    );
+    return null;
   }
 
   const fillColor = colored ? brand.color : "currentColor";

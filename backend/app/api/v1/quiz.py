@@ -434,12 +434,21 @@ def create_quiz_question(
         "medium": "medium", "intermediate": "medium", "trung bình": "medium", "trung binh": "medium", "vừa": "medium", "vua": "medium",
         "hard": "hard", "advanced": "hard", "nâng cao": "hard", "nang cao": "hard", "khó": "hard", "kho": "hard"
     }
-    clean_diff = diff_map.get(raw_diff, "medium")
+    if raw_diff not in diff_map:
+        raise HTTPException(status_code=400, detail="Độ khó câu hỏi không hợp lệ. Cho phép: easy, medium, hard.")
+    clean_diff = diff_map[raw_diff]
 
     if data.course_id:
         course = db.query(Course).filter(Course.id == data.course_id).first()
         if not course:
             raise HTTPException(status_code=400, detail="Khóa học được chỉ định không tồn tại.")
+
+    is_admin = bool(current_user and (getattr(current_user, "is_superuser", False) or any(getattr(r, "name", "") in ["admin", "moderator"] for r in getattr(current_user, "roles", []))))
+    if current_user is not None and not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chỉ Quản trị viên (Admin) mới có quyền thêm câu hỏi trắc nghiệm."
+        )
 
     user_id = getattr(current_user, "id", None) if (current_user and not hasattr(current_user, "dependency")) else None
 
@@ -527,7 +536,15 @@ def generate_quiz_with_ai(
     """
     Tự động sinh bộ câu hỏi trắc nghiệm bằng Trí tuệ Nhân tạo (Gemini AI)
     dựa trên nội dung Khóa học hoặc các Bài viết được chỉ định.
+    Chỉ Quản trị viên (Admin) mới có quyền tạo đề thi bằng AI.
     """
+    is_admin = bool(current_user and (getattr(current_user, "is_superuser", False) or any(getattr(r, "name", "") in ["admin", "moderator"] for r in getattr(current_user, "roles", []))))
+    if current_user is not None and not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chỉ Quản trị viên (Admin) mới có quyền tạo đề thi bằng AI."
+        )
+
     materials = []
     lang = req.language or ""
     course = None

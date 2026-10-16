@@ -739,13 +739,15 @@ ${rows}
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => requireAuth(() => setShowCreateJobModal(true), "Vui lòng đăng nhập để đăng tin tuyển dụng!")}
-          className="btn btn-sm btn-primary text-white font-bold rounded-xl gap-1.5 shadow-sm shrink-0 cursor-pointer"
-        >
-          <span>+</span> Đăng tin tuyển dụng
-        </button>
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => requireAuth(() => setShowCreateJobModal(true), "Vui lòng đăng nhập để đăng tin tuyển dụng!")}
+            className="btn btn-sm btn-primary text-white font-bold rounded-xl gap-1.5 shadow-sm shrink-0 cursor-pointer"
+          >
+            <span>+</span> Đăng tin tuyển dụng
+          </button>
+        )}
       </div>
 
       {/* Search & Filter Bar */}

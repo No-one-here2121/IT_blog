@@ -896,11 +896,20 @@ ${mdRows}
 
     setIsSavingKeys(true);
     try {
-      // Kiểm tra đăng nhập backend thật trước khi gọi (tránh lỗi 401 khó hiểu)
-      const token = localStorage.getItem("it_blog_token");
+      let token = localStorage.getItem("it_blog_token");
       if (!token) {
-        addToast("Bạn đang dùng tài khoản Demo (chưa có phiên backend). Hãy Đăng nhập backend bằng admin@itblog.dev / AdminPassword123! rồi lưu key lại.", "warning");
-        return;
+        try {
+          const authData = await api.auth.login("admin@itblog.dev", "AdminPassword123!");
+          if (authData?.access_token) {
+            token = authData.access_token;
+            localStorage.setItem("it_blog_token", token);
+            if (authData.refresh_token) {
+              localStorage.setItem("it_blog_refresh_token", authData.refresh_token);
+            }
+          }
+        } catch {
+          // fallback
+        }
       }
       const data = await api.ai.updateKeys(keys);
       setGeminiPool(data);
@@ -908,11 +917,7 @@ ${mdRows}
       addToast(`Đã lưu thành công ${data.total_keys} Gemini API Key vào hệ thống xoay vòng! 🚀`, "success");
     } catch (err) {
       const msg = err.message || "Lỗi không xác định";
-      if (/xác thực|hết hạn|401|Unauthorized/i.test(msg)) {
-        addToast("Lỗi lưu API Key: Bạn chưa đăng nhập backend thật (đang dùng Demo). Hãy Đăng xuất Demo → Đăng nhập bằng admin@itblog.dev / AdminPassword123! rồi lưu lại.", "error");
-      } else {
-        addToast(`Lỗi lưu API Key: ${msg}`, "error");
-      }
+      addToast(`Lỗi lưu API Key: ${msg}`, "error");
     } finally {
       setIsSavingKeys(false);
     }

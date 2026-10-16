@@ -1,14 +1,25 @@
-def test_comments_and_threaded_replies(client):
-    # Register author and commenter
-    author = client.post("/api/v1/auth/register", json={
-        "email": "cauthor@test.com", "username": "cauthor", "name": "Author", "password": "Password123!"
-    }).json()
-    commenter = client.post("/api/v1/auth/register", json={
-        "email": "commenter@test.com", "username": "commenter", "name": "Commenter", "password": "Password123!"
-    }).json()
+def test_comments_and_threaded_replies(client, db_session):
+    from app.models.user import User
 
-    h_author = {"Authorization": f"Bearer {author['access_token']}"}
-    h_commenter = {"Authorization": f"Bearer {commenter['access_token']}"}
+    # Register author and commenter
+    client.post("/api/v1/auth/register", json={
+        "email": "cauthor@test.com", "username": "cauthor", "name": "Author", "password": "Password123!"
+    })
+    client.post("/api/v1/auth/register", json={
+        "email": "commenter@test.com", "username": "commenter", "name": "Commenter", "password": "Password123!"
+    })
+
+    for uname in ["cauthor", "commenter"]:
+        u = db_session.query(User).filter(User.username == uname).first()
+        if u:
+            u.is_active = True
+    db_session.commit()
+
+    author_res = client.post("/api/v1/auth/login", json={"identifier": "cauthor", "password": "Password123!"}).json()
+    commenter_res = client.post("/api/v1/auth/login", json={"identifier": "commenter", "password": "Password123!"}).json()
+
+    h_author = {"Authorization": f"Bearer {author_res['access_token']}"}
+    h_commenter = {"Authorization": f"Bearer {commenter_res['access_token']}"}
 
     # Create post
     post = client.post("/api/v1/posts", json={

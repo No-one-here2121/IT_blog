@@ -31,36 +31,13 @@ export default function PostCard({ post, onNavigate, onSelectPost, onEdit, onDel
   const isLiked = Boolean(currentUser && Array.isArray(post.likes) && post.likes.includes(currentUser.id));
   const isBookmarked = Boolean(currentUser && Array.isArray(post.bookmarks) && post.bookmarks.includes(currentUser.id));
 
-  // Kiểm tra quyền Quản trị viên Admin / Moderator
-  const isAdmin = Boolean(
-    currentUser && (
-      currentUser.role === "admin" ||
-      currentUser.role === "moderator" ||
-      currentUser.is_superuser ||
-      currentUser.id === "demo_user" ||
-      String(currentUser.id) === "1" ||
-      currentUser.email === "admin@itblog.dev" ||
-      currentUser.username === "admin" ||
-      (Array.isArray(currentUser.roles) && (
-        currentUser.roles.includes("admin") ||
-        currentUser.roles.includes("moderator") ||
-        currentUser.roles.some((r) =>
-          typeof r === "string" ? r === "admin" || r === "moderator" : r?.name === "admin" || r?.name === "moderator"
-        )
-      ))
-    )
-  );
+  // Quyền Quản trị viên Admin / Moderator từ AuthContext
+  const isAdmin = Boolean(authIsAdmin);
+  const isSupervisor = Boolean(authIsAdmin || isModerator);
 
-  const isAuthor = Boolean(
-    currentUser && (
-      String(currentUser.id) === String(post.authorId) ||
-      String(currentUser.id) === String(post.author_id)
-    )
-  );
-
-  const isSupervisor = Boolean(isAdmin || authIsAdmin || isModerator);
-  const canEdit = isSupervisor || isAuthor;
-  const canDeleteDirect = isSupervisor || isAuthor;
+  // Chỉ Quản trị viên (Admin) và Kiểm duyệt viên (Moderator) mới có nút Sửa và Xóa bài viết
+  const canEdit = isSupervisor;
+  const canDeleteDirect = isSupervisor;
 
   const thumbnailUrl =
     post.coverImage ||

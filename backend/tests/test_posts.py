@@ -1,4 +1,6 @@
-def test_post_lifecycle(client):
+def test_post_lifecycle(client, db_session):
+    from app.models.user import User
+
     # 1. Register and get token
     reg_payload = {
         "email": "author@example.com",
@@ -7,7 +9,18 @@ def test_post_lifecycle(client):
         "password": "Password123!"
     }
     auth_res = client.post("/api/v1/auth/register", json=reg_payload)
-    token = auth_res.json()["access_token"]
+    assert auth_res.status_code == 201
+
+    # Activate user
+    author_user = db_session.query(User).filter(User.username == "author_dev").first()
+    author_user.is_active = True
+    db_session.commit()
+
+    # Login to obtain token
+    login_res = client.post("/api/v1/auth/login", json={"identifier": "author_dev", "password": "Password123!"})
+    assert login_res.status_code == 200
+    token = login_res.json()["access_token"]
+
     headers = {"Authorization": f"Bearer {token}"}
 
     # 2. Create Post

@@ -596,8 +596,9 @@ export default function PostDetailPage({ postId, params = {}, onNavigate, onEdit
       (currentUser.username && (currentUser.username === post.author?.username || currentUser.username === post.authorUsername))
     )
   );
-  const canEditPost = isAuthor || isSupervisor;
-  const canDeletePost = isAuthor || isSupervisor;
+  // Chỉ Quản trị viên (Admin) và Kiểm duyệt viên (Moderator) mới có quyền Sửa và Xóa bài viết
+  const canEditPost = isSupervisor;
+  const canDeletePost = isSupervisor;
 
   // Xử lý Thích bài viết
   const handleLike = () => {

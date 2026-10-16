@@ -509,7 +509,6 @@ export function AuthProvider({ children }) {
       currentUser.role === "admin" ||
       currentUser.is_superuser ||
       currentUser.id === "demo_admin" ||
-      String(currentUser.id) === "1" ||
       currentUser.email === "admin@itblog.dev" ||
       currentUser.username === "admin" ||
       (Array.isArray(currentUser.roles) && (
@@ -526,7 +525,6 @@ export function AuthProvider({ children }) {
       isAdmin ||
       currentUser.role === "moderator" ||
       currentUser.id === "demo_moderator" ||
-      String(currentUser.id) === "11" ||
       currentUser.email === "mod@itblog.dev" ||
       currentUser.username === "mod_dev" ||
       (Array.isArray(currentUser.roles) && (

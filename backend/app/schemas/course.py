@@ -22,6 +22,13 @@ class LessonUpdate(BaseModel):
     order_index: Optional[int] = 0
 
 
+class LessonPatchRequest(BaseModel):
+    video_url: Optional[str] = None
+    title: Optional[str] = None
+    content: Optional[str] = None
+    duration_minutes: Optional[int] = None
+
+
 class LessonResponse(BaseModel):
     id: int
     course_id: int
@@ -89,6 +96,7 @@ class CourseDetailResponse(BaseModel):
     lessons: List[LessonResponse] = []
     total_lessons: int = 0
     completed_lessons: int = 0
+    enrolled_students: int = 0
     user_progress_percent: float = 0.0
     is_enrolled: bool = False
     created_at: datetime

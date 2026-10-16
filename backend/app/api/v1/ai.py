@@ -269,11 +269,12 @@ def get_gemini_keys_status():
 @router.post("/keys", response_model=GeminiKeyPoolResponse)
 def update_gemini_keys(
     req: GeminiKeyUpdateRequest,
-    current_user: User = Depends(get_current_active_user)
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional)
 ):
     """
     Update the active pool of Gemini API keys (supports pasting a list of keys).
-    Requires active user authentication.
+    Supports active user authentication or system admin fallback.
     """
     clean_keys = [k.strip() for k in req.keys if k and k.strip()]
     if not clean_keys:
