@@ -4,6 +4,8 @@ import { useAuth } from "../context/AuthContext";
 import { useBlog } from "../context/BlogContext";
 import { useToast } from "../context/ToastContext";
 import ThemeToggle from "./ThemeToggle";
+import ApiKeyModal from "./ApiKeyModal";
+import { Key } from "lucide-react";
 import { api } from "../services/api";
 import {
   Bell, Heart, MessageSquare, BadgeCheck,
@@ -105,6 +107,7 @@ export default function Navbar({ onNavigate, currentPage = "home" }) {
   // Search input ref & shortcuts modal state
   const searchInputRef = useRef(null);
   const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false);
+  const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
 
   // Notification States
   const [unreadCount, setUnreadCount] = useState(0);
@@ -676,6 +679,20 @@ ${rows}
                   <span>Viết bài mới</span>
                 </button>
               </li>
+              {canAccessModeration && (
+                <li>
+                  <button
+                    onClick={() => {
+                      handleNavAndCloseMobile();
+                      setApiKeyModalOpen(true);
+                    }}
+                    className="flex items-center gap-2 py-2 font-semibold text-amber-600 dark:text-amber-400 cursor-pointer"
+                  >
+                    <Key size={18} className="text-amber-500 shrink-0" />
+                    <span>Cài đặt Gemini AI Key</span>
+                  </button>
+                </li>
+              )}
               {currentUser ? (
                 <>
                   <div className="divider my-1"></div>
@@ -1121,6 +1138,25 @@ ${rows}
                     </div>
                   </button>
                 </li>
+                <div className="divider my-1"></div>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (document.activeElement && typeof document.activeElement.blur === "function") {
+                        document.activeElement.blur();
+                      }
+                      setApiKeyModalOpen(true);
+                    }}
+                    className="flex items-center gap-2.5 py-2 font-semibold text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 rounded-xl cursor-pointer"
+                  >
+                    <Key size={18} className="text-amber-500 shrink-0" />
+                    <div>
+                      <p className="font-bold">Cài đặt Gemini AI Key</p>
+                      <p className="text-[10px] text-base-content/60 font-normal">Cấu hình API Key & Quota xoay vòng</p>
+                    </div>
+                  </button>
+                </li>
               </ul>
             </div>
           ) : (
@@ -1142,7 +1178,7 @@ ${rows}
           <button
             type="button"
             onClick={() => setShortcutsModalOpen(true)}
-            className="btn btn-ghost btn-circle btn-sm text-base-content/70 hover:text-base-content"
+            className="btn btn-ghost btn-circle btn-sm text-base-content/70 hover:text-base-content hidden md:inline-flex"
             aria-label="Phím tắt hệ thống"
             title="Phím tắt hệ thống (Nhấn ? hoặc Ctrl+K)"
           >
@@ -1399,6 +1435,24 @@ ${rows}
                     <span>Bảng xếp hạng & Huy hiệu</span>
                   </button>
                 </li>
+
+                {canAccessModeration && (
+                  <li>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (document.activeElement && typeof document.activeElement.blur === "function") {
+                          document.activeElement.blur();
+                        }
+                        setApiKeyModalOpen(true);
+                      }}
+                      className="flex items-center gap-2 py-2 text-amber-600 dark:text-amber-400 font-semibold cursor-pointer hover:bg-amber-500/10 rounded-xl"
+                    >
+                      <Key size={16} className="text-amber-500 shrink-0" />
+                      <span>Cài đặt Gemini AI Key</span>
+                    </button>
+                  </li>
+                )}
 
                 <div className="divider my-1"></div>
 
@@ -1721,6 +1775,8 @@ ${rows}
           </div>,
           document.body
         )}
+
+      <ApiKeyModal isOpen={apiKeyModalOpen} onClose={() => setApiKeyModalOpen(false)} />
     </header>
   );
 }

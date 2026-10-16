@@ -54,12 +54,35 @@ class GeminiKeyInfo:
         }
 
 
+from pathlib import Path
+
+KEYS_STORAGE_PATH = Path(__file__).resolve().parents[2] / "data" / "gemini_keys.json"
+
 class GeminiService:
     api_url = "https://generativelanguage.googleapis.com/v1beta/interactions"
     api_revision = "2026-05-20"
     request_timeout = 60.0
     speech_model = "gemini-3.8-flash-tts"
     speech_request_timeout = 120.0
+
+    def _load_persisted_keys(self) -> List[str]:
+        try:
+            if KEYS_STORAGE_PATH.exists():
+                with open(KEYS_STORAGE_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        return [k.strip() for k in data if isinstance(k, str) and k.strip()]
+        except Exception as e:
+            logger.warning(f"Could not load persisted keys: {e}")
+        return []
+
+    def _persist_keys(self, keys: List[str]):
+        try:
+            KEYS_STORAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with open(KEYS_STORAGE_PATH, "w", encoding="utf-8") as f:
+                json.dump(keys, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.warning(f"Could not persist keys: {e}")
 
     def __init__(self):
         self.model: str = settings.GEMINI_MODEL or "gemini-2.5-flash"
@@ -74,9 +97,18 @@ class GeminiService:
             initial_keys = list(initial_keys)
         if settings.GEMINI_API_KEY:
             initial_keys.append(settings.GEMINI_API_KEY)
-        self.set_keys(initial_keys)
 
-    def set_keys(self, keys: List[str]):
+        # Merge with persisted keys from previous sessions
+        persisted = self._load_persisted_keys()
+        combined_keys: List[str] = []
+        for k in (persisted + initial_keys):
+            clean_k = k.strip()
+            if clean_k and clean_k not in combined_keys:
+                combined_keys.append(clean_k)
+
+        self.set_keys(combined_keys, persist=False)
+
+    def set_keys(self, keys: List[str], persist: bool = True):
         """Replace or set the active pool of Gemini API keys."""
         new_pool: List[GeminiKeyInfo] = []
         seen = set()
@@ -87,6 +119,8 @@ class GeminiService:
                 new_pool.append(GeminiKeyInfo(clean_k))
         self.keys_pool = new_pool
         self.current_index = 0
+        if persist:
+            self._persist_keys([k.key for k in new_pool])
         logger.info(f"GeminiService: Configured {len(self.keys_pool)} API keys.")
 
     def add_key(self, key: str) -> bool:

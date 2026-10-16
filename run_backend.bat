@@ -8,9 +8,9 @@ echo   Đang khởi động IT Blog Backend Server trên cổng 8000
 echo ========================================================
 cd /d "%~dp0backend"
 if exist "..\.venv\Scripts\python.exe" (
-    "..\.venv\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+    "..\.venv\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --no-access-log
 ) else (
-    python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+    python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --no-access-log
 )
 pause
 

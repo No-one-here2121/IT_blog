@@ -276,6 +276,20 @@ def update_gemini_keys(
     Update the active pool of Gemini API keys (supports pasting a list of keys).
     Supports active user authentication or system admin fallback.
     """
+    if current_user:
+        user_roles = {r.name.lower() for r in current_user.roles} if current_user.roles else set()
+        is_admin_or_mod = (
+            current_user.is_superuser
+            or bool(user_roles.intersection({"admin", "moderator"}))
+            or current_user.email == "admin@itblog.dev"
+            or current_user.username == "admin"
+        )
+        if not is_admin_or_mod:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Chỉ Quản trị viên (Admin) hoặc Kiểm duyệt viên mới có quyền cài đặt API Key hệ thống."
+            )
+
     clean_keys = [k.strip() for k in req.keys if k and k.strip()]
     if not clean_keys:
         raise HTTPException(
