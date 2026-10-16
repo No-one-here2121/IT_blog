@@ -86,12 +86,33 @@ if (pythonCmd) {
   });
 }
 
-// 4. Khởi động Frontend (Vite - port 5173)
+// 4. Kiểm tra gói Frontend (node_modules)
+const nodeModulesPath = path.join(__dirname, 'node_modules');
+if (!fs.existsSync(nodeModulesPath)) {
+  console.log('\x1b[33m%s\x1b[0m', '📦 Chưa tìm thấy node_modules, đang tự động cài đặt thư viện Frontend (npm install)...');
+  try {
+    const isWindows = process.platform === 'win32';
+    const npmCmd = isWindows ? 'npm.cmd' : 'npm';
+    execSync(`${npmCmd} install`, { cwd: __dirname, stdio: 'inherit' });
+    console.log('\x1b[32m%s\x1b[0m', '✅ Đã cài đặt xong thư viện Frontend!');
+  } catch (err) {
+    console.warn('\x1b[33m%s\x1b[0m', '⚠️ Cài đặt tự động npm gặp sự cố, bạn có thể chạy: npm install');
+  }
+}
+
+// 5. Khởi động Frontend (Vite - port 5173)
 console.log('\x1b[36m%s\x1b[0m', '⚡ Đang khởi động Frontend Vite...');
 const isWindows = process.platform === 'win32';
 const npxCmd = isWindows ? 'npx.cmd' : 'npx';
 
-const frontendProcess = spawn(npxCmd, ['vite'], {
+console.log('\n\x1b[32m%s\x1b[0m', '==================================================');
+console.log('\x1b[1m\x1b[36m%s\x1b[0m', '  🚀 CÁC ĐƯỜNG DẪN LOCALHOST CỦA HỆ THỐNG:');
+console.log('\x1b[1m\x1b[32m%s\x1b[0m', '  👉 Website (Frontend): http://localhost:5173');
+console.log('\x1b[1m\x1b[33m%s\x1b[0m', '  👉 Backend API:        http://localhost:8000');
+console.log('\x1b[1m\x1b[35m%s\x1b[0m', '  👉 Swagger Docs:       http://localhost:8000/docs');
+console.log('\x1b[32m%s\x1b[0m', '==================================================\n');
+
+const frontendProcess = spawn(npxCmd, ['--yes', 'vite'], {
   cwd: __dirname,
   stdio: 'inherit',
   shell: isWindows
