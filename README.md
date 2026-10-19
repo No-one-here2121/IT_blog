@@ -6,7 +6,7 @@
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-v4.0-38B2AC.svg?style=flat&logo=tailwind-css&logoColor=white)](https://tailwindcss.com)
 [![DaisyUI](https://img.shields.io/badge/DaisyUI-v5.0-5A0EF8.svg?style=flat&logo=daisyui&logoColor=white)](https://daisyui.com)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-336791.svg?style=flat&logo=postgresql&logoColor=white)](https://www.postgresql.org)
-[![Gemini AI](https://img.shields.io/badge/Google%20Gemini-1.5%20Flash-4285F4.svg?style=flat&logo=google&logoColor=white)](https://ai.google.dev)
+[![Gemini AI](https://img.shields.io/badge/Google%20Gemini-3.8%20Flash-4285F4.svg?style=flat&logo=google&logoColor=white)](https://ai.google.dev)
 [![Tests](https://img.shields.io/badge/Pytest-100%25%20Passed-brightgreen.svg?style=flat&logo=pytest&logoColor=white)](https://docs.pytest.org)
 
 > **IT Blog** là nền tảng mạng xã hội tri thức công nghệ thông tin toàn diện và hiện đại nhất dành cho kỹ sư phần mềm, lập trình viên và sinh viên ngành CNTT. Hệ thống tích hợp đầy đủ các phân hệ chia sẻ bài viết kỹ thuật chuẩn Markdown, hệ thống bình luận lồng cấp đa tầng, lộ trình nghề nghiệp (Career Roadmaps), khóa học chuyên sâu, trắc nghiệm công nghệ tạo đề bằng AI, bảng tin việc làm IT, sự kiện hội thảo, trung tâm kiểm duyệt Admin 12 phân hệ và bộ động cơ cào tin tức kỹ thuật tự động lưu trữ hơn **2.620+ bài viết thực tế**.
@@ -51,11 +51,12 @@
 - **Cơ chế Khám phá Độc lập (Serendipity & Exploration)**: Tự động chèn 10-15% bài viết chất lượng cao từ các công nghệ mới nhằm mở rộng kiến thức và phá vỡ bẫy lặp thông tin (**Filter Bubble**).
 - **Tái xếp hạng Đa dạng hóa (MMR Diversity Re-ranking)**: Chống nhàm chán bằng cách tự động giãn cách các bài viết cùng tác giả hoặc cùng chuyên mục, đồng thời hạ điểm bài viết đã đọc kỹ để Newfeed luôn mang lại trải nghiệm mới lạ.
 
-### 4. Tích hợp Trí Tuệ Nhân Tạo (Gemini AI Multi-Key Pool)
-- Tích hợp mô hình **Google Gemini 1.5 Flash** với cơ chế xoay vòng Multi-Key Pool tự động chuyển đổi khóa API khi chạm giới hạn hạn mức (Rate-limit fallback).
+### 4. Tích hợp Trí Tuệ Nhân Tạo (Gemini Interactions API)
+- Tích hợp **Google Gemini 3.8 Flash** qua `v1beta/interactions`, dùng header `x-goog-api-key` và revision `2026-05-20`; hỗ trợ xoay vòng Multi-Key Pool khi chạm giới hạn hạn mức.
 - Ứng dụng AI:
   - Tự động kiểm duyệt nội dung độc hại, spam và phát hiện vi phạm bản quyền.
   - Tóm tắt bài viết tự động, đề xuất tiêu đề và thẻ tag kỹ thuật.
+  - Tạo giọng đọc tiếng Việt tự nhiên cho bài viết bằng Gemini TTS (`gemini-3.8-flash-tts`), phát và điều khiển audio ngay trên trang.
   - Động cơ sinh đề trắc nghiệm lập trình tự động (**AI Quiz Generator**) theo ngôn ngữ và độ khó.
 
 ### 4. Động cơ Thu thập Tin tức Kỹ thuật Đa luồng (Crawler Engine)
@@ -180,7 +181,9 @@ Hệ thống được thiết kế theo kiến trúc module hóa với 15 phân 
    pip install -r requirements.txt
    ```
 
-4. Khởi chạy máy chủ Backend Uvicorn:
+4. Cấu hình khóa Gemini trong `backend/.env` (sao chép từ `.env.example`): dùng `GEMINI_API_KEY` cho một khóa hoặc `GEMINI_API_KEYS` cho danh sách khóa phân tách bằng dấu phẩy. Mô hình mặc định là `gemini-3.1-flash-lite`. Khi chạy Docker Compose, đặt các biến này trong file `.env` ở thư mục gốc của dự án.
+
+5. Khởi chạy máy chủ Backend Uvicorn:
    ```bash
    uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
    ```

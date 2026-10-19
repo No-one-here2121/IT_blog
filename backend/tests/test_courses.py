@@ -4,10 +4,10 @@ from sqlalchemy.orm import Session
 from app.models.user import User
 
 
-def test_courses_syllabus_and_progress(client: TestClient, test_user: User, test_user_token: str):
+def test_courses_syllabus_and_progress(client: TestClient, db_session: Session, test_user: User, test_user_token: str):
     headers = {"Authorization": f"Bearer {test_user_token}"}
 
-    # 1. Create a course with lessons
+    # 1. Regular user cannot create a course -> 403 Forbidden
     course_payload = {
         "title": "Khóa học FastAPI Masterclass 2026",
         "description": "Thành thạo xây dựng REST API & GraphQL chuẩn Enterprise với FastAPI, Pydantic v2 và PostgreSQL",
@@ -25,6 +25,14 @@ def test_courses_syllabus_and_progress(client: TestClient, test_user: User, test
             }
         ]
     }
+    forbidden_resp = client.post("/api/v1/courses", json=course_payload, headers=headers)
+    assert forbidden_resp.status_code == 403
+    assert "Quản trị viên" in forbidden_resp.json()["detail"]
+
+    # 2. Admin user can create course -> 201 Created
+    test_user.is_superuser = True
+    db_session.commit()
+
     create_resp = client.post("/api/v1/courses", json=course_payload, headers=headers)
     assert create_resp.status_code == 201
     course_data = create_resp.json()
@@ -40,7 +48,8 @@ def test_courses_syllabus_and_progress(client: TestClient, test_user: User, test
     assert list_resp.status_code == 200
     courses = list_resp.json()
     assert len(courses) >= 1
-    assert courses[0]["total_lessons"] == 2
+    created_c = next(c for c in courses if c["id"] == course_id)
+    assert created_c["total_lessons"] == 2
 
     # 3. Get course detail by slug
     detail_resp = client.get(f"/api/v1/courses/{slug}", headers=headers)

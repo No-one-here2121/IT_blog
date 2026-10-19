@@ -1,4 +1,4 @@
-﻿/* eslint-disable react-refresh/only-export-components */
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState, useEffect } from "react";
 import { storage, STORAGE_KEYS } from "../utils/storage";
 import { SEED_USERS } from "../data/seedData";
@@ -224,7 +224,8 @@ export function AuthProvider({ children }) {
   };
 
   /**
-   * Dang ky tai khoan moi that tren Backend CSDL
+   * Dang ky tai khoan moi that tren Backend CSDL.
+   * Tra ve { success, message, field } de phia UI hien thi loi cu the tung o nhap.
    */
   const register = async ({ name, email, username, password }) => {
     const trimmedEmail = (email || "").trim().toLowerCase();
@@ -232,12 +233,10 @@ export function AuthProvider({ children }) {
     const trimmedName = (name || "").trim();
 
     if (!trimmedEmail) {
-      addToast("Email không được để trống!", "warning");
-      return false;
+      return { success: false, field: "email", message: "Email không được để trống!" };
     }
     if (!trimmedName) {
-      addToast("Họ và tên không được để trống!", "warning");
-      return false;
+      return { success: false, field: "name", message: "Họ và tên không được để trống!" };
     }
 
     try {
@@ -249,22 +248,44 @@ export function AuthProvider({ children }) {
       });
 
       if (data?.user) {
+        // Neu tai khoan can Admin phe duyet truoc khi dang nhap
+        if (data?.pending_approval || !data?.user?.is_active || !data?.access_token) {
+          setAuthModalOpen(false);
+          const pendingMsg = data?.message || "Đăng ký thành công! Tài khoản của bạn đang chờ Quản trị viên (Admin) phê duyệt trước khi có thể đăng nhập.";
+          return {
+            success: true,
+            pending_approval: true,
+            message: pendingMsg,
+            user: data.user
+          };
+        }
+
         const normalized = normalizeUser(data.user);
         setCurrentUser(normalized);
         setUsers((prev) => [normalized, ...prev.filter((u) => String(u.id) !== String(normalized.id))]);
         setAuthModalOpen(false);
         addToast(`Đăng ký tài khoản thành công! Chào mừng ${normalized.name}. 🎉`, "success");
         setTimeout(() => executePendingAction(), 100);
-        return true;
+        return { success: true };
       }
+      return { success: false, message: "Đăng ký không thành công. Vui lòng thử lại." };
     } catch (err) {
       const msg = err.message || "";
-      if (msg.includes("Email này đã được đăng ký") || msg.toLowerCase().includes("tồn tại") || msg.toLowerCase().includes("email")) {
-        addToast("Tài khoản này đã được đăng ký trong hệ thống! Vui lòng chuyển sang Đăng nhập. 🔐", "info");
-      } else {
-        addToast(msg || "Đăng ký không thành công. Vui lòng kiểm tra lại thông tin.", "error");
+      // Ánh xạ lỗi backend sang đúng trường nhập để hiển thị inline
+      let field = "";
+      if (/username|tên người dùng|tài khoản/i.test(msg) && !/email/i.test(msg)) {
+        field = "username";
+      } else if (/email/i.test(msg)) {
+        field = "email";
       }
-      return false;
+
+      const isConflict = /đã (tồn tại|được đăng ký)|đã có|tồn tại/i.test(msg);
+      const friendly = isConflict
+        ? msg
+        : (msg || "Đăng ký không thành công. Vui lòng kiểm tra lại thông tin.");
+
+      // Khong addToast o day de tranh toast kep voi logup.jsx (logup se hien 1 toast duy nhat)
+      return { success: false, field, message: friendly };
     }
   };
 
@@ -488,7 +509,6 @@ export function AuthProvider({ children }) {
       currentUser.role === "admin" ||
       currentUser.is_superuser ||
       currentUser.id === "demo_admin" ||
-      String(currentUser.id) === "1" ||
       currentUser.email === "admin@itblog.dev" ||
       currentUser.username === "admin" ||
       (Array.isArray(currentUser.roles) && (
@@ -505,7 +525,6 @@ export function AuthProvider({ children }) {
       isAdmin ||
       currentUser.role === "moderator" ||
       currentUser.id === "demo_moderator" ||
-      String(currentUser.id) === "11" ||
       currentUser.email === "mod@itblog.dev" ||
       currentUser.username === "mod_dev" ||
       (Array.isArray(currentUser.roles) && (

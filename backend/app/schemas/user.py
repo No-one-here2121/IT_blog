@@ -80,10 +80,12 @@ class AuthorSummary(BaseModel):
 
 # Token Schemas
 class TokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
     user: UserResponse
+    pending_approval: bool = False
+    message: Optional[str] = None
 
 
 class TokenRefresh(BaseModel):

@@ -386,8 +386,8 @@ export default function Menu_main({ onNavigate, onSelectPost, onEditPost }) {
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-xs">Hiển thị:</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="font-medium text-xs whitespace-nowrap">Hiển thị:</span>
             <select
               value={postsPerPage}
               onChange={(e) => {
@@ -412,7 +412,7 @@ export default function Menu_main({ onNavigate, onSelectPost, onEditPost }) {
               type="button"
               onClick={() => handlePageChange(1)}
               disabled={currentPage === 1}
-              className="btn btn-xs sm:btn-sm btn-ghost border border-base-300 rounded-xl disabled:opacity-30 font-semibold"
+              className="btn btn-xs sm:btn-sm btn-ghost border border-base-300 rounded-xl disabled:opacity-40 disabled:bg-base-200/50 disabled:text-base-content/40 disabled:border-base-300 font-semibold"
               title="Về trang đầu tiên"
             >
               ⏮
@@ -423,9 +423,10 @@ export default function Menu_main({ onNavigate, onSelectPost, onEditPost }) {
               type="button"
               onClick={() => handlePageChange(currentPage - 1)}
               disabled={currentPage === 1}
-              className="btn btn-xs sm:btn-sm btn-outline btn-neutral rounded-xl disabled:opacity-30 font-semibold gap-1"
+              className="btn btn-xs sm:btn-sm rounded-xl font-semibold gap-1 border border-base-300 bg-base-100 text-base-content hover:bg-base-200 disabled:opacity-40 disabled:bg-base-200/50 disabled:text-base-content/40 disabled:border-base-300"
             >
-              ◀ <span className="hidden sm:inline">Trước</span>
+              <span>◀</span>
+              <span className="hidden sm:inline">Trước</span>
             </button>
 
             {/* Các số trang */}
@@ -446,7 +447,7 @@ export default function Menu_main({ onNavigate, onSelectPost, onEditPost }) {
                   className={`btn btn-xs sm:btn-sm rounded-xl font-bold min-w-[32px] sm:min-w-[36px] transition-all ${
                     isCurrent
                       ? "btn-primary text-white shadow-sm"
-                      : "btn-ghost hover:bg-base-200 text-base-content/80"
+                      : "btn-ghost border border-base-300/60 hover:bg-base-200 text-base-content"
                   }`}
                 >
                   {p}
@@ -459,9 +460,10 @@ export default function Menu_main({ onNavigate, onSelectPost, onEditPost }) {
               type="button"
               onClick={() => handlePageChange(currentPage + 1)}
               disabled={currentPage === totalPages}
-              className="btn btn-xs sm:btn-sm btn-outline btn-neutral rounded-xl disabled:opacity-30 font-semibold gap-1"
+              className="btn btn-xs sm:btn-sm rounded-xl font-semibold gap-1 border border-base-300 bg-base-100 text-base-content hover:bg-base-200 disabled:opacity-40 disabled:bg-base-200/50 disabled:text-base-content/40 disabled:border-base-300"
             >
-              <span className="hidden sm:inline">Sau</span> ▶
+              <span className="hidden sm:inline">Sau</span>
+              <span>▶</span>
             </button>
 
             {/* Nút Cuối */}
@@ -469,7 +471,7 @@ export default function Menu_main({ onNavigate, onSelectPost, onEditPost }) {
               type="button"
               onClick={() => handlePageChange(totalPages)}
               disabled={currentPage === totalPages}
-              className="btn btn-xs sm:btn-sm btn-ghost border border-base-300 rounded-xl disabled:opacity-30 font-semibold"
+              className="btn btn-xs sm:btn-sm btn-ghost border border-base-300 rounded-xl disabled:opacity-40 disabled:bg-base-200/50 disabled:text-base-content/40 disabled:border-base-300 font-semibold"
               title="Tới trang cuối cùng"
             >
               ⏭
@@ -478,7 +480,7 @@ export default function Menu_main({ onNavigate, onSelectPost, onEditPost }) {
 
           {/* Ô nhảy nhanh tới trang */}
           <form onSubmit={handleJumpPage} className="flex items-center gap-1.5 text-xs">
-            <span className="text-base-content/60 font-medium hidden md:inline">Nhảy tới:</span>
+            <span className="text-base-content/70 font-medium whitespace-nowrap hidden md:inline">Nhảy tới:</span>
             <input
               type="number"
               min={1}
@@ -488,7 +490,7 @@ export default function Menu_main({ onNavigate, onSelectPost, onEditPost }) {
               placeholder={`${currentPage}`}
               className="input input-xs input-bordered w-14 text-center font-bold bg-base-100 rounded-lg focus:input-primary"
             />
-            <span className="text-base-content/50">/ {totalPages}</span>
+            <span className="text-base-content/60 font-medium whitespace-nowrap">/ {totalPages}</span>
             <button
               type="submit"
               className="btn btn-xs btn-primary text-white font-bold rounded-lg px-2.5"
@@ -680,8 +682,8 @@ ${rows}
           )}
 
                     {/* Thanh công cụ lọc & sắp xếp */}
-          <div className="flex flex-wrap items-center justify-between gap-4 mb-6 bg-base-200/50 p-3.5 rounded-xl border border-base-300">
-            <div className="flex flex-wrap items-center gap-2 text-xs text-base-content/70">
+          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 mb-6 bg-base-200/50 p-3.5 rounded-xl border border-base-300 min-w-0 overflow-hidden">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-base-content/70 min-w-0">
               <span>
                 Tìm thấy <strong className="text-primary font-bold">{displayedPosts.length}</strong> bài viết
                 {totalPages > 1 && (
@@ -733,14 +735,14 @@ ${rows}
             </div>
 
             {/* Sắp xếp & Chuyển đổi giao diện hiển thị */}
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 min-w-0">
               {/* Lọc theo Thời gian xuất bản */}
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-semibold text-base-content/70">Thời gian:</span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-xs font-semibold text-base-content/70 whitespace-nowrap">Thời gian:</span>
                 <select
                   value={timeRange}
                   onChange={(e) => setTimeRange(e.target.value)}
-                  className="select select-xs select-bordered bg-base-100 focus:select-primary font-semibold text-xs"
+                  className="select select-xs select-bordered bg-base-100 focus:select-primary font-semibold text-xs max-w-[150px]"
                 >
                   <option value="all">Tất cả thời gian</option>
                   <option value="today">Hôm nay (24h)</option>
@@ -750,12 +752,12 @@ ${rows}
               </div>
 
               {/* Lọc theo Thời lượng đọc */}
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-semibold text-base-content/70">Độ dài:</span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-xs font-semibold text-base-content/70 whitespace-nowrap">Độ dài:</span>
                 <select
                   value={readDuration}
                   onChange={(e) => setReadDuration(e.target.value)}
-                  className="select select-xs select-bordered bg-base-100 focus:select-primary font-semibold text-xs"
+                  className="select select-xs select-bordered bg-base-100 focus:select-primary font-semibold text-xs max-w-[150px]"
                 >
                   <option value="all">Tất cả độ dài</option>
                   <option value="quick">⚡ Đọc nhanh (&lt; 3p)</option>
@@ -765,7 +767,7 @@ ${rows}
               </div>
 
               {/* Toggle Chế độ xem: Lưới 4 cột rộng (Toàn màn hình) vs Có Sidebar */}
-              <div className="hidden sm:flex items-center bg-base-200/80 p-0.5 rounded-lg border border-base-300">
+              <div className="hidden sm:flex items-center bg-base-200/80 p-0.5 rounded-lg border border-base-300 shrink-0">
                 <button
                   type="button"
                   onClick={() => handleSetLayoutMode("grid")}
@@ -799,12 +801,12 @@ ${rows}
               </div>
 
               {/* Sắp xếp */}
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-semibold text-base-content/70">Sắp xếp:</span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-xs font-semibold text-base-content/70 whitespace-nowrap">Sắp xếp:</span>
                 <select
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value)}
-                  className="select select-xs select-bordered bg-base-100 focus:select-primary font-semibold"
+                  className="select select-xs select-bordered bg-base-100 focus:select-primary font-semibold max-w-[150px]"
                 >
                   <option value="newest">⚡ Mới nhất</option>
                   <option value="likes">❤️ Nhiều lượt thích nhất</option>
@@ -944,9 +946,9 @@ ${rows}
             </div>
           ) : (
             /* Chế độ 2: 2 Cột + Sidebar Cố Định (Sticky Top) Không Để Khoảng Trống */
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 items-start">
-              {/* Cột chính: Danh sách bài viết (3 Cột trong hệ 4) */}
-              <div className="lg:col-span-3">
+            <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-6 xl:gap-8 items-start">
+              {/* Cột chính: Danh sách bài viết (2/3 khi có sidebar) */}
+              <div className="lg:col-span-2 xl:col-span-3 min-w-0">
                 {isPostListLoading ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                     {[...Array(6)].map((_, i) => (
@@ -1005,9 +1007,9 @@ ${rows}
               </div>
 
               {/* Sidebar bên phải: STICKY TOP-20 Cuộn theo trang, không bao giờ bị bỏ trống */}
-              <aside className="lg:col-span-1 space-y-5 sticky top-24 self-start max-h-[calc(100vh-6.5rem)] overflow-y-auto scrollbar-none pr-1">
+              <aside className="lg:col-span-1 min-w-0 w-full overflow-hidden sticky top-24 self-start max-h-[calc(100vh-6.5rem)] overflow-y-auto scrollbar-none pr-1">
                 {/* Widget 1: Tác giả nổi bật */}
-                <div className="bg-base-100 rounded-2xl border border-base-300 p-5 shadow-sm">
+                <div className="bg-base-100 rounded-2xl border border-base-300 p-4 xl:p-5 shadow-sm overflow-hidden">
                   <h3 className="text-sm font-bold text-base-content uppercase tracking-wider mb-4 flex items-center gap-2">
                     <Award className="w-4 h-4 text-amber-500 shrink-0" /><span>Tác giả nổi bật</span>
                   </h3>

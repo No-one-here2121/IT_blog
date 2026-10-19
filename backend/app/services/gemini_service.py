@@ -1,3 +1,5 @@
+import base64
+import binascii
 import json
 import logging
 import re
@@ -52,20 +54,61 @@ class GeminiKeyInfo:
         }
 
 
+from pathlib import Path
+
+KEYS_STORAGE_PATH = Path(__file__).resolve().parents[2] / "data" / "gemini_keys.json"
+
 class GeminiService:
+    api_url = "https://generativelanguage.googleapis.com/v1beta/interactions"
+    api_revision = "2026-05-20"
+    request_timeout = 60.0
+    speech_model = "gemini-3.8-flash-tts"
+    speech_request_timeout = 120.0
+
+    def _load_persisted_keys(self) -> List[str]:
+        try:
+            if KEYS_STORAGE_PATH.exists():
+                with open(KEYS_STORAGE_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        return [k.strip() for k in data if isinstance(k, str) and k.strip()]
+        except Exception as e:
+            logger.warning(f"Could not load persisted keys: {e}")
+        return []
+
+    def _persist_keys(self, keys: List[str]):
+        try:
+            KEYS_STORAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with open(KEYS_STORAGE_PATH, "w", encoding="utf-8") as f:
+                json.dump(keys, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.warning(f"Could not persist keys: {e}")
+
     def __init__(self):
-        self.model: str = settings.GEMINI_MODEL or "gemini-1.5-flash"
+        self.model: str = settings.GEMINI_MODEL or "gemini-2.5-flash"
         self.keys_pool: List[GeminiKeyInfo] = []
         self.current_index: int = 0
-        
-        # Load initial keys from settings
-        initial_keys = settings.GEMINI_API_KEYS
-        if isinstance(initial_keys, list):
-            self.set_keys(initial_keys)
-        elif isinstance(initial_keys, str) and initial_keys:
-            self.set_keys([initial_keys])
 
-    def set_keys(self, keys: List[str]):
+        # Load initial keys from settings without mutating the original settings list.
+        initial_keys = settings.GEMINI_API_KEYS or []
+        if isinstance(initial_keys, str):
+            initial_keys = [initial_keys] if initial_keys else []
+        else:
+            initial_keys = list(initial_keys)
+        if settings.GEMINI_API_KEY:
+            initial_keys.append(settings.GEMINI_API_KEY)
+
+        # Merge with persisted keys from previous sessions
+        persisted = self._load_persisted_keys()
+        combined_keys: List[str] = []
+        for k in (persisted + initial_keys):
+            clean_k = k.strip()
+            if clean_k and clean_k not in combined_keys:
+                combined_keys.append(clean_k)
+
+        self.set_keys(combined_keys, persist=False)
+
+    def set_keys(self, keys: List[str], persist: bool = True):
         """Replace or set the active pool of Gemini API keys."""
         new_pool: List[GeminiKeyInfo] = []
         seen = set()
@@ -76,6 +119,8 @@ class GeminiService:
                 new_pool.append(GeminiKeyInfo(clean_k))
         self.keys_pool = new_pool
         self.current_index = 0
+        if persist:
+            self._persist_keys([k.key for k in new_pool])
         logger.info(f"GeminiService: Configured {len(self.keys_pool)} API keys.")
 
     def add_key(self, key: str) -> bool:
@@ -108,6 +153,184 @@ class GeminiService:
 
         return None
 
+    @staticmethod
+    def _extract_text_from_response(data: Any) -> Optional[str]:
+        """Support both legacy steps-based responses and newer candidate-based Gemini payloads."""
+        if not isinstance(data, dict):
+            return None
+
+        for container_name in ("steps", "candidates"):
+            container = data.get(container_name)
+            if not isinstance(container, list):
+                continue
+
+            for item in reversed(container):
+                if not isinstance(item, dict):
+                    continue
+
+                if container_name == "steps":
+                    if item.get("type") != "model_output":
+                        continue
+                    content = item.get("content", [])
+                else:
+                    content = item.get("content", {})
+                    if isinstance(content, dict):
+                        content = content.get("parts", [])
+
+                if isinstance(content, list):
+                    text_parts = []
+                    for block in content:
+                        if isinstance(block, dict):
+                            text = block.get("text")
+                            if text:
+                                text_parts.append(text)
+                            elif block.get("type") == "text":
+                                text_parts.append(block.get("text", ""))
+                    if text_parts:
+                        return "".join(text_parts)
+
+                if isinstance(content, dict):
+                    parts = content.get("parts", [])
+                    if isinstance(parts, list):
+                        text_parts = [part.get("text", "") for part in parts if isinstance(part, dict)]
+                        combined = "".join(text_parts)
+                        if combined:
+                            return combined
+
+        return None
+
+    @staticmethod
+    def _extract_audio_base64(data: Any) -> Optional[str]:
+        """Extract base64 audio from Gemini Interactions API response layouts.
+
+        The API returns an Interaction whose audio is stored in the ``steps``
+        array as content blocks of type ``audio`` (e.g.
+        ``{"type": "audio", "data": "BASE64_ENCODED", "mime_type": "..."}``),
+        while convenience properties like ``interaction.output_audio`` are
+        computed on top of those steps by the client SDKs.  This method
+        therefore scans both the legacy top-level fields AND the steps /
+        candidates containers (including nested parts), instead of only
+        looking for SDK-level fields in the raw HTTP response.
+        """
+        if not isinstance(data, dict):
+            return None
+
+        # 1. Legacy / SDK-level convenience fields
+        for key in ("output_audio", "outputAudio", "audio"):
+            payload = GeminiService._looks_like_audio(data.get(key))
+            if payload:
+                return str(payload)
+
+        # 2. Walk everything, in priority order:
+        #    - steps / candidates containers (documented layout)
+        #    - blocks typed "audio" (content blocks with data/mime_type)
+        #    - any dict whose keys look like an audio payload
+        #    as a last resort, a deep recursive scan
+        for container_key in ("steps", "candidates"):
+            if not isinstance(data.get(container_key), list):
+                continue
+            for item in data[container_key]:
+                if not isinstance(item, dict):
+                    continue
+                payload = GeminiService._try_extract_item_audio(item)
+                if payload:
+                    return str(payload)
+
+        # 3. Deep recursive fallback
+        return GeminiService._deep_find_audio(data)
+
+    @staticmethod
+    def _looks_like_audio(value: Any) -> Optional[str]:
+        """Return a payload string if the value looks like base64 audio."""
+        if isinstance(value, str):
+            return value if value.strip() else None
+        if not isinstance(value, dict):
+            return None
+        for nested_key in ("data", "base64", "audio_data"):
+            payload = value.get(nested_key)
+            if isinstance(payload, str) and payload.strip():
+                return payload
+        if value.get("mime_type") and value.get("data"):
+            return str(value.get("data"))
+        nested = value.get("content")
+        if isinstance(nested, dict):
+            for deep_key in ("data", "base64"):
+                payload = nested.get(deep_key)
+                if isinstance(payload, str) and payload.strip():
+                    return payload
+        return None
+
+    @staticmethod
+    def _try_extract_item_audio(item: Dict[str, Any]) -> Optional[str]:
+        """Audio inside a step/candidate object (e.g. steps[].content[])."""
+        if not isinstance(item, dict):
+            return None
+
+        for key in ("output_audio", "outputAudio", "audio", "inline_data", "inlineData"):
+            payload = GeminiService._looks_like_audio(item.get(key))
+            if payload:
+                return str(payload)
+
+        # Content blocks: [{"type": "audio", "data": "...", "mime_type": "audio/wav"}]
+        content = item.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                payload = GeminiService._looks_like_audio(block)
+                if payload:
+                    return str(payload)
+                mime = str(block.get("mime_type") or block.get("mimeType") or "")
+                block_type = str(block.get("type") or "")
+                if block_type in ("audio", "output_audio") or mime.startswith("audio/"):
+                    for nested_key in ("data", "base64", "audio_data"):
+                        payload = block.get(nested_key)
+                        if isinstance(payload, str) and payload.strip():
+                            return str(payload)
+        elif isinstance(content, dict):
+            payload = GeminiService._looks_like_audio(content)
+            if payload:
+                return str(payload)
+
+        # Candidates-style parts: candidates[].content[].parts[]
+        parts = item.get("parts")
+        if isinstance(parts, list):
+            for part in parts:
+                if not isinstance(part, dict):
+                    continue
+                payload = GeminiService._looks_like_audio(part)
+                if payload:
+                    return str(payload)
+                mime = str(part.get("mime_type") or part.get("mimeType") or "")
+                if mime.startswith("audio/"):
+                    for nested_key in ("data", "base64", "audio_data"):
+                        payload = part.get(nested_key)
+                        if isinstance(payload, str) and payload.strip():
+                            return str(payload)
+        return None
+
+    @staticmethod
+    def _deep_find_audio(node: Any, depth: int = 0) -> Optional[str]:
+        """Last-resort recursive scan for audio payloads in the whole response."""
+        if depth > 16:
+            return None
+        if isinstance(node, dict):
+            # Skip non-audio-looking containers that frequently appear in
+            # Gemini responses (though a dict with data+audio mime is ok).
+            mime = str(node.get("mime_type") or node.get("mimeType") or "")
+            if mime.startswith("audio/") and "data" in node:
+                return str(node.get("data"))
+            for value in node.values():
+                payload = GeminiService._deep_find_audio(value, depth + 1)
+                if payload:
+                    return str(payload)
+        elif isinstance(node, list):
+            for value in node:
+                payload = GeminiService._deep_find_audio(value, depth + 1)
+                if payload:
+                    return str(payload)
+        return None
+
     def call_gemini(
         self,
         prompt: str,
@@ -121,25 +344,24 @@ class GeminiService:
         if not self.keys_pool:
             return None
 
+        resolved_instruction = system_instruction or ""
+        if json_mode:
+            json_guideline = " Hãy trả về dữ liệu đúng định dạng JSON hợp lệ thuần túy. Tuyệt đối không bọc trong markdown và không giải thích ngoài JSON."
+            resolved_instruction = f"{resolved_instruction.strip()}{json_guideline}".strip()
+
+        candidate_models = [self.model]
+        for alt in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-3.1-flash-lite"]:
+            if alt not in candidate_models:
+                candidate_models.append(alt)
+
         payload: Dict[str, Any] = {
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [{"text": prompt}]
-                }
-            ],
-            "generationConfig": {
-                "temperature": temperature
-            }
+            "model": self.model,
+            "input": prompt,
+            "generation_config": {"temperature": temperature},
         }
 
-        if system_instruction:
-            payload["systemInstruction"] = {
-                "parts": [{"text": system_instruction}]
-            }
-
-        if json_mode:
-            payload["generationConfig"]["responseMimeType"] = "application/json"
+        if resolved_instruction:
+            payload["system_instruction"] = resolved_instruction
 
         # Try available keys in pool
         max_attempts = max(1, len(self.keys_pool))
@@ -150,22 +372,40 @@ class GeminiService:
 
             key_info.request_count += 1
             key_info.last_used_at = datetime.now(timezone.utc).isoformat()
-            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={key_info.key}"
+            headers = {
+                "x-goog-api-key": key_info.key,
+                "Content-Type": "application/json",
+                "Api-Revision": self.api_revision,
+            }
 
             try:
-                with httpx.Client(timeout=20.0) as client:
-                    resp = client.post(api_url, json=payload)
+                resp = None
+                with httpx.Client(timeout=self.request_timeout) as client:
+                    for model_candidate in candidate_models:
+                        payload["model"] = model_candidate
+                        resp = client.post(self.api_url, headers=headers, json=payload)
+                        if resp.status_code == 200:
+                            self.model = model_candidate
+                            break
+                        elif resp.status_code == 503 or "model" in resp.text.lower():
+                            continue
+                        else:
+                            break
 
-                if resp.status_code == 200:
+                if resp is not None and resp.status_code == 200:
                     data = resp.json()
-                    candidates = data.get("candidates", [])
-                    if candidates and "content" in candidates[0]:
-                        parts = candidates[0]["content"].get("parts", [])
-                        if parts and "text" in parts[0]:
-                            key_info.success_count += 1
-                            key_info.status = "active"
-                            key_info.last_error = None
-                            return parts[0]["text"]
+                    text = self._extract_text_from_response(data)
+                    if text:
+                        key_info.success_count += 1
+                        key_info.status = "active"
+                        key_info.last_error = None
+                        return text
+                    key_info.failure_count += 1
+                    key_info.last_error = "Gemini response did not contain text output"
+                    logger.warning(
+                        "Gemini returned no text output for key %s",
+                        key_info.masked_key,
+                    )
                     return None
 
                 # Handle Rate Limit (429)
@@ -200,19 +440,205 @@ class GeminiService:
 
         return None
 
+    def generate_speech(self, text: str) -> Optional[bytes]:
+        """Generate natural Vietnamese narration as WAV audio using Gemini TTS."""
+        if not self.keys_pool:
+            return None
+
+        payload = {
+            "model": self.speech_model,
+            "input": [
+                {
+                    "type": "user_input",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": text,
+                            "annotations": [
+                                {
+                                    "type": "speech_metadata",
+                                    "style": (
+                                        "Natural Vietnamese narration, warm and engaging, "
+                                        "clear pronunciation, steady moderate pace."
+                                    ),
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+            "response_format": {"type": "audio"},
+            "generation_config": {
+                "speech_config": [{"voice": "Kore"}],
+            },
+        }
+
+        max_attempts = max(1, len(self.keys_pool))
+        for _ in range(max_attempts):
+            key_info = self.get_next_key_info()
+            if not key_info:
+                break
+
+            key_info.request_count += 1
+            key_info.last_used_at = datetime.now(timezone.utc).isoformat()
+            headers = {
+                "x-goog-api-key": key_info.key,
+                "Content-Type": "application/json",
+                "Api-Revision": self.api_revision,
+            }
+
+            try:
+                with httpx.Client(timeout=self.speech_request_timeout) as client:
+                    resp = client.post(self.api_url, headers=headers, json=payload)
+
+                if resp.status_code == 200:
+                    response_data = resp.json()
+                    audio_data = self._extract_audio_base64(response_data)
+                    if not audio_data:
+                        key_info.failure_count += 1
+                        key_info.last_error = "Gemini response did not contain audio output"
+                        logger.warning(
+                            "Gemini returned no audio output for key %s. Response keys: %s",
+                            key_info.masked_key,
+                            sorted(response_data.keys()),
+                        )
+                        return None
+
+                    try:
+                        normalized = str(audio_data).strip()
+                        if normalized.lower().startswith("data:"):
+                            normalized = normalized.split(",", 1)[1]
+                        normalized = "".join(normalized.split())
+                        if not normalized:
+                            raise ValueError("audio payload was empty")
+                        audio_bytes = base64.b64decode(normalized, validate=False)
+                    except (binascii.Error, TypeError, ValueError) as exc:
+                        key_info.failure_count += 1
+                        key_info.last_error = f"Invalid audio data: {str(exc)[:100]}"
+                        logger.warning(
+                            "Gemini returned invalid audio data for key %s",
+                            key_info.masked_key,
+                        )
+                        return None
+
+                    key_info.success_count += 1
+                    key_info.status = "active"
+                    key_info.last_error = None
+                    return audio_bytes
+
+                if resp.status_code == 429:
+                    key_info.failure_count += 1
+                    key_info.status = "rate_limited"
+                    key_info.rate_limited_until = time.time() + 60
+                    key_info.last_error = "429 Quota Exceeded / Rate Limited"
+                    logger.warning(
+                        "Gemini TTS key %s rate limited. Rotating to next key...",
+                        key_info.masked_key,
+                    )
+                    continue
+
+                if resp.status_code in [400, 403]:
+                    err_msg = resp.text
+                    if "API_KEY_INVALID" in err_msg or "PERMISSION_DENIED" in err_msg:
+                        key_info.failure_count += 1
+                        key_info.status = "invalid"
+                        key_info.last_error = f"{resp.status_code} Invalid API Key"
+                        logger.error(
+                            "Gemini TTS key %s is invalid. Rotating...",
+                            key_info.masked_key,
+                        )
+                        continue
+
+                key_info.failure_count += 1
+                key_info.last_error = f"HTTP {resp.status_code}: {resp.text[:100]}"
+                logger.warning(
+                    "Gemini TTS failed for key %s with HTTP %s",
+                    key_info.masked_key,
+                    resp.status_code,
+                )
+            except (httpx.HTTPError, TypeError, ValueError) as exc:
+                key_info.failure_count += 1
+                key_info.last_error = f"Gemini TTS request failed: {str(exc)[:100]}"
+                logger.warning(
+                    "Gemini TTS request failed for key %s: %s",
+                    key_info.masked_key,
+                    exc,
+                )
+
+        return None
+
+    def generate_vietnamese_tts(self, text: str) -> Optional[bytes]:
+        """Generate high-quality native Vietnamese audio using Google TTS service as reliable fallback."""
+        import urllib.parse
+        clean_text = re.sub(r"\s+", " ", text).strip()
+        if not clean_text:
+            return None
+
+        # Split text into chunks <= 160 characters (Google TTS character limit is ~200)
+        chunks = []
+        sentences = re.split(r"(?<=[.!?;\n])\s+", clean_text)
+        for sent in sentences:
+            sent = sent.strip()
+            if not sent:
+                continue
+            if len(sent) <= 160:
+                chunks.append(sent)
+            else:
+                words = sent.split(" ")
+                current = []
+                current_len = 0
+                for w in words:
+                    if current_len + len(w) + 1 > 160:
+                        chunks.append(" ".join(current))
+                        current = [w]
+                        current_len = len(w)
+                    else:
+                        current.append(w)
+                        current_len += len(w) + 1
+                if current:
+                    chunks.append(" ".join(current))
+
+        if not chunks:
+            return None
+
+        chunks = chunks[:120]  # Support up to ~20 minutes of speech
+        audio_data = bytearray()
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Referer": "https://translate.google.com/",
+        }
+
+        with httpx.Client(timeout=15.0, headers=headers) as client:
+            for chunk in chunks:
+                try:
+                    url = f"https://translate.google.com/translate_tts?ie=UTF-8&q={urllib.parse.quote(chunk)}&tl=vi&client=tw-ob"
+                    resp = client.get(url)
+                    if resp.status_code == 200 and resp.content:
+                        audio_data.extend(resp.content)
+                except Exception as exc:
+                    logger.warning("TTS chunk fetch error: %s", exc)
+                    continue
+
+        return bytes(audio_data) if len(audio_data) > 0 else None
+
     def test_key(self, api_key: str) -> Dict[str, Any]:
         """Test a specific API key against Google Gemini API."""
         clean_k = api_key.strip()
         if not clean_k:
             return {"valid": False, "message": "API key không được để trống"}
 
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={clean_k}"
+        headers = {
+            "x-goog-api-key": clean_k,
+            "Content-Type": "application/json",
+            "Api-Revision": self.api_revision,
+        }
         payload = {
-            "contents": [{"parts": [{"text": "Hello, respond with 'OK' if you can read this."}]}]
+            "model": self.model,
+            "input": "Hello, respond with 'OK' if you can read this.",
         }
         try:
-            with httpx.Client(timeout=10.0) as client:
-                resp = client.post(api_url, json=payload)
+            with httpx.Client(timeout=self.request_timeout) as client:
+                resp = client.post(self.api_url, headers=headers, json=payload)
             if resp.status_code == 200:
                 return {"valid": True, "message": f"Kết nối Gemini thành công! (Mô hình: {self.model})"}
             elif resp.status_code == 429:

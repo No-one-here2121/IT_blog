@@ -654,10 +654,10 @@ ${content}
       return;
     }
 
-    // Phân quyền xuất bản: Chỉ Ban quản trị (Admin / Moderator) mới có quyền xuất bản trực tiếp ("approved").
-    // Thành viên thông thường đăng bài sẽ luôn được chuyển vào hàng đợi ("pending") để Ban quản trị kiểm duyệt.
-    const resolvedStatus = isSupervisor
-      ? (submitStatus || "approved")
+    // Bài viết mới đăng luôn ở trạng thái 'pending' để Ban quản trị (Admin) và Kiểm duyệt viên (Moderator) duyệt
+    const isDraft = submitStatus === "draft";
+    const resolvedStatus = isDraft
+      ? "draft"
       : (isEditing ? (editPostData?.status || "pending") : "pending");
 
     // Chuẩn hóa tags
@@ -935,7 +935,7 @@ ${content}
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              handleSubmit(isSupervisor ? "approved" : "pending");
+              handleSubmit("pending");
             }}
             className="space-y-5"
           >
@@ -1268,14 +1268,14 @@ ${content}
                   👁️ Xem trước
                 </button>
 
-                {!isEditing && (isAdmin || isModerator) && (
+                {!isEditing && (
                   <button
                     type="button"
-                    onClick={() => handleSubmit("pending")}
-                    className="btn btn-sm border border-amber-400/80 bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/60 gap-1 text-xs font-bold transition-colors"
-                    title="Ban quản trị: Gửi bài viết vào danh sách chờ duyệt"
+                    onClick={() => handleSubmit("draft")}
+                    className="btn btn-sm btn-ghost border border-base-300 gap-1 text-xs font-semibold"
+                    title="Lưu bản nháp để chỉnh sửa sau"
                   >
-                    ⏳ Gửi chờ duyệt
+                    💾 Lưu nháp
                   </button>
                 )}
 
@@ -1283,11 +1283,7 @@ ${content}
                   type="submit"
                   className="btn btn-sm btn-primary text-white font-bold px-5 shadow-md hover:scale-105 active:scale-95 transition-all text-xs"
                 >
-                  {isEditing
-                    ? "Lưu thay đổi"
-                    : isSupervisor
-                    ? "✓ Xuất bản ngay"
-                    : "⏳ Gửi bài chờ duyệt"}
+                  {isEditing ? "Lưu thay đổi" : "⏳ Gửi bài chờ duyệt"}
                 </button>
               </div>
             </div>
@@ -1363,10 +1359,10 @@ ${content}
               ← Quay lại soạn thảo
             </button>
             <button
-              onClick={() => handleSubmit(isSupervisor ? "approved" : "pending")}
+              onClick={() => handleSubmit("pending")}
               className="btn btn-sm btn-primary text-white font-bold text-xs"
             >
-              {isSupervisor ? "✓ Xác nhận xuất bản" : "⏳ Gửi bài chờ duyệt"}
+              {isEditing ? "Lưu thay đổi" : "⏳ Gửi bài chờ duyệt"}
             </button>
           </div>
         </div>

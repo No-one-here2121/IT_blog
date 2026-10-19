@@ -265,17 +265,19 @@ def create_post(
             db.flush()
         category_id = cat.id
 
-    valid_statuses = {s.value for s in PostStatus}
-    if post_in.status:
-        clean_status = post_in.status.lower()
-        if clean_status not in valid_statuses:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Trạng thái bài viết không hợp lệ."
-            )
-        post_status = clean_status
-    else:
+    is_admin = bool(current_user and (
+        getattr(current_user, "is_superuser", False) or
+        any(getattr(r, "name", "") in ["admin", "moderator"] for r in getattr(current_user, "roles", []))
+    ))
+
+    # Bài viết mới đăng mặc định PENDING, trừ khi draft hoặc do Admin/Moderator chủ động duyệt thẳng 'approved'
+    clean_status = (post_in.status or "").lower().strip()
+    if clean_status == PostStatus.DRAFT.value:
+        post_status = PostStatus.DRAFT.value
+    elif clean_status == PostStatus.APPROVED.value and is_admin:
         post_status = PostStatus.APPROVED.value
+    else:
+        post_status = PostStatus.PENDING.value
 
     new_post = Post(
         title=post_in.title.strip(),
@@ -317,6 +319,13 @@ def create_post(
 
     db.commit()
     db.refresh(new_post)
+
+    # Tự động sinh bộ câu hỏi trắc nghiệm khớp với nội dung bài viết vừa đăng
+    try:
+        from app.services.quiz_generator import ensure_post_quiz_questions
+        ensure_post_quiz_questions(db, new_post, count=5, user_id=current_user.id)
+    except Exception as e:
+        logger.warning(f"Could not auto-generate quiz questions for new post #{new_post.id}: {e}")
 
     return PostResponse.model_validate(new_post)
 
@@ -394,8 +403,14 @@ def update_post(
                 detail="Trạng thái bài viết không hợp lệ."
             )
         post.status = new_status
-        if new_status == PostStatus.APPROVED.value and not post.published_at:
-            post.published_at = datetime.now(timezone.utc)
+        if new_status == PostStatus.APPROVED.value:
+            if not post.published_at:
+                post.published_at = datetime.now(timezone.utc)
+            try:
+                from app.services.quiz_generator import ensure_post_quiz_questions
+                ensure_post_quiz_questions(db, post, count=5, user_id=current_user.id)
+            except Exception as e:
+                logger.warning(f"Could not auto-generate quiz questions for approved post #{post.id}: {e}")
 
     if post_in.category_id is not None:
         if post_in.category_id > 0:
@@ -459,6 +474,13 @@ def update_post(
     db.add(post)
     db.commit()
     db.refresh(post)
+
+    # Đảm bảo bài viết luôn có câu hỏi trắc nghiệm khớp nội dung
+    try:
+        from app.services.quiz_generator import ensure_post_quiz_questions
+        ensure_post_quiz_questions(db, post, count=5, user_id=current_user.id)
+    except Exception as e:
+        logger.warning(f"Could not ensure quiz questions for updated post #{post.id}: {e}")
 
     return PostResponse.model_validate(post)
 

@@ -72,7 +72,7 @@ export function getRouteUrl(page, params = null) {
 // Phân giải thông tin trang từ thanh URL trình duyệt hiện tại
 export function parseRouteFromLocation() {
   if (typeof window === "undefined") {
-    return { page: "home", postId: "post_001", authorId: null, tab: "my_posts", section: "terms" };
+    return { page: "home", postId: null, authorId: null, tab: "my_posts", section: "terms" };
   }
 
   const rawPath = window.location.pathname.replace(/\/+$/, "") || "/";
@@ -83,7 +83,7 @@ export function parseRouteFromLocation() {
   if (queryPage) {
     return {
       page: queryPage,
-      postId: searchParams.get("postId") || "post_001",
+      postId: searchParams.get("postId") || null,
       authorId: searchParams.get("authorId") || null,
       tab: searchParams.get("tab") || "my_posts",
       section: searchParams.get("section") || "terms"
@@ -115,27 +115,31 @@ export function parseRouteFromLocation() {
   }
 
   // - Các tab tính năng chính
-  if (rawPath === "/roadmaps") return { page: "roadmaps", postId: "post_001", authorId: null, tab: "my_posts", section: "terms" };
-  if (rawPath === "/courses") return { page: "courses", postId: "post_001", authorId: null, tab: "my_posts", section: "terms" };
-  if (rawPath === "/quiz") return { page: "quiz", postId: "post_001", authorId: null, tab: "my_posts", section: "terms" };
-  if (rawPath === "/jobs") return { page: "jobs", postId: "post_001", authorId: null, tab: "my_posts", section: "terms" };
-  if (rawPath === "/events") return { page: "events", postId: "post_001", authorId: null, tab: "my_posts", section: "terms" };
-  if (rawPath === "/leaderboard") return { page: "leaderboard", postId: "post_001", authorId: null, tab: "my_posts", section: "terms" };
-  if (rawPath === "/moderation") return { page: "moderation", postId: "post_001", authorId: null, tab: "my_posts", section: "terms" };
-  if (rawPath === "/create-post" || rawPath === "/create") return { page: "create_post", postId: "post_001", authorId: null, tab: "my_posts", section: "terms" };
-  if (rawPath === "/edit-post") return { page: "edit_post", postId: "post_001", authorId: null, tab: "my_posts", section: "terms" };
-  if (rawPath === "/login") return { page: "login", postId: "post_001", authorId: null, tab: "my_posts", section: "terms" };
-  if (rawPath === "/logup" || rawPath === "/register") return { page: "logup", postId: "post_001", authorId: null, tab: "my_posts", section: "terms" };
+  if (rawPath === "/roadmaps") return { page: "roadmaps", postId: null, authorId: null, tab: "my_posts", section: "terms" };
+  if (rawPath === "/courses") return { page: "courses", postId: null, authorId: null, tab: "my_posts", section: "terms" };
+  if (rawPath === "/quiz") {
+    const pId = searchParams.get("postId") || searchParams.get("post_id") || null;
+    const cId = searchParams.get("courseId") || searchParams.get("course_id") || null;
+    return { page: "quiz", postId: pId, courseId: cId, title: searchParams.get("title") || null, authorId: null, tab: "my_posts", section: "terms" };
+  }
+  if (rawPath === "/jobs") return { page: "jobs", postId: null, authorId: null, tab: "my_posts", section: "terms" };
+  if (rawPath === "/events") return { page: "events", postId: null, authorId: null, tab: "my_posts", section: "terms" };
+  if (rawPath === "/leaderboard") return { page: "leaderboard", postId: null, authorId: null, tab: "my_posts", section: "terms" };
+  if (rawPath === "/moderation") return { page: "moderation", postId: null, authorId: null, tab: "my_posts", section: "terms" };
+  if (rawPath === "/create-post" || rawPath === "/create") return { page: "create_post", postId: null, authorId: null, tab: "my_posts", section: "terms" };
+  if (rawPath === "/edit-post") return { page: "edit_post", postId: null, authorId: null, tab: "my_posts", section: "terms" };
+  if (rawPath === "/login") return { page: "login", postId: null, authorId: null, tab: "my_posts", section: "terms" };
+  if (rawPath === "/logup" || rawPath === "/register") return { page: "logup", postId: null, authorId: null, tab: "my_posts", section: "terms" };
   if (rawPath === "/policy" || rawPath === "/terms" || rawPath === "/privacy" || rawPath === "/copyright") {
     let section = "terms";
     if (rawPath === "/privacy") section = "privacy";
     else if (rawPath === "/copyright") section = "copyright";
     else if (searchParams.get("section")) section = searchParams.get("section");
-    return { page: "policy", postId: "post_001", authorId: null, tab: "my_posts", section };
+    return { page: "policy", postId: null, authorId: null, tab: "my_posts", section };
   }
 
   // Mặc định là Trang chủ
-  return { page: "home", postId: "post_001", authorId: null, tab: "my_posts", section: "terms" };
+  return { page: "home", postId: null, authorId: null, tab: "my_posts", section: "terms" };
 }
 
 function AppContent() {
@@ -176,7 +180,11 @@ function AppContent() {
 
     if (params?.postId) setSelectedPostId(params.postId);
     if (params?.postData) setEditPostData(params.postData);
-    if (params?.quizParams) setQuizParams(params.quizParams);
+    if (params?.quizParams) {
+      setQuizParams(params.quizParams);
+    } else if (page === "quiz") {
+      setQuizParams({});
+    }
     if (params?.tab) setProfileTab(params.tab);
     else if (page === "profile" && !params?.tab) setProfileTab("my_posts");
     if (params?.section) setPolicySection(params.section);

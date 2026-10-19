@@ -83,13 +83,14 @@ def register(user_in: UserRegister, db: Session = Depends(get_db)):
             detail="Tên người dùng (username) này đã tồn tại, vui lòng chọn tên khác."
         )
 
-    # Create new user
+    # Create new user (mới đăng ký để is_active=False, chờ admin duyệt)
     new_user = User(
         email=user_in.email.lower().strip(),
         username=clean_username,
         name=clean_name,
         hashed_password=get_password_hash(clean_password),
-        avatar=f"https://api.dicebear.com/7.x/bottts/svg?seed={user_in.username}"
+        avatar=f"https://api.dicebear.com/7.x/bottts/svg?seed={user_in.username}",
+        is_active=False
     )
 
     # Assign default 'user' role (create if not yet seeded in fresh DB)
@@ -104,14 +105,13 @@ def register(user_in: UserRegister, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_user)
 
-    # Generate tokens
-    access_token = create_access_token(subject=new_user.id)
-    refresh_token = create_refresh_token(subject=new_user.id)
-
+    # Tài khoản mới đăng ký phải đợi admin duyệt nên chưa cấp token đăng nhập ngay
     return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        user=UserResponse.model_validate(new_user)
+        access_token=None,
+        refresh_token=None,
+        user=UserResponse.model_validate(new_user),
+        pending_approval=True,
+        message="Đăng ký tài khoản thành công! Tài khoản của bạn đang chờ Quản trị viên (Admin) phê duyệt trước khi có thể đăng nhập."
     )
 
 
@@ -148,7 +148,7 @@ def login(login_in: UserLogin, db: Session = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tài khoản của bạn hiện đang bị vô hiệu hóa."
+            detail="Tài khoản của bạn đang chờ Quản trị viên (Admin) phê duyệt hoặc đã bị tạm khóa. Vui lòng liên hệ Admin!"
         )
 
     access_token = create_access_token(subject=user.id)

@@ -37,6 +37,8 @@ ENV/
 .pytest_cache/
 backend/.env
 backend/app.db
+backend/data/*.json
+backend/data/gemini_keys.json
 backend/uploads/*
 !backend/uploads/.gitkeep
 

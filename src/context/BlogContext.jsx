@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useState, useEffect, useMemo, useCallback } from "react";
+import { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { storage, STORAGE_KEYS } from "../utils/storage";
 import { SEED_POSTS } from "../data/seedData";
 import { generateId } from "../utils/id";
@@ -41,67 +41,117 @@ export function BlogProvider({ children }) {
   // Khởi tạo danh sách bài viết từ storage hoặc seed data
   const [posts, setPosts] = useState(() => {
     const saved = storage.get(STORAGE_KEYS.POSTS, null);
-    if (!saved || !saved.some((p) => p.status === "pending")) {
-      storage.set(STORAGE_KEYS.POSTS, SEED_POSTS);
-      return SEED_POSTS;
+    if (Array.isArray(saved) && saved.length >= 5 && saved.some((p) => String(p.id) === "9")) {
+      return saved;
     }
-    return saved;
+    storage.set(STORAGE_KEYS.POSTS, SEED_POSTS);
+    return SEED_POSTS;
   });
 
-  // Tự động tải và đồng bộ danh sách bài viết từ backend FastAPI
-  const syncPostsFromBackend = () => {
-    api.posts.list({ limit: 500 })
-      .then((res) => {
-        const backendItems = res?.items || (Array.isArray(res) ? res : []);
-        if (backendItems.length > 0) {
-          const normalized = backendItems.map((bp) => ({
-            id: String(bp.id),
-            title: bp.title,
-            slug: bp.slug,
-            category: bp.category?.name || bp.category || "Backend",
-            tags: Array.isArray(bp.tags) ? bp.tags.map((t) => (typeof t === "object" ? t.name : t)) : [],
-            coverImage: bp.cover_image || bp.coverImage || "",
-            excerpt: bp.excerpt || "",
-            content: bp.content || "",
-            authorId: bp.author_id || bp.author?.id || "author_unknown",
-            author: bp.author ? {
-              id: String(bp.author.id),
-              name: bp.author.name || bp.author.username || "Tác giả IT",
-              username: bp.author.username,
-              avatar: bp.author.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${bp.author.id}`,
-              bio: bp.author.bio || "Cộng tác viên IT Blog",
-              role: bp.author.role || "user"
-            } : null,
-            status: bp.status || "approved",
-            likes_count: bp.likes_count ?? (Array.isArray(bp.likes) ? bp.likes.length : 0),
-            likes: Array.isArray(bp.likes) ? bp.likes : [],
-            bookmarks_count: bp.bookmarks_count ?? (Array.isArray(bp.bookmarks) ? bp.bookmarks.length : 0),
-            bookmarks: Array.isArray(bp.bookmarks) ? bp.bookmarks : [],
-            comments_count: bp.comments_count ?? (Array.isArray(bp.comments) ? bp.comments.length : 0),
-            comments: Array.isArray(bp.comments) && bp.comments.length > 0 && typeof bp.comments[0] === "object" ? bp.comments : [],
-            views: typeof bp.views === "number" ? bp.views : (bp.views || 0),
-            readTime: bp.read_time || "5 phút đọc",
-            isVerified: Boolean(bp.is_verified || bp.isVerified),
-            createdAt: bp.created_at || bp.createdAt || new Date().toISOString()
-          }));
+  const syncInFlight = useRef(false);
+  const syncRequested = useRef(false);
 
-          setPosts((prev) => {
-            const backendIds = new Set(normalized.map((n) => n.id));
-            const remainingLocal = prev.filter((p) => !backendIds.has(String(p.id)));
-            return [...normalized, ...remainingLocal];
-          });
-        }
+  // Tự động tải và đồng bộ danh sách bài viết từ backend FastAPI
+  const syncPostsFromBackend = useCallback(() => {
+    if (syncInFlight.current) {
+      syncRequested.current = true;
+      return;
+    }
+    syncInFlight.current = true;
+
+    const fetchAllPosts = async (status) => {
+      const firstPage = await api.posts.list({ page: 1, limit: 500, ...status });
+      const toItems = (response) => response?.items || (Array.isArray(response) ? response : []);
+      const items = toItems(firstPage);
+      const totalPages = firstPage?.total_pages || 1;
+      const rest = await Promise.all(
+        Array.from({ length: Math.max(0, totalPages - 1) }, (_, index) =>
+          api.posts.list({ page: index + 2, limit: 500, ...status }).then(toItems)
+        )
+      );
+      return [...items, ...rest.flat()];
+    };
+
+    Promise.all([
+      fetchAllPosts({}),
+      fetchAllPosts({ status: "pending" }).catch((error) => {
+        console.warn("Could not sync pending posts:", error.message);
+        return [];
       })
-      .catch((err) => {
-        console.warn("Backend posts sync fallback:", err.message);
+    ])
+      .then(([approvedItems, pendingItems]) => {
+        // Người dùng thường không có quyền xem pending; backend có thể trả approved ở request này.
+        // Gộp theo ID để tránh trùng bài.
+        const backendItems = new Map(
+          [...approvedItems, ...pendingItems].map((post) => [String(post.id), post])
+        );
+        const normalized = [...backendItems.values()].map((bp) => ({
+          id: String(bp.id),
+          title: bp.title,
+          slug: bp.slug,
+          category: bp.category?.name || bp.category || "Backend",
+          tags: Array.isArray(bp.tags) ? bp.tags.map((t) => (typeof t === "object" ? t.name : t)) : [],
+          coverImage: bp.cover_image || bp.coverImage || "",
+          excerpt: bp.excerpt || "",
+          content: bp.content || "",
+          authorId: bp.author_id || bp.author?.id || "author_unknown",
+          author: bp.author ? {
+            id: String(bp.author.id),
+            name: bp.author.name || bp.author.username || "Tác giả IT",
+            username: bp.author.username,
+            avatar: bp.author.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${bp.author.id}`,
+            bio: bp.author.bio || "Cộng tác viên IT Blog",
+            role: bp.author.role || "user"
+          } : null,
+          status: bp.status || "approved",
+          likes_count: bp.likes_count ?? (Array.isArray(bp.likes) ? bp.likes.length : 0),
+          likes: Array.isArray(bp.likes) ? bp.likes : [],
+          bookmarks_count: bp.bookmarks_count ?? (Array.isArray(bp.bookmarks) ? bp.bookmarks.length : 0),
+          bookmarks: Array.isArray(bp.bookmarks) ? bp.bookmarks : [],
+          comments_count: bp.comments_count ?? (Array.isArray(bp.comments) ? bp.comments.length : 0),
+          comments: Array.isArray(bp.comments) && bp.comments.length > 0 && typeof bp.comments[0] === "object" ? bp.comments : [],
+          views: typeof bp.views === "number" ? bp.views : (bp.views || 0),
+          readTime: bp.read_time || "5 phút đọc",
+          isVerified: Boolean(bp.is_verified || bp.isVerified),
+          createdAt: bp.created_at || bp.createdAt || new Date().toISOString()
+        }));
+
+        setPosts((prev) => {
+          const backendIds = new Set(normalized.map((post) => post.id));
+          const pendingLocal = prev.filter(
+            (post) => !backendIds.has(String(post.id)) && String(post.status || "").toLowerCase() === "pending"
+          );
+          return [...normalized, ...pendingLocal];
+        });
+      })
+      .catch((error) => {
+        console.warn("Backend posts sync failed; keeping the last available list:", error.message);
+      })
+      .finally(() => {
+        syncInFlight.current = false;
+        if (syncRequested.current) {
+          syncRequested.current = false;
+          window.setTimeout(() => window.dispatchEvent(new Event("refresh_posts")), 0);
+        }
       });
-  };
+  }, []);
 
   useEffect(() => {
     syncPostsFromBackend();
     window.addEventListener("refresh_posts", syncPostsFromBackend);
-    return () => window.removeEventListener("refresh_posts", syncPostsFromBackend);
-  }, []);
+    const syncWhenVisible = () => {
+      if (document.visibilityState === "visible") syncPostsFromBackend();
+    };
+    window.addEventListener("focus", syncWhenVisible);
+    document.addEventListener("visibilitychange", syncWhenVisible);
+    const intervalId = window.setInterval(syncWhenVisible, 30_000);
+    return () => {
+      window.removeEventListener("refresh_posts", syncPostsFromBackend);
+      window.removeEventListener("focus", syncWhenVisible);
+      document.removeEventListener("visibilitychange", syncWhenVisible);
+      window.clearInterval(intervalId);
+    };
+  }, [syncPostsFromBackend]);
 
   // State bộ lọc và tìm kiếm
   const [searchQuery, setSearchQuery] = useState("");
@@ -336,8 +386,9 @@ export function BlogProvider({ children }) {
   const createPost = (postData) => {
     if (!currentUser) return null;
 
-    const isSupervisor = checkIsSupervisor(currentUser);
-    const resolvedStatus = isSupervisor ? (postData.status || "approved") : "pending";
+    // Đăng bài mới luôn ở trạng thái 'pending' (chờ QTV & Kiểm duyệt viên duyệt), trừ khi lưu nháp 'draft'
+    const isDraft = postData.status === "draft";
+    const resolvedStatus = isDraft ? "draft" : "pending";
     const isPending = resolvedStatus === "pending";
 
     const newPost = {
@@ -354,10 +405,10 @@ export function BlogProvider({ children }) {
     };
 
     setPosts((prev) => [newPost, ...prev]);
-    if (isPending) {
-      addToast("Bài viết đã được gửi vào danh sách chờ duyệt! ⏳", "info");
+    if (isDraft) {
+      addToast("Đã lưu bản nháp bài viết thành công! 💾", "info");
     } else {
-      addToast("Đăng bài viết mới thành công! 🎉", "success");
+      addToast("Bài viết đã được gửi vào danh sách chờ duyệt từ Quản trị viên và Kiểm duyệt viên! ⏳", "info");
     }
 
     // Gửi lưu vào backend database
@@ -373,7 +424,17 @@ export function BlogProvider({ children }) {
       is_deprecated: Boolean(postData.isDeprecated),
       deprecated_warning: postData.deprecatedWarning,
       status: resolvedStatus
-    }).catch(() => {});
+    })
+      .then((created) => {
+        // DB đã có bản thật -> thay thế bản local post_xxx bằng bản thật từ DB
+        if (created?.id) {
+          setPosts((prev) => prev.map((p) => String(p.id) === String(newPost.id) ? { ...created, authorId: currentUser.id } : p));
+        }
+        setTimeout(() => syncPostsFromBackend(), 400);
+      })
+      .catch((err) => {
+        console.warn("Chưa đồng bộ được bài lên máy chủ backend, giữ bản cục bộ an toàn:", err);
+      });
 
     return newPost;
   };
@@ -381,7 +442,7 @@ export function BlogProvider({ children }) {
   /**
    * Duyệt và xuất bản bài viết (Yêu cầu xác thực Quản trị viên Admin / Kiểm duyệt viên Moderator)
    */
-  const approvePost = (postId) => {
+  const approvePost = async (postId) => {
     if (!currentUser) {
       addToast("Vui lòng đăng nhập với quyền Ban giám sát để duyệt bài!", "error");
       return false;
@@ -390,18 +451,64 @@ export function BlogProvider({ children }) {
       addToast("Bạn không có quyền duyệt bài viết! Yêu cầu vai trò Admin hoặc Moderator.", "error");
       return false;
     }
+
+    const targetPost = posts.find((p) => String(p.id) === String(postId));
+    const numericId = Number(postId);
+
+    // Cập nhật trạng thái duyệt trên state giao diện
     setPosts((prev) =>
       prev.map((p) => (String(p.id) === String(postId) ? { ...p, status: "approved" } : p))
     );
-    addToast("Đã phê duyệt và xuất bản bài viết thành công! ✓", "success");
-    api.posts.update(postId, { status: "approved" }).catch(() => {});
+
+    if (Number.isInteger(numericId) && numericId > 0) {
+      // 1. Bài đã có ID trong database: Cập nhật status sang 'approved'
+      try {
+        await api.posts.update(numericId, { status: "approved" });
+        addToast("Đã duyệt bài viết! AI đã tự động tạo đề trắc nghiệm bám sát nội dung vào Database! 🤖✓", "success");
+      } catch (err) {
+        console.warn("Lỗi khi cập nhật trạng thái bài viết lên DB:", err);
+        addToast("Đã phê duyệt bài viết thành công! ✓", "success");
+      }
+    } else if (targetPost) {
+      // 2. Bài mới được tạo từ local/chờ duyệt: Gửi trực tiếp vào PostgreSQL Database với status 'approved'
+      try {
+        const created = await api.posts.create({
+          title: targetPost.title,
+          category_name: targetPost.category,
+          tags: targetPost.tags || ["IT"],
+          cover_image: targetPost.coverImage || targetPost.cover_image || undefined,
+          excerpt: targetPost.excerpt || targetPost.title,
+          content: targetPost.content,
+          tech_stack_version: targetPost.techStackVersion,
+          scheduled_at: targetPost.scheduledAt,
+          is_deprecated: Boolean(targetPost.isDeprecated),
+          deprecated_warning: targetPost.deprecatedWarning,
+          status: "approved"
+        });
+
+        if (created?.id) {
+          // Cập nhật ID tạm thành ID số thật từ PostgreSQL Database
+          setPosts((prev) =>
+            prev.map((p) => (String(p.id) === String(postId) ? { ...created, authorId: targetPost.authorId || currentUser.id, status: "approved" } : p))
+          );
+        }
+        addToast("Đã lưu bài viết vào Database và AI đã tạo đề trắc nghiệm theo nội dung bài viết! 🤖✓", "success");
+      } catch (err) {
+        console.warn("Lỗi khi lưu bài duyệt vào DB:", err);
+        addToast("Đã phê duyệt bài viết thành công! ✓", "success");
+      }
+    } else {
+      addToast("Đã phê duyệt bài viết thành công! ✓", "success");
+    }
+
+    setTimeout(() => syncPostsFromBackend(), 400);
     return true;
   };
 
   /**
    * Từ chối bài viết (Yêu cầu xác thực Quản trị viên Admin / Kiểm duyệt viên Moderator)
    */
-  const rejectPost = (postId) => {
+  const rejectPost = async (postId) => {
     if (!currentUser) {
       addToast("Vui lòng đăng nhập với quyền Ban giám sát để từ chối bài!", "error");
       return false;
@@ -410,11 +517,21 @@ export function BlogProvider({ children }) {
       addToast("Bạn không có quyền từ chối bài viết! Yêu cầu vai trò Admin hoặc Moderator.", "error");
       return false;
     }
+
     setPosts((prev) =>
       prev.map((p) => (String(p.id) === String(postId) ? { ...p, status: "rejected" } : p))
     );
+
+    const numericId = Number(postId);
+    if (Number.isInteger(numericId) && numericId > 0) {
+      try {
+        await api.posts.update(numericId, { status: "rejected" });
+      } catch (err) {
+        console.warn("Lỗi từ chối bài trên DB:", err);
+      }
+    }
     addToast("Đã từ chối bài viết.", "info");
-    api.posts.update(postId, { status: "rejected" }).catch(() => {});
+    setTimeout(() => syncPostsFromBackend(), 400);
     return true;
   };
 
@@ -454,9 +571,16 @@ export function BlogProvider({ children }) {
       change_summary: updatedData.changeSummary,
       is_deprecated: updatedData.isDeprecated,
       deprecated_warning: updatedData.deprecatedWarning
-    }).catch(() => {});
+    })
+      .then(() => {
+        addToast("Cập nhật bài viết thành công!", "success");
+        syncPostsFromBackend();
+      })
+      .catch((err) => {
+        console.warn("Lỗi cập nhật bài viết trên máy chủ:", err);
+        syncPostsFromBackend();
+      });
 
-    addToast("Cập nhật bài viết thành công!", "success");
     return true;
   };
 
@@ -485,8 +609,15 @@ export function BlogProvider({ children }) {
     }
 
     setPosts((prev) => prev.filter((p) => String(p.id) !== String(postId)));
-    addToast(isSupervisor && !isAuthor ? "🛡️ Ban giám sát đã xóa bài viết trực tiếp thành công!" : "Đã xóa bài viết thành công! 🗑️", "info");
-    api.posts.delete(postId).catch(() => {});
+    api.posts.delete(postId)
+      .then(() => {
+        addToast(isSupervisor && !isAuthor ? "🛡️ Ban giám sát đã xóa bài viết trực tiếp thành công!" : "Đã xóa bài viết thành công! 🗑️", "info");
+        syncPostsFromBackend();
+      })
+      .catch((err) => {
+        console.warn("Lỗi xóa bài viết trên máy chủ:", err);
+        syncPostsFromBackend();
+      });
     return true;
   };
 

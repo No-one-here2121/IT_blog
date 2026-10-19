@@ -19,6 +19,8 @@ export default function Logup_page({ onNavigate }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [accountExists, setAccountExists] = useState(false);
   const [errors, setErrors] = useState({});
+  const [registeredPending, setRegisteredPending] = useState(false);
+  const [pendingUser, setPendingUser] = useState(null);
 
   // Nếu người dùng đã đăng nhập -> Chặn truy cập trang đăng ký và tự động chuyển về trang chủ
   useEffect(() => {
@@ -49,6 +51,69 @@ export default function Logup_page({ onNavigate }) {
           >
             Quay lại trang chủ ngay
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (registeredPending) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-base-200/50 p-4">
+        <div className="card bg-base-100 p-8 rounded-3xl shadow-xl text-center max-w-md w-full space-y-5 animate-fade-in border border-base-300">
+          <div className="w-16 h-16 rounded-full bg-warning/15 text-warning mx-auto flex items-center justify-center text-3xl font-bold">
+            ⏳
+          </div>
+          <div>
+            <span className="badge badge-warning gap-1 text-xs font-bold py-3 px-3 rounded-full mb-2">
+              Chờ Admin duyệt tài khoản
+            </span>
+            <h2 className="text-xl font-black text-base-content mt-1">Đăng ký thành công!</h2>
+            <p className="text-sm text-base-content/70 mt-2">
+              Chào mừng <strong>{pendingUser?.name}</strong>! Tài khoản của bạn đã được lưu vào hệ thống.
+            </p>
+          </div>
+
+          <div className="bg-base-200/60 p-4 rounded-2xl text-left text-xs space-y-2 border border-base-300">
+            <div className="flex justify-between items-center py-1 border-b border-base-300/50">
+              <span className="text-base-content/60">Tên người dùng:</span>
+              <strong className="text-base-content font-mono font-bold">@{pendingUser?.username}</strong>
+            </div>
+            <div className="flex justify-between items-center py-1 border-b border-base-300/50">
+              <span className="text-base-content/60">Email:</span>
+              <strong className="text-base-content">{pendingUser?.email}</strong>
+            </div>
+            <div className="flex justify-between items-center py-1">
+              <span className="text-base-content/60">Trạng thái:</span>
+              <span className="inline-flex items-center gap-1 font-bold text-warning">
+                <span className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse"></span>
+                Chờ phê duyệt
+              </span>
+            </div>
+          </div>
+
+          <div className="p-3 bg-amber-500/10 rounded-xl text-xs text-amber-700 dark:text-amber-300 text-left flex items-start gap-2 border border-amber-500/20">
+            <span className="text-base">ℹ️</span>
+            <span>
+              Theo quy định của hệ thống, tài khoản mới tạo cần được <strong>Quản trị viên (Admin) phê duyệt</strong> trước khi có thể đăng nhập.
+            </span>
+          </div>
+
+          <div className="space-y-2 pt-2">
+            <button
+              type="button"
+              onClick={() => onNavigate && onNavigate("login")}
+              className="btn btn-primary font-bold rounded-xl w-full text-white"
+            >
+              Đi tới trang Đăng nhập
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigate && onNavigate("home")}
+              className="btn btn-ghost btn-sm text-base-content/70 font-semibold rounded-xl w-full"
+            >
+              Về trang chủ
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -96,21 +161,58 @@ export default function Logup_page({ onNavigate }) {
 
   const handleRegister = async (e) => {
     e.preventDefault();
+    // Xóa lỗi cũ trước khi kiểm tra lại
+    setAccountExists(false);
     if (!validate()) return;
 
     setIsSubmitting(true);
-    setAccountExists(false);
     try {
-      const success = await register({ name, email, username, password });
+      const result = await register({ name, email, username, password });
       setIsSubmitting(false);
-      if (success && onNavigate) {
-        onNavigate("home");
-      } else if (!success) {
-        setAccountExists(true);
+
+      // register() trả về object { success, message, field, pending_approval }
+      const success = typeof result === "object" && result !== null ? result.success : result;
+
+      if (success) {
+        if (result?.pending_approval) {
+          setRegisteredPending(true);
+          setPendingUser({
+            name: name.trim(),
+            email: email.trim().toLowerCase(),
+            username: username.trim().toLowerCase(),
+            message: result?.message
+          });
+          return;
+        }
+        if (onNavigate) onNavigate("home");
+        return;
       }
-    } catch {
+
+      // Thất bại: hiển thị lỗi cụ thể ngay tại ô nhập tương ứng
+      const message = (typeof result === "object" && result?.message) || "Đăng ký không thành công. Vui lòng thử lại.";
+      const field = (typeof result === "object" && result?.field) || "";
+      const msgLower = String(message).toLowerCase();
+      const isConflict = /đã (tồn tại|được đăng ký)|tồn tại|trùng|already exists|duplicate|unique/i.test(msgLower)
+        && !/kết nối|mạng|máy chủ|server|database|failed to fetch|network/i.test(msgLower);
+
+      setErrors((prev) => ({
+        ...prev,
+        ...(field === "email" ? { email: message } : {}),
+        ...(field === "username" ? { username: message } : {}),
+        // Nếu backend không xác định được trường, hiển thị ở cả email & username khi là lỗi trùng
+        ...(!field && isConflict ? { email: message, username: message } : {}),
+      }));
+
+      // Chỉ hiện banner đỏ khi đúng lỗi trùng / không map được trường trùng
+      if (!field && isConflict) {
+        setAccountExists(true);
+      } else if (!field && !isConflict) {
+        addToast(message, "error");
+      }
+    } catch (err) {
       setIsSubmitting(false);
-      setAccountExists(true);
+      // Lỗi mạng / backend chết / DB lỗi: hiện đúng message, KHÔNG đổ cho trùng
+      addToast(err?.message || "Không kết nối được máy chủ. Kiểm tra backend :8000.", "error");
     }
   };
 

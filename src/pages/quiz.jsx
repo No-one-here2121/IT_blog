@@ -2,7 +2,7 @@ import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { useEffect, useState, useCallback } from "react";
 import api from "../services/api";
-import { DEFAULT_QUIZ_TOPICS, DEFAULT_QUIZ_QUESTIONS } from "../data/quizBank";
+import { DEFAULT_QUIZ_TOPICS, DEFAULT_QUIZ_QUESTIONS, TOPIC_ALIASES, DEFAULT_POST_QUIZZES } from "../data/quizBank";
 
 /**
  * Trang Ngan hang Trac nghiem Kien thuc IT chuyen sau
@@ -14,16 +14,44 @@ import { DEFAULT_QUIZ_TOPICS, DEFAULT_QUIZ_QUESTIONS } from "../data/quizBank";
 export default function QuizPage({ params = {}, onNavigate }) {
   const { currentUser, requireAuth, isAdmin } = useAuth();
   const { addToast } = useToast();
-  const { courseId, postId, title } = params;
+  const rawPostId = params.postId || params.post_id || params.quizParams?.postId || params.quizParams?.post_id;
+  const rawCourseId = params.courseId || params.course_id || params.quizParams?.courseId || params.quizParams?.course_id;
+  const title = params.title || params.quizParams?.title || "";
 
-  // Topics & Questions Data States
+  // Validate that postId and courseId are valid positive numbers (ignore fake strings like "post_001")
+  const cleanPostId = (rawPostId && !isNaN(Number(rawPostId)) && Number(rawPostId) > 0) ? Number(rawPostId) : null;
+  const cleanCourseId = (rawCourseId && !isNaN(Number(rawCourseId)) && Number(rawCourseId) > 0) ? Number(rawCourseId) : null;
+  const postId = cleanPostId;
+  const courseId = cleanCourseId;
+
+  // Topics, Post Quizzes & Questions Data States
   const [topics, setTopics] = useState(DEFAULT_QUIZ_TOPICS);
+  const [postQuizzes, setPostQuizzes] = useState(DEFAULT_POST_QUIZZES);
+  const [aiQuizzes, setAiQuizzes] = useState([]);
+  const [activePostId, setActivePostId] = useState(cleanPostId);
+  const [activeCourseId, setActiveCourseId] = useState(cleanCourseId);
+  const [activeTitle, setActiveTitle] = useState(title || "");
   const [selectedTopic, setSelectedTopic] = useState("all");
   const [selectedCount, setSelectedCount] = useState(10); // 5, 10, 15, 20, "all"
   const [selectedDifficulty, setSelectedDifficulty] = useState("all"); // "all", "easy", "medium", "hard"
 
-  // Trang thai bat dau lam bai: Chi hien thi cau hoi khi nguoi dung bam vao de tai hoac bam "Bat dau"
-  const [isExamStarted, setIsExamStarted] = useState(Boolean(courseId || postId));
+  // Trang thai bat dau lam bai: Chi bat dau ngay neu co postId hoac courseId hop le
+  const [isExamStarted, setIsExamStarted] = useState(Boolean(cleanCourseId || cleanPostId));
+
+  useEffect(() => {
+    setActivePostId(cleanPostId);
+    setActiveCourseId(cleanCourseId);
+    if (title) setActiveTitle(title);
+    if (cleanCourseId || cleanPostId) {
+      setIsExamStarted(true);
+      setQuestions([]);
+      setAnswers({});
+      setSubmitted(false);
+      setFilterWrongOnly(false);
+    } else {
+      setIsExamStarted(false);
+    }
+  }, [cleanCourseId, cleanPostId, title]);
 
   const [allPoolQuestions, setAllPoolQuestions] = useState([]);
   const [questions, setQuestions] = useState([]);
@@ -66,7 +94,7 @@ export default function QuizPage({ params = {}, onNavigate }) {
   const [newCorrectIndex, setNewCorrectIndex] = useState(0);
   const [newExplanation, setNewExplanation] = useState("");
   const [newLanguage, setNewLanguage] = useState("React");
-  const [newDifficulty, setNewDifficulty] = useState("intermediate");
+  const [newDifficulty, setNewDifficulty] = useState("medium");
   const [isSubmittingQuestion, setIsSubmittingQuestion] = useState(false);
 
   const [showAiModal, setShowAiModal] = useState(false);
@@ -78,8 +106,8 @@ export default function QuizPage({ params = {}, onNavigate }) {
 
 
 
-  // 1. Tai danh sach chuyen de kem so luong cau hoi tu backend
-  useEffect(() => {
+  // 1. Tai danh sach chuyen de va cac de thi theo bai viet tu backend
+  const loadTopics = useCallback(() => {
     api.quiz
       .getTopics()
       .then((res) => {
@@ -92,43 +120,146 @@ export default function QuizPage({ params = {}, onNavigate }) {
       });
   }, []);
 
+  const loadPostQuizzes = useCallback(() => {
+    api.quiz
+      .getPostQuizzes()
+      .then((res) => {
+        if (Array.isArray(res) && res.length > 0) {
+          setPostQuizzes(res);
+        } else {
+          setPostQuizzes(DEFAULT_POST_QUIZZES);
+        }
+      })
+      .catch((e) => {
+        console.warn("Could not fetch post quizzes, using synced defaults:", e);
+        setPostQuizzes(DEFAULT_POST_QUIZZES);
+      });
+  }, []);
+
+  const loadAiQuizzes = useCallback(() => {
+    if (api.quiz?.getAiQuizzes) {
+      api.quiz
+        .getAiQuizzes()
+        .then((res) => {
+          if (Array.isArray(res)) {
+            setAiQuizzes(res);
+          }
+        })
+        .catch((e) => {
+          console.warn("Could not fetch AI quizzes:", e);
+        });
+    }
+  }, []);
+
+  useEffect(() => {
+    loadTopics();
+    loadPostQuizzes();
+    loadAiQuizzes();
+  }, [loadTopics, loadPostQuizzes, loadAiQuizzes]);
+
+  const effectivePostId = (activePostId && !isNaN(Number(activePostId)) && Number(activePostId) > 0)
+    ? Number(activePostId)
+    : cleanPostId;
+  const effectiveCourseId = (activeCourseId && !isNaN(Number(activeCourseId)) && Number(activeCourseId) > 0)
+    ? Number(activeCourseId)
+    : cleanCourseId;
+  const effectiveTitle = activeTitle || title;
+
   // 2. Tai toan bo cau hoi cua chu de da chon tu backend hoac fallback
   useEffect(() => {
     let ignore = false;
+    setLoading(true);
+    setQuestions([]);
+    setAllPoolQuestions([]);
+
     const queryParams = {
       limit: 200,
       randomize: false,
     };
-    if (courseId) queryParams.course_id = courseId;
-    if (postId) queryParams.post_id = postId;
-    if (selectedTopic && selectedTopic !== "all") queryParams.language = selectedTopic;
+    if (effectiveCourseId) queryParams.course_id = effectiveCourseId;
+    if (effectivePostId) {
+      queryParams.post_id = effectivePostId;
+    } else if (selectedTopic && selectedTopic !== "all") {
+      queryParams.language = selectedTopic;
+    }
 
     api.quiz.getQuestions(queryParams)
       .then((res) => {
         if (ignore) return;
         let list = Array.isArray(res) ? res : (res?.questions || []);
         if (!list || list.length === 0) {
-          if (selectedTopic === "all") {
+          if (effectivePostId) {
+            list = DEFAULT_QUIZ_QUESTIONS.filter((q) => {
+              return Array.isArray(q.post_ids) && q.post_ids.includes(Number(effectivePostId));
+            });
+            if (list.length === 0) {
+              const matchedPq = DEFAULT_POST_QUIZZES.find((pq) => Number(pq.post_id) === Number(effectivePostId));
+              if (matchedPq?.question_ids) {
+                list = DEFAULT_QUIZ_QUESTIONS.filter((q) => matchedPq.question_ids.includes(Number(q.id)));
+              }
+            }
+          } else if (selectedTopic === "all") {
             list = DEFAULT_QUIZ_QUESTIONS;
           } else {
-            list = DEFAULT_QUIZ_QUESTIONS.filter(
-              (q) => (q.language || "").toLowerCase().includes(selectedTopic.toLowerCase())
-            );
+            const aliases = TOPIC_ALIASES[selectedTopic] || [selectedTopic.toLowerCase()];
+            list = DEFAULT_QUIZ_QUESTIONS.filter((q) => {
+              const lang = (q.language || "").toLowerCase();
+              return aliases.some((a) => lang.includes(a));
+            });
+            if (list.length === 0) list = DEFAULT_QUIZ_QUESTIONS;
           }
         }
-        setAllPoolQuestions(list);
+        const normalized = (list || []).map((q, idx) => ({
+          ...q,
+          id: q.id != null && String(q.id).trim() !== "" ? String(q.id) : `pool_${idx + 1}`
+        }));
+        setAllPoolQuestions(normalized);
+
+        // Neu dang trong che do thi, nap ngay bo cau hoi vua lay vao bai thi
+        if (isExamStarted && normalized.length > 0) {
+          prepareExamQuestions(normalized);
+          setTimerActive(true);
+        }
+
+        // Nếu đang load câu hỏi theo postId, câu hỏi mới có thể vừa được tạo.
+        // Refresh topics và postQuizzes để cập nhật danh sách ngay lập tức.
+        if (effectivePostId && normalized.length > 0) {
+          loadTopics();
+          loadPostQuizzes();
+        }
       })
       .catch((err) => {
         if (ignore) return;
         console.warn("Quiz questions fetch error, using local fallback data:", err);
-        if (selectedTopic === "all") {
-          setAllPoolQuestions(DEFAULT_QUIZ_QUESTIONS);
+        let list = [];
+        if (effectivePostId) {
+          list = DEFAULT_QUIZ_QUESTIONS.filter((q) => {
+            return Array.isArray(q.post_ids) && q.post_ids.includes(Number(effectivePostId));
+          });
+          if (list.length === 0) {
+            const matchedPq = DEFAULT_POST_QUIZZES.find((pq) => Number(pq.post_id) === Number(effectivePostId));
+            if (matchedPq?.question_ids) {
+              list = DEFAULT_QUIZ_QUESTIONS.filter((q) => matchedPq.question_ids.includes(Number(q.id)));
+            }
+          }
+        } else if (selectedTopic && selectedTopic !== "all") {
+          const aliases = TOPIC_ALIASES[selectedTopic] || [selectedTopic.toLowerCase()];
+          const matched = DEFAULT_QUIZ_QUESTIONS.filter((q) => {
+            const lang = (q.language || "").toLowerCase();
+            return aliases.some((a) => lang.includes(a));
+          });
+          list = matched.length > 0 ? matched : DEFAULT_QUIZ_QUESTIONS;
         } else {
-          setAllPoolQuestions(
-            DEFAULT_QUIZ_QUESTIONS.filter(
-              (q) => (q.language || "").toLowerCase().includes(selectedTopic.toLowerCase())
-            )
-          );
+          list = DEFAULT_QUIZ_QUESTIONS;
+        }
+        const normalized = (list || []).map((q, idx) => ({
+          ...q,
+          id: q.id != null && String(q.id).trim() !== "" ? String(q.id) : `fallback_${idx + 1}`
+        }));
+        setAllPoolQuestions(normalized);
+        if (isExamStarted && normalized.length > 0) {
+          prepareExamQuestions(normalized);
+          setTimerActive(true);
         }
       })
       .finally(() => {
@@ -138,53 +269,66 @@ export default function QuizPage({ params = {}, onNavigate }) {
     return () => {
       ignore = true;
     };
-  }, [courseId, postId, selectedTopic]);
+  }, [effectiveCourseId, effectivePostId, selectedTopic, loadTopics, loadPostQuizzes]);
 
   // 3. Chuan bi bo cau hoi
-  const prepareExamQuestions = useCallback(() => {
-    if (!allPoolQuestions || allPoolQuestions.length === 0) {
+  const prepareExamQuestions = useCallback((customPool = null) => {
+    const pool = customPool || allPoolQuestions;
+    if (!pool || pool.length === 0) {
       setQuestions([]);
       return;
     }
 
-    let filtered = [...allPoolQuestions];
+    let filtered = [...pool];
     if (selectedDifficulty && selectedDifficulty !== "all") {
       filtered = filtered.filter(
         (q) => (q.difficulty || "medium").toLowerCase() === selectedDifficulty.toLowerCase()
       );
       if (filtered.length === 0) {
-        filtered = [...allPoolQuestions];
+        filtered = [...pool];
       }
     }
 
-    const shuffled = [...filtered].sort(() => 0.5 - Math.random());
+    // Với bài thi theo bài viết hoặc khóa học: KHÔNG xáo trộn ngẫu nhiên để tất cả user làm chung 1 đề thống nhất
+    const isFixedExam = Boolean(effectivePostId || effectiveCourseId);
+    const shuffled = isFixedExam
+      ? [...filtered]
+      : [...filtered].sort(() => 0.5 - Math.random());
 
     let finalSlice = shuffled;
-    if (selectedCount !== "all") {
+    if (isFixedExam) {
+      finalSlice = shuffled;
+    } else if (selectedCount !== "all") {
       const targetCount = Number(selectedCount) || 10;
       finalSlice = shuffled.slice(0, targetCount);
     }
 
-    setQuestions(finalSlice);
+    const examQuestions = finalSlice.map((q, idx) => ({
+      ...q,
+      id: q.id != null && String(q.id).trim() !== "" ? String(q.id) : `exam_${idx + 1}`
+    }));
+
+    setQuestions(examQuestions);
     setAnswers({});
     setSubmitted(false);
     setFilterWrongOnly(false);
 
     const allottedSeconds = Math.max(180, finalSlice.length * 60);
     setTimeLeft(allottedSeconds);
-  }, [allPoolQuestions, selectedCount, selectedDifficulty]);
+  }, [allPoolQuestions, selectedCount, selectedDifficulty, effectivePostId, effectiveCourseId]);
 
   useEffect(() => {
     if (isExamStarted && allPoolQuestions.length > 0 && questions.length === 0) {
-      queueMicrotask(() => {
-        prepareExamQuestions();
-        setTimerActive(true);
-      });
+      prepareExamQuestions(allPoolQuestions);
+      setTimerActive(true);
     }
-  }, [allPoolQuestions.length, isExamStarted, questions.length, prepareExamQuestions]);
+  }, [allPoolQuestions, isExamStarted, questions.length, prepareExamQuestions]);
 
   const handleStartExam = (topicId) => {
     requireAuth(() => {
+      setActivePostId(null);
+      setActiveCourseId(null);
+      setActiveTitle("");
       if (topicId) {
         setSelectedTopic(topicId);
       }
@@ -195,11 +339,71 @@ export default function QuizPage({ params = {}, onNavigate }) {
     }, "Vui lòng đăng nhập để bắt đầu làm bài thi trắc nghiệm và lưu kết quả!");
   };
 
+  const handleStartPostExam = (pq) => {
+    requireAuth(() => {
+      setActivePostId(pq.post_id);
+      setActiveCourseId(null);
+      setActiveTitle(pq.title);
+      setQuestions([]);
+      setAllPoolQuestions([]);
+      setLoading(true);
+      setIsExamStarted(true);
+      setTimerActive(true);
+      setAnswers({});
+      setSubmitted(false);
+      setFilterWrongOnly(false);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }, "Vui lòng đăng nhập để bắt đầu làm bài thi trắc nghiệm và lưu kết quả!");
+  };
+
+  const handleStartAiExam = (aq) => {
+    requireAuth(() => {
+      setActivePostId(null);
+      setActiveCourseId(null);
+      setActiveTitle(aq.title || `Đề thi AI: ${aq.language}`);
+      setSelectedTopic(aq.language);
+      setQuestions([]);
+      setAllPoolQuestions([]);
+      setLoading(true);
+      setIsExamStarted(true);
+      setTimerActive(true);
+      setAnswers({});
+      setSubmitted(false);
+      setFilterWrongOnly(false);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+
+      api.quiz
+        .getQuestions({ language: aq.language, limit: 10, randomize: false })
+        .then((res) => {
+          const list = Array.isArray(res) ? res : (res?.questions || []);
+          const normalized = (list || []).map((q, idx) => ({
+            ...q,
+            id: q.id != null && String(q.id).trim() !== "" ? String(q.id) : `ai_${idx + 1}`
+          }));
+          setAllPoolQuestions(normalized);
+          prepareExamQuestions(normalized);
+          setTimerActive(true);
+        })
+        .catch((e) => {
+          console.warn("Could not load AI exam questions:", e);
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+    }, "Vui lòng đăng nhập để bắt đầu làm bài thi trắc nghiệm và lưu kết quả!");
+  };
+
   const handleExitToTopics = () => {
+    setActivePostId(null);
+    setActiveCourseId(null);
+    setActiveTitle("");
     setIsExamStarted(false);
     setTimerActive(false);
     setSubmitted(false);
     setAnswers({});
+    loadPostQuizzes();
+    loadTopics();
+    loadAiQuizzes();
   };
 
   const handleShuffleQuestions = () => {
@@ -220,7 +424,9 @@ export default function QuizPage({ params = {}, onNavigate }) {
 
   const pickAnswer = (qid, optionIdx) => {
     if (submitted) return;
-    setAnswers((prev) => ({ ...prev, [qid]: optionIdx }));
+    if (qid == null) return;
+    const key = String(qid);
+    setAnswers((prev) => ({ ...prev, [key]: optionIdx }));
   };
 
   const handleScoreSubmit = async () => {
@@ -228,14 +434,14 @@ export default function QuizPage({ params = {}, onNavigate }) {
     setTimerActive(false);
 
     const calculatedScore = questions.reduce(
-      (acc, q) => acc + (answers[q.id] === q.answer_index ? 1 : 0),
+      (acc, q) => acc + (answers[String(q.id)] === (q.answer_index ?? q.correct_index) ? 1 : 0),
       0
     );
 
     const activeTopicObj = topics.find((t) => t.id === selectedTopic);
     const newRecord = {
       id: Date.now(),
-      topic: title || activeTopicObj?.title || "Kiến thức IT",
+      topic: effectiveTitle || title || activeTopicObj?.title || "Kiến thức IT",
       score: calculatedScore,
       total: questions.length,
       percentage: Math.round((calculatedScore / (questions.length || 1)) * 100),
@@ -258,6 +464,10 @@ export default function QuizPage({ params = {}, onNavigate }) {
     } catch (e) {
       console.warn("Quiz submit sync fallback:", e);
     }
+
+    // Refresh topic & post quiz counts — câu hỏi mới có thể đã được tạo trong session này
+    loadTopics();
+    loadPostQuizzes();
   };
 
   useEffect(() => {
@@ -277,7 +487,7 @@ export default function QuizPage({ params = {}, onNavigate }) {
   }, [isExamStarted, submitted, timerActive, timeLeft, loading]);
 
   const handleRetakeWrongQuestions = () => {
-    const wrongOnes = questions.filter((q) => answers[q.id] !== q.answer_index);
+    const wrongOnes = questions.filter((q) => answers[String(q.id)] !== (q.answer_index ?? q.correct_index));
     if (wrongOnes.length === 0) return;
     setQuestions([...wrongOnes]);
     setAnswers({});
@@ -316,8 +526,8 @@ export default function QuizPage({ params = {}, onNavigate }) {
       "### Chi Tiết Từng Câu Hỏi & Lời Giải Thích Kỹ Thuật",
       "",
       ...questions.map((q, idx) => {
-        const userAns = answers[q.id];
-        const isCorrect = userAns === q.answer_index;
+        const userAns = answers[String(q.id)];
+        const isCorrect = userAns === (q.answer_index ?? q.correct_index);
         const mark = isCorrect ? "✅ [ĐÚNG]" : "❌ [SAI]";
         const userChoice = userAns !== undefined ? q.options[userAns] : "Chưa trả lời";
         const correctChoice = q.options[q.answer_index];
@@ -360,41 +570,59 @@ export default function QuizPage({ params = {}, onNavigate }) {
       return;
     }
     setIsSubmittingQuestion(true);
+    const normalizedDifficulty = newDifficulty === "intermediate" ? "medium" : newDifficulty;
     const payload = {
       question: newQuestionText.trim(),
       code_snippet: newQuestionCode.trim() || undefined,
       options: newOptions.map((o) => o.trim()),
+      answer_index: newCorrectIndex,
       correct_index: newCorrectIndex,
       explanation: newExplanation.trim() || undefined,
       language: newLanguage,
-      difficulty: newDifficulty
+      difficulty: normalizedDifficulty
     };
 
     try {
-      await api.quiz.create(payload);
-    } catch {
-      // offline fallback
+      const res = await api.quiz.create(payload);
+      const createdId = res?.id || res?.question_id || Date.now();
+      const newQ = {
+        id: String(createdId),
+        ...payload,
+        answer_index: newCorrectIndex,
+        correct_index: newCorrectIndex,
+        correct_answer: payload.options[newCorrectIndex]
+      };
+
+      setQuestions((prev) => [newQ, ...prev]);
+      setAllPoolQuestions((prev) => [newQ, ...prev]);
+      addToast("Đã lưu câu hỏi trắc nghiệm vào cơ sở dữ liệu PostgreSQL (pgAdmin 4) thành công! 🧠", "success");
+      setShowCreateModal(false);
+      setNewQuestionText("");
+      setNewQuestionCode("");
+      setNewOptions(["", "", "", ""]);
+      setNewCorrectIndex(0);
+      setNewExplanation("");
+
+      // Đồng bộ lại số lượng câu hỏi của các chuyên đề từ Database
+      api.quiz.getTopics().then((resTopics) => {
+        if (Array.isArray(resTopics) && resTopics.length > 0) {
+          setTopics(resTopics);
+        }
+      }).catch(() => {});
+    } catch (err) {
+      console.error("Create quiz question error:", err);
+      addToast("Lỗi khi lưu câu hỏi vào cơ sở dữ liệu: " + (err.message || "Vui lòng kiểm tra kết nối CSDL"), "error");
+    } finally {
+      setIsSubmittingQuestion(false);
     }
-
-    const newQ = {
-      id: Date.now(),
-      ...payload,
-      correct_answer: payload.options[newCorrectIndex]
-    };
-
-    setQuestions((prev) => [newQ, ...prev]);
-    addToast("Đã thêm câu hỏi trắc nghiệm mới thành công! 🧠", "success");
-    setShowCreateModal(false);
-    setNewQuestionText("");
-    setNewQuestionCode("");
-    setNewOptions(["", "", "", ""]);
-    setNewCorrectIndex(0);
-    setNewExplanation("");
-    setIsSubmittingQuestion(false);
   };
 
   const handleGenerateAiQuiz = async (e) => {
     if (e) e.preventDefault();
+    if (!isAdmin) {
+      addToast("Chỉ Quản trị viên (Admin) mới có quyền tạo đề trắc nghiệm bằng AI!", "error");
+      return;
+    }
     setIsGenerating(true);
     setError("");
     try {
@@ -402,27 +630,49 @@ export default function QuizPage({ params = {}, onNavigate }) {
         language: aiTopic.trim() || "IT",
         difficulty: aiDifficulty,
         count: Number(aiCount),
-        post_ids: postId ? [postId] : undefined,
-        course_id: courseId || undefined,
       });
 
+      let newQuestions = [];
       if (res?.created && res.created.length > 0 && res.created[0].options?.length > 0) {
-        setQuestions(res.created);
+        newQuestions = res.created.map((q, idx) => ({
+          ...q,
+          id: q.id != null && String(q.id).trim() !== "" ? String(q.id) : `ai_${Date.now()}_${idx + 1}`
+        }));
       } else {
-        const fresh = await api.quiz.getQuestions({ language: aiTopic, limit: Number(aiCount) });
+        const fresh = await api.quiz.getQuestions({ language: aiTopic.trim(), limit: Number(aiCount) });
         const freshList = Array.isArray(fresh) ? fresh : (fresh?.questions || []);
         if (freshList.length > 0) {
-          setQuestions(freshList);
+          newQuestions = freshList.map((q, idx) => ({
+            ...q,
+            id: q.id != null && String(q.id).trim() !== "" ? String(q.id) : `ai_${Date.now()}_${idx + 1}`
+          }));
         }
       }
-      setAnswers({});
-      setSubmitted(false);
-      setTimeLeft(Number(aiCount) * 60);
-      setTimerActive(true);
-      setFilterWrongOnly(false);
-      setShowAiModal(false);
-      setIsExamStarted(true);
-      setAiAlert("Đã sinh thành công " + (res?.count || aiCount) + " câu hỏi về " + aiTopic + " bằng AI! Hãy thử sức ngay.");
+
+      if (newQuestions.length > 0) {
+        setActivePostId(null);
+        setActiveCourseId(null);
+        const diffLabel = aiDifficulty === "hard" ? "Nâng cao" : aiDifficulty === "easy" ? "Cơ bản" : "Trung bình";
+        setActiveTitle(`Đề thi AI: ${aiTopic.trim()} (${diffLabel})`);
+        setSelectedTopic(aiTopic.trim());
+        setAllPoolQuestions(newQuestions);
+        setQuestions(newQuestions);
+        setAnswers({});
+        setSubmitted(false);
+        setTimeLeft(Math.max(180, newQuestions.length * 60));
+        setTimerActive(true);
+        setFilterWrongOnly(false);
+        setShowAiModal(false);
+        setIsExamStarted(true);
+        setAiAlert(`Đã sinh và mở thành công đề thi AI với ${newQuestions.length} câu hỏi về ${aiTopic}! Hãy thử sức ngay.`);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      } else {
+        setError("Không nhận được câu hỏi từ AI. Vui lòng thử lại!");
+      }
+
+      loadTopics();
+      loadPostQuizzes();
+      loadAiQuizzes();
     } catch (err) {
       console.warn("AI Quiz generation error:", err);
       setError("Không thể tạo đề thi bằng AI lúc này. Vui lòng thử lại sau.");
@@ -432,11 +682,11 @@ export default function QuizPage({ params = {}, onNavigate }) {
   };
 
   const score = questions.reduce(
-    (acc, q) => acc + (answers[q.id] === (q.answer_index ?? q.correct_index) ? 1 : 0),
+    (acc, q) => acc + (answers[String(q.id)] === (q.answer_index ?? q.correct_index) ? 1 : 0),
     0
   );
 
-  const wrongQuestions = questions.filter((q) => answers[q.id] !== (q.answer_index ?? q.correct_index));
+  const wrongQuestions = questions.filter((q) => answers[String(q.id)] !== (q.answer_index ?? q.correct_index));
 
   const displayedQuestions = filterWrongOnly && submitted ? wrongQuestions : questions;
   const currentTopicMeta = topics.find((t) => t.id === selectedTopic) || topics[0];
@@ -445,12 +695,39 @@ export default function QuizPage({ params = {}, onNavigate }) {
     <div className="w-full max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-6">
       {/* Nut quay lai trang chu hoac quay lai danh sach de tai */}
       <div className="flex items-center justify-between mb-4">
-        <button
-          onClick={() => onNavigate && onNavigate("home")}
-          className="btn btn-ghost btn-sm gap-1.5 text-base-content/80 hover:text-base-content font-semibold"
-        >
-          ← Về trang chủ
-        </button>
+        <div className="flex items-center gap-2">
+          {postId ? (
+            <button
+              onClick={() => onNavigate && onNavigate("post_detail", { postId })}
+              className="btn btn-primary btn-sm gap-1.5 text-white font-bold shadow-xs rounded-xl"
+            >
+              ← Quay lại bài viết
+            </button>
+          ) : courseId ? (
+            <button
+              onClick={() => onNavigate && onNavigate("courses", { courseId })}
+              className="btn btn-primary btn-sm gap-1.5 text-white font-bold shadow-xs rounded-xl"
+            >
+              ← Quay lại khóa học
+            </button>
+          ) : (
+            <button
+              onClick={() => onNavigate && onNavigate("home")}
+              className="btn btn-ghost btn-sm gap-1.5 text-base-content/80 hover:text-base-content font-semibold"
+            >
+              ← Về trang chủ
+            </button>
+          )}
+
+          {(postId || courseId) && (
+            <button
+              onClick={() => onNavigate && onNavigate("home")}
+              className="btn btn-ghost btn-sm gap-1.5 text-base-content/60 hover:text-base-content font-semibold text-xs"
+            >
+              Về trang chủ
+            </button>
+          )}
+        </div>
 
         {isExamStarted && (
           <button
@@ -476,31 +753,37 @@ export default function QuizPage({ params = {}, onNavigate }) {
                   Ngân hàng Trắc nghiệm & Kiểm tra Năng lực IT
                 </h1>
                 <p className="text-xs sm:text-sm text-base-content/70 mt-1.5 max-w-3xl leading-relaxed">
-                  Hệ thống hơn 90 câu hỏi trắc nghiệm chuyên sâu chia theo từng đề tài công nghệ thực tế.
+                  Hệ thống hơn {topics.find((t) => t.id === "all")?.question_count || 180} câu hỏi trắc nghiệm chuyên sâu chia theo từng đề tài công nghệ thực tế.
                   Chọn đề tài bạn muốn ôn tập, số lượng câu hỏi và bắt đầu thử sức ngay!
                 </p>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 self-start md:self-center shrink-0">
+              {isAdmin && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateModal(true)}
+                    className="btn btn-sm btn-outline btn-primary font-bold gap-1.5 rounded-xl shadow-xs cursor-pointer"
+                  >
+                    <span>➕</span>
+                    <span>Thêm câu hỏi trắc nghiệm</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowAiModal(true)}
+                    className="btn btn-sm btn-primary text-white font-bold gap-1.5 shadow-md hover:scale-105 transition-all rounded-xl cursor-pointer"
+                  >
+                    <span>⚡</span>
+                    <span>Tạo đề bằng AI</span>
+                  </button>
+                </>
+              )}
               <button
                 type="button"
-                onClick={() => requireAuth(() => setShowCreateModal(true), "Vui lòng đăng nhập để thêm câu hỏi trắc nghiệm!")}
-                className="btn btn-sm btn-outline btn-primary font-bold gap-1.5 rounded-xl shadow-xs cursor-pointer"
-              >
-                <span>➕</span>
-                <span>Thêm câu hỏi trắc nghiệm</span>
-              </button>
-              <button
-                onClick={() => requireAuth(() => setShowAiModal(true), "Vui lòng đăng nhập để tạo đề thi bằng AI!")}
-                className="btn btn-sm btn-primary text-white font-bold gap-1.5 shadow-md hover:scale-105 transition-all rounded-xl"
-              >
-                <span>⚡</span>
-                <span>Tạo đề bằng AI</span>
-              </button>
-              <button
                 onClick={() => setShowHistoryModal(true)}
-                className="btn btn-sm btn-outline btn-ghost gap-1.5 rounded-xl font-semibold"
+                className="btn btn-sm btn-outline btn-ghost gap-1.5 rounded-xl font-semibold cursor-pointer"
               >
                 <span>📜</span>
                 <span>Lịch sử thi ({quizHistory.length})</span>
@@ -574,6 +857,126 @@ export default function QuizPage({ params = {}, onNavigate }) {
               </div>
             </div>
           </div>
+
+          {/* Danh Sách Bộ Đề Trắc Nghiệm Theo Bài Viết Đã Tạo */}
+          {postQuizzes && postQuizzes.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                <h2 className="text-base font-extrabold text-base-content flex items-center gap-2">
+                  <span className="p-1 rounded-lg bg-primary/10 text-primary">📖</span>
+                  <span>Bộ Đề Trắc Nghiệm Theo Bài Viết:</span>
+                  <span className="badge badge-sm badge-primary text-white font-bold">
+                    {postQuizzes.length} đề thi
+                  </span>
+                </h2>
+                <span className="text-xs text-base-content/60">
+                  Tất cả thành viên đều làm chung 1 đề thi chuẩn hóa của từng bài viết
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {postQuizzes.map((pq) => (
+                  <div
+                    key={pq.post_id}
+                    className="p-5 rounded-3xl border border-base-300 bg-base-100 hover:border-primary/50 hover:shadow-md transition-all flex flex-col justify-between gap-4 group"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="badge badge-sm badge-outline text-primary font-bold">
+                          {pq.category_name || "Kiến thức"}
+                        </span>
+                        <span className="badge badge-neutral text-white font-bold text-xs">
+                          {pq.question_count} câu trắc nghiệm
+                        </span>
+                      </div>
+                      <h3 className="font-extrabold text-base text-base-content group-hover:text-primary transition-colors line-clamp-2">
+                        {pq.title}
+                      </h3>
+                      <p className="text-xs text-base-content/60 mt-1 flex items-center gap-2">
+                        <span>✍️ {pq.author_name}</span>
+                        <span>•</span>
+                        <span className="text-success font-semibold">Khớp 100% nội dung</span>
+                      </p>
+                    </div>
+
+                    <div className="pt-3 border-t border-base-200 flex items-center justify-between">
+                      <span className="text-[11px] text-base-content/50 font-medium">
+                        ⏱️ ~10 phút • Đề cố định
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleStartPostExam(pq)}
+                        className="btn btn-sm btn-primary text-white rounded-xl font-bold gap-1 shadow-xs hover:scale-105 transition-transform"
+                      >
+                        <span>Làm bài ngay</span>
+                        <span>→</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Danh Sách Bộ Đề Thi Tạo Bằng AI (Gemini AI) */}
+          {aiQuizzes && aiQuizzes.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                <h2 className="text-base font-extrabold text-base-content flex items-center gap-2">
+                  <span className="p-1 rounded-lg bg-purple-500/10 text-purple-600">⚡</span>
+                  <span>Bộ Đề Thi Tạo Bằng AI (Gemini AI):</span>
+                  <span className="badge badge-sm badge-secondary text-white font-bold">
+                    {aiQuizzes.length} đề thi
+                  </span>
+                </h2>
+                <span className="text-xs text-base-content/60">
+                  Câu hỏi chuyên sâu sinh tự động theo công nghệ bạn vừa yêu cầu
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {aiQuizzes.map((aq) => (
+                  <div
+                    key={aq.id}
+                    className="p-5 rounded-3xl border border-purple-500/20 bg-gradient-to-br from-purple-500/5 via-base-100 to-base-100 hover:border-purple-500/50 hover:shadow-md transition-all flex flex-col justify-between gap-4 group"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="badge badge-sm badge-outline text-purple-600 border-purple-500/40 font-bold">
+                          ⚡ AI Gemini
+                        </span>
+                        <span className="badge badge-secondary text-white font-bold text-xs">
+                          {aq.question_count} câu trong kho
+                        </span>
+                      </div>
+                      <h3 className="font-extrabold text-base text-base-content group-hover:text-purple-600 transition-colors line-clamp-2">
+                        {aq.title}
+                      </h3>
+                      <p className="text-xs text-base-content/60 mt-1 flex items-center gap-2">
+                        <span>🤖 Công nghệ: <strong className="text-base-content">{aq.language}</strong></span>
+                        <span>•</span>
+                        <span className="text-purple-600 font-semibold">Tự động cập nhật</span>
+                      </p>
+                    </div>
+
+                    <div className="pt-3 border-t border-base-200 flex items-center justify-between">
+                      <span className="text-[11px] text-base-content/50 font-medium">
+                        ⏱️ ~10 phút • Đề AI thông minh
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleStartAiExam(aq)}
+                        className="btn btn-sm btn-secondary text-white rounded-xl font-bold gap-1 shadow-xs hover:scale-105 transition-transform"
+                      >
+                        <span>Làm bài ngay</span>
+                        <span>→</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Danh Sach Cac De Tai Chuyen De (Topic Cards Grid) */}
           <div className="space-y-3">
@@ -684,16 +1087,26 @@ export default function QuizPage({ params = {}, onNavigate }) {
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-base-content">
-                      {title ? ("Trắc nghiệm: " + title) : currentTopicMeta?.title || "Ngân hàng Trắc nghiệm IT"}
+                      {effectivePostId
+                        ? (effectiveTitle ? "Trắc nghiệm bài học: " + effectiveTitle : "Trắc nghiệm kiến thức bài viết")
+                        : effectiveTitle
+                        ? "Trắc nghiệm: " + effectiveTitle
+                        : currentTopicMeta?.title || "Ngân hàng Trắc nghiệm IT"}
                     </h1>
-                    {currentTopicMeta?.badge && (
+                    {effectivePostId ? (
+                      <span className="badge badge-primary text-white font-bold text-xs">
+                        📖 Đề thi chuẩn hóa theo bài viết
+                      </span>
+                    ) : currentTopicMeta?.badge ? (
                       <span className="badge badge-primary text-white font-bold text-xs">
                         {currentTopicMeta.badge}
                       </span>
-                    )}
+                    ) : null}
                   </div>
                   <p className="text-xs sm:text-sm text-base-content/70 mt-1 max-w-2xl leading-relaxed">
-                    {currentTopicMeta?.description || "Hệ thống câu hỏi tuyển chọn thực tế từ các kỹ sư công nghệ cao cấp."}
+                    {effectivePostId
+                      ? "Bộ câu hỏi kiểm tra mức độ nắm bắt kiến thức được tạo cố định khớp với nội dung bài viết. Tất cả người học đều làm chung 1 đề thi."
+                      : currentTopicMeta?.description || "Hệ thống câu hỏi tuyển chọn thực tế từ các kỹ sư công nghệ cao cấp."}
                   </p>
                 </div>
               </div>
@@ -934,14 +1347,16 @@ export default function QuizPage({ params = {}, onNavigate }) {
             <div className="lg:col-span-8 space-y-4 min-w-0">
               <div className="space-y-4">
                 {displayedQuestions.map((q, qi) => {
-                  const chosen = answers[q.id];
+                  const qKey = String(q.id);
+                  const chosen = answers[qKey];
+                  const correctIdx = q.answer_index ?? q.correct_index;
                   return (
                     <div
                       key={q.id}
                       id={"question-" + q.id}
                       className={"scroll-mt-24 rounded-3xl border p-5 sm:p-6 shadow-xs transition-all " + (
                         submitted
-                          ? chosen === q.answer_index
+                          ? chosen === correctIdx
                             ? "border-success/60 bg-success/5"
                             : "border-error/60 bg-error/5"
                           : "border-base-300 bg-base-100"
@@ -973,7 +1388,7 @@ export default function QuizPage({ params = {}, onNavigate }) {
                       <div className="grid gap-2.5">
                         {(q.options || []).map((opt, oi) => {
                           const chosenThis = chosen === oi;
-                          const answerThis = q.answer_index === oi;
+                          const answerThis = correctIdx === oi;
                           let cls =
                             "border-base-300 bg-base-100 hover:border-primary/50 hover:bg-base-200/50";
                           if (submitted) {
@@ -1105,8 +1520,9 @@ export default function QuizPage({ params = {}, onNavigate }) {
                   </p>
                   <div className="grid grid-cols-5 gap-2">
                     {displayedQuestions.map((q, qi) => {
-                      const isAnswered = answers[q.id] !== undefined;
-                      const isCorrect = submitted && answers[q.id] === q.answer_index;
+                      const qKey = String(q.id);
+                      const isAnswered = answers[qKey] !== undefined;
+                      const isCorrect = submitted && answers[qKey] === (q.answer_index ?? q.correct_index);
                       const isWrong = submitted && isAnswered && !isCorrect;
 
                       let btnCls = "bg-base-200 text-base-content/70 hover:bg-base-300";
@@ -1164,7 +1580,7 @@ export default function QuizPage({ params = {}, onNavigate }) {
       )}
 
       {/* Modal Tao de thi bang AI */}
-      {showAiModal && (
+      {isAdmin && showAiModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in"
           onClick={(e) => {
@@ -1374,12 +1790,14 @@ export default function QuizPage({ params = {}, onNavigate }) {
                     onChange={(e) => setNewLanguage(e.target.value)}
                     className="select select-bordered select-sm w-full text-xs rounded-xl"
                   >
-                    <option value="React">React 19</option>
-                    <option value="FastAPI">FastAPI / Python</option>
-                    <option value="Docker">Docker / DevOps</option>
-                    <option value="PostgreSQL">PostgreSQL</option>
-                    <option value="Security">Bảo mật Web</option>
-                    <option value="System Design">System Design</option>
+                    <option value="React">React 19 & Frontend</option>
+                    <option value="FastAPI">FastAPI & Backend</option>
+                    <option value="PostgreSQL">PostgreSQL & Database</option>
+                    <option value="DevOps">DevOps, Docker & K8s</option>
+                    <option value="Python">Python Core & Async</option>
+                    <option value="Security">Bảo mật Web & Ứng dụng</option>
+                    <option value="Architecture">Kiến trúc Hệ thống (System Design)</option>
+                    <option value="Fullstack">Fullstack Engineering</option>
                   </select>
                 </div>
                 <div>
@@ -1392,7 +1810,7 @@ export default function QuizPage({ params = {}, onNavigate }) {
                     className="select select-bordered select-sm w-full text-xs rounded-xl"
                   >
                     <option value="easy">Cơ bản (Easy)</option>
-                    <option value="intermediate">Trung bình (Medium)</option>
+                    <option value="medium">Trung bình (Medium)</option>
                     <option value="hard">Nâng cao (Hard)</option>
                   </select>
                 </div>

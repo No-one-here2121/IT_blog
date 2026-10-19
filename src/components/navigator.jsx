@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useAuth } from "../context/AuthContext";
 import { useBlog } from "../context/BlogContext";
 import { useToast } from "../context/ToastContext";
 import ThemeToggle from "./ThemeToggle";
+import ApiKeyModal from "./ApiKeyModal";
+import { Key } from "lucide-react";
 import { api } from "../services/api";
 import {
   Bell, Heart, MessageSquare, BadgeCheck,
@@ -104,6 +107,7 @@ export default function Navbar({ onNavigate, currentPage = "home" }) {
   // Search input ref & shortcuts modal state
   const searchInputRef = useRef(null);
   const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false);
+  const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
 
   // Notification States
   const [unreadCount, setUnreadCount] = useState(0);
@@ -675,6 +679,20 @@ ${rows}
                   <span>Viết bài mới</span>
                 </button>
               </li>
+              {canAccessModeration && (
+                <li>
+                  <button
+                    onClick={() => {
+                      handleNavAndCloseMobile();
+                      setApiKeyModalOpen(true);
+                    }}
+                    className="flex items-center gap-2 py-2 font-semibold text-amber-600 dark:text-amber-400 cursor-pointer"
+                  >
+                    <Key size={18} className="text-amber-500 shrink-0" />
+                    <span>Cài đặt Gemini AI Key</span>
+                  </button>
+                </li>
+              )}
               {currentUser ? (
                 <>
                   <div className="divider my-1"></div>
@@ -898,8 +916,8 @@ ${rows}
           </div>
         </div>
 
-        {/* Center: Search input */}
-        <div className="relative flex-1 max-w-xs xl:max-w-sm min-w-[160px] mx-2 transition-all duration-200 hidden sm:block">
+        {/* Center: Search input - bo tròn, ngắn nhưng vẫn co giãn khi chật */}
+        <div className="relative flex-1 min-w-[120px] max-w-[220px] lg:max-w-[256px] mx-2 transition-all duration-200 hidden sm:block">
           <div className="relative w-full">
             <input
               ref={searchInputRef}
@@ -909,8 +927,8 @@ ${rows}
               onFocus={() => setSearchFocused(true)}
               onBlur={() => setTimeout(() => setSearchFocused(false), 250)}
               onKeyDown={handleSearchKeyDown}
-              placeholder="Tìm kiếm bài viết, công nghệ..."
-              className="input input-sm input-bordered w-full pl-9 pr-14 bg-base-200/60 hover:bg-base-200 focus:bg-base-100 transition-all rounded-full text-xs shadow-2xs"
+              placeholder="Tìm kiếm..."
+              className="input input-sm input-bordered w-full pl-9 pr-9 bg-base-200/60 hover:bg-base-200 focus:bg-base-100 transition-all rounded-full text-xs shadow-2xs placeholder:text-base-content/40"
             />
             <svg
               className="w-4 h-4 text-base-content/50 absolute left-3 top-2.5"
@@ -920,18 +938,13 @@ ${rows}
             >
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
-            {searchQuery ? (
+            {searchQuery && (
               <button
                 onClick={() => setSearchQuery("")}
                 className="absolute right-2.5 top-2.5 text-xs text-base-content/40 hover:text-base-content"
               >
                 ✕
               </button>
-            ) : (
-              <span className="absolute right-2.5 top-2 pointer-events-none hidden md:inline-flex items-center gap-0.5 opacity-50">
-                <kbd className="kbd kbd-xs text-[10px] font-mono py-0 px-1 bg-base-300">Ctrl</kbd>
-                <kbd className="kbd kbd-xs text-[10px] font-mono py-0 px-1 bg-base-300">K</kbd>
-              </span>
             )}
           </div>
 
@@ -1125,6 +1138,25 @@ ${rows}
                     </div>
                   </button>
                 </li>
+                <div className="divider my-1"></div>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (document.activeElement && typeof document.activeElement.blur === "function") {
+                        document.activeElement.blur();
+                      }
+                      setApiKeyModalOpen(true);
+                    }}
+                    className="flex items-center gap-2.5 py-2 font-semibold text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 rounded-xl cursor-pointer"
+                  >
+                    <Key size={18} className="text-amber-500 shrink-0" />
+                    <div>
+                      <p className="font-bold">Cài đặt Gemini AI Key</p>
+                      <p className="text-[10px] text-base-content/60 font-normal">Cấu hình API Key & Quota xoay vòng</p>
+                    </div>
+                  </button>
+                </li>
               </ul>
             </div>
           ) : (
@@ -1146,7 +1178,7 @@ ${rows}
           <button
             type="button"
             onClick={() => setShortcutsModalOpen(true)}
-            className="btn btn-ghost btn-circle btn-sm text-base-content/70 hover:text-base-content"
+            className="btn btn-ghost btn-circle btn-sm text-base-content/70 hover:text-base-content hidden md:inline-flex"
             aria-label="Phím tắt hệ thống"
             title="Phím tắt hệ thống (Nhấn ? hoặc Ctrl+K)"
           >
@@ -1168,9 +1200,9 @@ ${rows}
                   aria-label="Thông báo"
                   title="Thông báo"
                 >
-                  <Bell size={18} />
+                  <Bell size={18} className="shrink-0" />
                   {unreadCount > 0 && (
-                    <span className="absolute top-1 right-1 w-4 h-4 bg-error text-white text-[10px] font-extrabold rounded-full flex items-center justify-center leading-none">
+                    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-0.5 bg-error text-white text-[9px] font-extrabold rounded-full flex items-center justify-center leading-none ring-2 ring-base-100 pointer-events-none">
                       {unreadCount > 9 ? "9+" : unreadCount}
                     </span>
                   )}
@@ -1404,6 +1436,24 @@ ${rows}
                   </button>
                 </li>
 
+                {canAccessModeration && (
+                  <li>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (document.activeElement && typeof document.activeElement.blur === "function") {
+                          document.activeElement.blur();
+                        }
+                        setApiKeyModalOpen(true);
+                      }}
+                      className="flex items-center gap-2 py-2 text-amber-600 dark:text-amber-400 font-semibold cursor-pointer hover:bg-amber-500/10 rounded-xl"
+                    >
+                      <Key size={16} className="text-amber-500 shrink-0" />
+                      <span>Cài đặt Gemini AI Key</span>
+                    </button>
+                  </li>
+                )}
+
                 <div className="divider my-1"></div>
 
                 <li>
@@ -1575,15 +1625,16 @@ ${rows}
         </div>
       )}
 
-      {/* Modal Bảng Phím Tắt Hệ Thống (Keyboard Shortcuts Cheatsheet) */}
-      {shortcutsModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in"
+      {/* Modal Bảng Phím Tắt Hệ Thống (Keyboard Shortcuts Cheatsheet) — Portal ra body để không bị kẹt trong header sticky + backdrop-blur */}
+      {shortcutsModalOpen &&
+        createPortal(
+          <div
+          className="fixed inset-0 z-[100] flex justify-center overflow-y-auto bg-black/60 backdrop-blur-xs p-4 animate-fade-in"
           onClick={(e) => {
             if (e.target === e.currentTarget) setShortcutsModalOpen(false);
           }}
         >
-          <div className="relative w-full max-w-lg max-h-[90vh] flex flex-col bg-base-100 rounded-3xl shadow-2xl border border-base-300 overflow-hidden">
+          <div className="relative w-full max-w-lg max-h-[calc(100vh-2rem)] flex flex-col bg-base-100 rounded-3xl shadow-2xl border border-base-300 overflow-hidden my-auto">
             {/* Header */}
             <div className="p-5 border-b border-base-200 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2 min-w-0 pr-2">
@@ -1607,7 +1658,7 @@ ${rows}
             </div>
 
             {/* Body */}
-            <div className="p-5 flex-1 overflow-y-auto space-y-4 text-xs">
+            <div className="p-5 flex-1 min-h-0 overflow-y-auto space-y-4 text-xs">
               {/* Nhóm 1: Thao tác chung */}
               <div>
                 <h4 className="font-bold text-[11px] uppercase tracking-wider text-base-content/50 mb-2.5">
@@ -1708,7 +1759,7 @@ ${rows}
             </div>
 
             {/* Footer */}
-            <div className="p-4 bg-base-200/40 border-t border-base-200 flex items-center justify-between">
+            <div className="p-4 bg-base-200/40 border-t border-base-200 flex items-center justify-between shrink-0">
               <span className="text-[11px] text-base-content/50">
                 Nhấn <kbd className="kbd kbd-xs">Esc</kbd> bất kỳ lúc nào để đóng
               </span>
@@ -1720,9 +1771,12 @@ ${rows}
                 Đã hiểu
               </button>
             </div>
-          </div>
-        </div>
-      )}
+            </div>
+          </div>,
+          document.body
+        )}
+
+      <ApiKeyModal isOpen={apiKeyModalOpen} onClose={() => setApiKeyModalOpen(false)} />
     </header>
   );
 }

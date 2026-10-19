@@ -5,7 +5,7 @@ import random
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from app.core.database import get_db
 from app.models.user import User
@@ -104,15 +104,95 @@ def build_fallback_questions(
 
 _TOPICS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "quiz_topics.json")
 
+DEFAULT_TOPICS_METADATA = [
+    {
+        "id": "all",
+        "title": "Tất cả Đề tài",
+        "icon": "🌐",
+        "badge": "Toàn diện",
+        "description": "Luyện tập tổng hợp câu hỏi từ tất cả các chuyên đề kỹ thuật."
+    },
+    {
+        "id": "React",
+        "title": "React 19 & Frontend",
+        "icon": "⚛️",
+        "badge": "Frontend",
+        "description": "Hooks, Server Actions, useActionState, Suspense, Fiber và React Compiler."
+    },
+    {
+        "id": "FastAPI",
+        "title": "FastAPI & Backend",
+        "icon": "⚡",
+        "badge": "Backend",
+        "description": "Async def, Pydantic V2, Dependency Injection, Lifespan và CORS."
+    },
+    {
+        "id": "PostgreSQL",
+        "title": "PostgreSQL & Database",
+        "icon": "🐘",
+        "badge": "Database",
+        "description": "Connection Pooling, GIN Index, EXPLAIN ANALYZE, MVCC và Partitioning."
+    },
+    {
+        "id": "DevOps",
+        "title": "DevOps, Docker & K8s",
+        "icon": "🐳",
+        "badge": "DevOps",
+        "description": "Multi-stage builds, Kubernetes Pods/Probes, CI/CD và Reverse Proxy."
+    },
+    {
+        "id": "Python",
+        "title": "Python Core & Async",
+        "icon": "🐍",
+        "badge": "Language",
+        "description": "Asyncio TaskGroup, Faster CPython 3.11+, Generators, GIL và Metaclasses."
+    },
+    {
+        "id": "Security",
+        "title": "Bảo mật Web & Ứng dụng",
+        "icon": "🛡️",
+        "badge": "Security",
+        "description": "OWASP Top 10, SQL Injection, XSS, CSRF, JWT và Password Hashing."
+    },
+    {
+        "id": "Architecture",
+        "title": "Kiến trúc Hệ thống",
+        "icon": "🏗️",
+        "badge": "System Design",
+        "description": "Microservices, Saga Pattern, Caching Redis, Kafka vs RabbitMQ và CAP."
+    },
+    {
+        "id": "Fullstack",
+        "title": "Fullstack Engineering",
+        "icon": "💻",
+        "badge": "Software Eng",
+        "description": "gRPC vs REST, HTTP/2 & 3, SSE, SOLID, Clean Architecture và SemVer."
+    }
+]
+
+TOPIC_ALIASES = {
+    "all": [],
+    "React": ["react", "react 19", "frontend", "tailwind css", "tailwind", "nextjs", "next.js", "ui"],
+    "FastAPI": ["fastapi", "backend", "pydantic", "fastapi & backend", "fastapi / python"],
+    "PostgreSQL": ["postgresql", "postgres", "database", "sql", "csdl"],
+    "DevOps": ["devops", "docker", "ci/cd", "kubernetes", "k8s", "docker / devops", "linux"],
+    "Python": ["python", "asyncio", "python core", "cpython"],
+    "Security": ["security", "web security", "owasp", "bảo mật", "bảo mật web", "jwt"],
+    "Architecture": ["architecture", "microservices", "system design", "kiến trúc", "hệ thống", "kiến trúc hệ thống"],
+    "Fullstack": ["fullstack", "full stack", "html5", "css3", "javascript", "html/web", "web", "clean architecture"]
+}
+
 
 def get_topics_metadata() -> List[Dict[str, Any]]:
     if os.path.exists(_TOPICS_FILE):
         try:
             with open(_TOPICS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                if isinstance(data, list) and len(data) > 0:
+                    return data
         except Exception as e:
             logger.warning(f"Error loading quiz_topics.json: {e}")
-    return []
+    return DEFAULT_TOPICS_METADATA
 
 
 @router.get("/topics", response_model=List[Dict[str, Any]])
@@ -133,12 +213,80 @@ def get_quiz_topics(db: Session = Depends(get_db)):
         if t_id == "all":
             cnt = total_all
         else:
-            cnt = sum(c for lang, c in counts.items() if t_id.lower() in (lang or "").lower())
+            aliases = TOPIC_ALIASES.get(t_id, [t_id.lower()])
+            matched_langs = {
+                lang for lang in counts.keys()
+                if any(alias in (lang or "").lower() for alias in aliases)
+            }
+            cnt = sum(counts[lang] for lang in matched_langs)
         topics.append({
             **item,
             "question_count": cnt
         })
     return topics
+
+
+@router.get("/post-quizzes", response_model=List[Dict[str, Any]])
+def get_post_quizzes(db: Session = Depends(get_db)):
+    """
+    Lấy danh sách các bài viết đã có bộ đề trắc nghiệm trong CSDL,
+    kèm thông tin bài viết và số lượng câu hỏi để hiển thị trên trang Ngân hàng trắc nghiệm.
+    """
+    rows = (
+        db.query(Post, func.count(QuizQuestionPost.question_id).label("question_count"))
+        .join(QuizQuestionPost, QuizQuestionPost.post_id == Post.id)
+        .group_by(Post.id)
+        .having(func.count(QuizQuestionPost.question_id) > 0)
+        .order_by(Post.id.desc())
+        .all()
+    )
+    result = []
+    for post, count in rows:
+        result.append({
+            "post_id": post.id,
+            "title": post.title,
+            "slug": post.slug,
+            "category_name": post.category.name if post.category else "IT",
+            "cover_image": post.cover_image,
+            "question_count": count,
+            "author_name": (post.author.name or post.author.username) if post.author else "IT Blog",
+            "created_at": post.created_at.isoformat() if post.created_at else None,
+        })
+    return result
+
+
+@router.get("/ai-quizzes", response_model=List[Dict[str, Any]])
+def get_ai_quizzes(db: Session = Depends(get_db)):
+    """
+    Lấy danh sách các bộ đề thi trắc nghiệm được tạo bằng AI trong CSDL.
+    """
+    rows = (
+        db.query(
+            QuizQuestion.language,
+            func.count(QuizQuestion.id).label("question_count"),
+            func.max(QuizQuestion.created_at).label("latest_created_at")
+        )
+        .filter(QuizQuestion.source == "ai")
+        .group_by(QuizQuestion.language)
+        .order_by(func.max(QuizQuestion.created_at).desc())
+        .all()
+    )
+    result = []
+    for lang, count, latest_at in rows:
+        clean_lang = (lang or "").strip()
+        if not clean_lang:
+            continue
+        display_title = f"Đề thi AI: {clean_lang.title() if len(clean_lang) > 3 else clean_lang.upper()}"
+        result.append({
+            "id": f"ai_{clean_lang.lower().replace(' ', '_')}",
+            "language": clean_lang,
+            "title": display_title,
+            "question_count": count,
+            "created_at": latest_at.isoformat() if latest_at else None,
+            "badge": "⚡ AI Gemini",
+            "icon": "🤖"
+        })
+    return result
 
 
 @router.get("/questions", response_model=Dict[str, List[QuizQuestionResponse]])
@@ -158,24 +306,55 @@ def get_quiz_questions(
     query = db.query(QuizQuestion)
 
     if post_id is not None:
+        # Kiểm tra xem bài viết đã có câu hỏi trắc nghiệm chưa, nếu chưa có thì tự động sinh hoặc liên kết
+        count_existing = db.query(QuizQuestionPost).filter(QuizQuestionPost.post_id == post_id).count()
+        if count_existing == 0:
+            target_post = db.query(Post).filter(Post.id == post_id).first()
+            if target_post:
+                from app.services.quiz_generator import ensure_post_quiz_questions
+                ensure_post_quiz_questions(db, target_post, count=5)
+
         query = query.join(QuizQuestionPost, QuizQuestionPost.question_id == QuizQuestion.id)\
                      .filter(QuizQuestionPost.post_id == post_id)
+        if isinstance(difficulty, str) and difficulty.strip() and difficulty.lower().strip() != "mixed":
+            diff_q = query.filter(QuizQuestion.difficulty == difficulty.lower().strip())
+            if diff_q.count() > 0:
+                query = diff_q
     elif course_id is not None:
-        query = query.filter(QuizQuestion.course_id == course_id)
+        course_q = query.filter(QuizQuestion.course_id == course_id)
+        if isinstance(difficulty, str) and difficulty.strip() and difficulty.lower().strip() != "mixed":
+            course_q = course_q.filter(QuizQuestion.difficulty == difficulty.lower().strip())
 
-    if language and language.strip().lower() not in ["all", "tất cả", "tat ca", ""]:
-        query = query.filter(QuizQuestion.language.ilike(f"%{language.strip()}%"))
+        if course_q.count() > 0:
+            query = course_q
+        else:
+            # Fallback by course category or title
+            target_course = db.query(Course).filter(Course.id == course_id).first()
+            if target_course:
+                course_topic = (target_course.category.name if target_course.category else target_course.title) or ""
+                aliases = TOPIC_ALIASES.get(course_topic, [course_topic.lower()])
+                query = query.filter(or_(*[QuizQuestion.language.ilike(f"%{a}%") for a in aliases]))
+                if isinstance(difficulty, str) and difficulty.strip() and difficulty.lower().strip() != "mixed":
+                    diff_q = query.filter(QuizQuestion.difficulty == difficulty.lower().strip())
+                    if diff_q.count() > 0:
+                        query = diff_q
+            else:
+                query = course_q
+    else:
+        if isinstance(language, str) and language.strip().lower() not in ["all", "tất cả", "tat ca", ""]:
+            clean_lang = language.strip()
+            aliases = TOPIC_ALIASES.get(clean_lang, [clean_lang.lower()])
+            query = query.filter(or_(*[QuizQuestion.language.ilike(f"%{a}%") for a in aliases]))
+        if isinstance(difficulty, str) and difficulty.strip() and difficulty.lower().strip() != "mixed":
+            query = query.filter(QuizQuestion.difficulty == difficulty.lower().strip())
 
-    if difficulty and difficulty != "mixed":
-        query = query.filter(QuizQuestion.difficulty == difficulty.lower().strip())
-
-    # L?y danh s?ch ng?u nhi?n ho?c theo th? t?
+    # Lấy danh sách ngẫu nhiên hoặc theo thứ tự
     if randomize:
         items = query.order_by(func.random()).limit(limit).all()
     else:
         items = query.order_by(QuizQuestion.id.asc()).limit(limit).all()
 
-    # N?u ch?a c? c?u h?i n?o theo filter v? kh?ng ch? ??nh post_id/course_id, l?y c?u h?i chung
+    # Nếu chưa có câu hỏi nào theo filter và không chỉ định post_id/course_id, lấy câu hỏi chung
     if not items and post_id is None and course_id is None:
         fallback_q = db.query(QuizQuestion)
         if randomize:
@@ -231,33 +410,61 @@ def create_quiz_question(
     current_user: Optional[User] = Depends(get_current_user_optional)
 ):
     """
-    Thêm mới thủ công 1 câu hỏi trắc nghiệm vào ngân hàng đề thi.
+    Thêm mới thủ công 1 câu hỏi trắc nghiệm vào ngân hàng đề thi và lưu vào PostgreSQL.
     """
     if not data.question.strip():
         raise HTTPException(status_code=400, detail="Nội dung câu hỏi không được để trống.")
     clean_options = [opt.strip() for opt in data.options if isinstance(opt, str) and opt.strip()]
     if len(clean_options) < 2:
         raise HTTPException(status_code=400, detail="Câu hỏi phải có ít nhất 2 phương án lựa chọn không rỗng.")
-    if data.answer_index < 0 or data.answer_index >= len(clean_options):
-        raise HTTPException(status_code=400, detail="Chỉ số đáp án đúng (answer_index) không hợp lệ.")
 
-    clean_diff = data.difficulty.lower().strip() if data.difficulty else "medium"
-    if clean_diff not in ["easy", "medium", "hard"]:
+    # Normalize answer_index / correct_index
+    idx = data.answer_index
+    if idx is None or idx < 0:
+        idx = getattr(data, "correct_index", None)
+    if idx is None or idx < 0:
+        idx = 0
+    if idx >= len(clean_options):
+        idx = 0
+
+    # Normalize difficulty
+    raw_diff = str(data.difficulty or "medium").lower().strip()
+    diff_map = {
+        "easy": "easy", "basic": "easy", "cơ bản": "easy", "co ban": "easy", "dễ": "easy", "de": "easy",
+        "medium": "medium", "intermediate": "medium", "trung bình": "medium", "trung binh": "medium", "vừa": "medium", "vua": "medium",
+        "hard": "hard", "advanced": "hard", "nâng cao": "hard", "nang cao": "hard", "khó": "hard", "kho": "hard"
+    }
+    if raw_diff not in diff_map:
         raise HTTPException(status_code=400, detail="Độ khó câu hỏi không hợp lệ. Cho phép: easy, medium, hard.")
+    clean_diff = diff_map[raw_diff]
 
     if data.course_id:
         course = db.query(Course).filter(Course.id == data.course_id).first()
         if not course:
             raise HTTPException(status_code=400, detail="Khóa học được chỉ định không tồn tại.")
 
-    user_id = current_user.id if current_user else None
+    is_admin = bool(current_user and (getattr(current_user, "is_superuser", False) or any(getattr(r, "name", "") in ["admin", "moderator"] for r in getattr(current_user, "roles", []))))
+    if current_user is not None and not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chỉ Quản trị viên (Admin) mới có quyền thêm câu hỏi trắc nghiệm."
+        )
+
+    user_id = getattr(current_user, "id", None) if (current_user and not hasattr(current_user, "dependency")) else None
+
+    # Handle code snippet if attached
+    final_question = data.question.strip()
+    if hasattr(data, "code_snippet") and data.code_snippet and data.code_snippet.strip():
+        snippet = data.code_snippet.strip()
+        if snippet not in final_question:
+            final_question = f"{final_question}\n\n```\n{snippet}\n```"
 
     question = QuizQuestion(
         course_id=data.course_id,
-        language=data.language or "",
-        question=data.question.strip(),
+        language=data.language or "IT",
+        question=final_question,
         options=clean_options,
-        answer_index=data.answer_index,
+        answer_index=idx,
         explanation=data.explanation or "",
         difficulty=clean_diff,
         source="manual",
@@ -277,8 +484,19 @@ def create_quiz_question(
 
     return {
         "ok": True,
-        "message": "Tạo câu hỏi trắc nghiệm thành công.",
-        "question_id": question.id
+        "message": "Tạo câu hỏi trắc nghiệm thành công và đã lưu vào cơ sở dữ liệu PostgreSQL.",
+        "id": question.id,
+        "question_id": question.id,
+        "language": question.language,
+        "question": question.question,
+        "options": question.options,
+        "answer_index": question.answer_index,
+        "correct_index": question.answer_index,
+        "explanation": question.explanation or "",
+        "difficulty": question.difficulty,
+        "course_id": question.course_id,
+        "source": question.source,
+        "created_at": question.created_at.isoformat() if question.created_at else None
     }
 
 
@@ -318,7 +536,15 @@ def generate_quiz_with_ai(
     """
     Tự động sinh bộ câu hỏi trắc nghiệm bằng Trí tuệ Nhân tạo (Gemini AI)
     dựa trên nội dung Khóa học hoặc các Bài viết được chỉ định.
+    Chỉ Quản trị viên (Admin) mới có quyền tạo đề thi bằng AI.
     """
+    is_admin = bool(current_user and (getattr(current_user, "is_superuser", False) or any(getattr(r, "name", "") in ["admin", "moderator"] for r in getattr(current_user, "roles", []))))
+    if current_user is not None and not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chỉ Quản trị viên (Admin) mới có quyền tạo đề thi bằng AI."
+        )
+
     materials = []
     lang = req.language or ""
     course = None
@@ -404,7 +630,7 @@ def generate_quiz_with_ai(
         )
         via = "fallback_local"
 
-    user_id = current_user.id if current_user else None
+    user_id = getattr(current_user, "id", None) if (current_user and not hasattr(current_user, "dependency")) else None
     created = []
 
     for q_data in generated_questions:
