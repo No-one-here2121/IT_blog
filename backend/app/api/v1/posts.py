@@ -70,7 +70,7 @@ def calculate_read_time(content: str) -> str:
 def get_posts(
     db: Session = Depends(get_db),
     page: int = Query(1, ge=1, description="Page number"),
-    limit: int = Query(9, ge=1, le=500, description="Items per page"),
+    limit: int = Query(9, ge=1, le=30, description="Items per page"),
     category: Optional[str] = Query(None, description="Category name or slug"),
     tag: Optional[str] = Query(None, description="Tag name or slug"),
     author_id: Optional[int] = Query(None, description="Filter by author ID"),

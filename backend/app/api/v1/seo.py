@@ -106,10 +106,22 @@ def get_robots_txt(request: Request):
     """
     base_url = str(request.base_url).rstrip("/")
     robots_content = f"""User-agent: *
+User-agent: GPTBot
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+User-agent: Bytespider
+Disallow: /
+
+User-agent: *
 Allow: /
-Disallow: /admin
-Disallow: /moderation
 Disallow: /api/
+Disallow: /moderation
 
 Sitemap: {base_url}/sitemap.xml
 """

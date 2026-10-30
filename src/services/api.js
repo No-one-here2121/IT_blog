@@ -344,7 +344,10 @@ export const api = {
       const token = localStorage.getItem("it_blog_token");
       if (!token) return null;
       try {
-        const wsUrl = (API_BASE_URL.replace(/^http/, "ws")) + `/notifications/ws?token=${token}`;
+const base = API_BASE_URL.startsWith("http")
+? API_BASE_URL.replace(/^http/, "ws")
+: `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}${API_BASE_URL}`;
+const wsUrl = `${base}/notifications/ws?token=${token}`;
         const ws = new WebSocket(wsUrl);
         ws.onmessage = (event) => {
           if (event.data === "pong") return;
